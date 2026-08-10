@@ -58,6 +58,20 @@ async function readJsonBody(request, maxBytes) {
 
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
 
+const SS2022_KEY_BYTES = {
+    '2022-blake3-aes-128-gcm': 16,
+    '2022-blake3-aes-256-gcm': 32,
+};
+
+function validateSs2022Credentials(method, password) {
+    const expectedBytes = SS2022_KEY_BYTES[String(method || '')];
+    if (!expectedBytes) throw new Error('Invalid Shadowsocks 2022 method');
+    if (typeof password !== 'string' || password.length > 128 || !/^[A-Za-z0-9+/]+={0,2}$/.test(password)) throw new Error('Invalid Shadowsocks 2022 key');
+    let decoded;
+    try { decoded = decodeBase64Bytes(password); } catch { throw new Error('Invalid Shadowsocks 2022 key'); }
+    if (decoded.byteLength !== expectedBytes || base64Bytes(decoded) !== password) throw new Error(`Shadowsocks 2022 key must decode to ${expectedBytes} bytes`);
+}
+
 function validateTrafficReport(data) {
     if (!validIp(data.ip) || typeof data.report_id !== 'string' || data.report_id.length > 160 || !data.report_id.startsWith(`${data.ip}:`)) throw new Error('Invalid report identity');
     const entries = data.node_traffic === undefined ? [] : data.node_traffic;
@@ -145,6 +159,29 @@ async function chunkBatch(db, statements, size = 100) {
 
 function yamlString(value) {
     return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')}"`;
+}
+
+function surgePolicyName(value) {
+    return String(value || 'KUI').replace(/[=,\r\n]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120) || 'KUI';
+}
+
+function surgeValue(value) {
+    return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`;
+}
+
+function surgeTlsOptions(sni) {
+    return `${sni ? `, sni=${surgeValue(sni)}` : ''}, skip-cert-verify=true`;
+}
+
+function buildSurgeProxyLine({ name, protocol, host, port, method, uuid, password, sni }) {
+    const prefix = `${surgePolicyName(name)} = `;
+    if (protocol === 'Shadowsocks2022' || protocol === 'SS') return `${prefix}ss, ${host}, ${port}, encrypt-method=${method || uuid}, password=${surgeValue(password)}`;
+    if (protocol === 'Hysteria2') return `${prefix}hysteria2, ${host}, ${port}, password=${surgeValue(password || uuid)}${surgeTlsOptions(sni)}`;
+    if (protocol === 'TUIC') return `${prefix}tuic-v5, ${host}, ${port}, uuid=${surgeValue(uuid)}, password=${surgeValue(password)}, alpn=h3${surgeTlsOptions(sni)}`;
+    if (protocol === 'Trojan') return `${prefix}trojan, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
+    if (protocol === 'AnyTLS') return `${prefix}anytls, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
+    if (protocol === 'Socks5') return `${prefix}socks5, ${host}, ${port}, ${surgeValue(uuid)}, ${surgeValue(password)}`;
+    return '';
 }
 
 function escapeHtml(value) {
@@ -506,6 +543,10 @@ async function initializeDbSchema(db) {
         `CREATE INDEX IF NOT EXISTS idx_group_resources_resource ON user_group_resources(resource_type, resource_id)`
     ];
     for (let query of initQueries) { try { await db.prepare(query).run(); } catch (e) {} }
+    try {
+        const deployment = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
+        if (!deployment?.val) await db.prepare("INSERT OR IGNORE INTO sys_config (key, val, ts) VALUES ('deployment_id', ?, ?)").bind(crypto.randomUUID(), Date.now()).run();
+    } catch (e) {}
     try { await db.prepare("ALTER TABLE nodes ADD COLUMN network TEXT DEFAULT 'tcp'").run(); } catch (e) {}
     try { await db.prepare("UPDATE nodes SET network = 'http' WHERE protocol = 'H2-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run(); } catch (e) {}
     try { await db.prepare("UPDATE nodes SET network = 'grpc' WHERE protocol = 'gRPC-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run(); } catch (e) {}
@@ -587,6 +628,17 @@ async function ensureDbSchema(db) {
         });
     }
     return schemaReadyPromise;
+}
+
+async function getDeploymentId(db) {
+    await ensureDbSchema(db);
+    let row = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
+    if (!row?.val) {
+        const generated = crypto.randomUUID();
+        await db.prepare("INSERT OR IGNORE INTO sys_config (key, val, ts) VALUES ('deployment_id', ?, ?)").bind(generated, Date.now()).run();
+        row = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
+    }
+    return row?.val || '';
 }
 
 async function verifyAuth(authHeader, request, db, env, context) {
@@ -856,7 +908,7 @@ async function proxyLocal(method, subPath, req, env, body = null) {
                     try { slotMap = JSON.parse(globalRow.value); } catch(e) {}
                 }
                 const rawCountry = (slotMap["0"] || slotMap.country || "JP").toString().toUpperCase();
-                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry };
+                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry, public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
                 const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
                 return new Response(JSON.stringify({ ...slotMap, "0": rawCountry, "port": slotMap.port || 7920, "country": rawCountry, switch_trigger: slotMap.switch_trigger || 0, proxy: proxyCfg, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' } });
             } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
@@ -874,7 +926,7 @@ async function proxyLocal(method, subPath, req, env, body = null) {
                 if (data.mesh && typeof data.mesh === 'object') sanitized.mesh = data.mesh;
                 if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
                 await db.prepare("INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(configKey, JSON.stringify(sanitized)).run();
-                const proxyCfg = { enabled: true, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry };
+                const proxyCfg = { enabled: true, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry, public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
                 return new Response(JSON.stringify({ success: true, slot_map: sanitized, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
             } catch (e) { console.error('[proxy-config-save] FAILED:', e.message); return new Response(JSON.stringify({ success: false, error: "CONFIG_WRITE_ERR: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
@@ -1198,6 +1250,7 @@ export async function onRequest(context) {
 
     if (action === "config" && method === "GET") {
         await ensureDbSchema(db);
+        const deploymentId = await getDeploymentId(db);
         const ip = new URL(request.url).searchParams.get("ip"); const now = Date.now(); const adminUser = env.ADMIN_USERNAME || "admin";
         const authHeader = request.headers.get("Authorization");
         const currentUser = await verifyAuth(authHeader, request, db, env, context);
@@ -1205,7 +1258,7 @@ export async function onRequest(context) {
         if (currentUser !== adminUser && !agentAuthenticated) return new Response("Unauthorized", { status: 401 });
         const query = `SELECT n.* FROM nodes n LEFT JOIN users u ON n.username = u.username WHERE n.vps_ip = ? AND n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND (n.username = ? OR n.username = 'admin' OR (u.username IS NOT NULL AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?)))`;
         const { results: machineNodes } = await db.prepare(query).bind(ip, now, adminUser, now).all();
-        for (let node of machineNodes) { if (node.protocol === "dokodemo-door" && node.relay_type === "internal") { const targetNode = await db.prepare("SELECT * FROM nodes WHERE id = ?").bind(node.target_id).first(); if (targetNode) node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id }; } }
+        for (let node of machineNodes) { if (node.protocol === "dokodemo-door" && node.relay_type === "internal") { const targetNode = await db.prepare("SELECT * FROM nodes WHERE id = ?").bind(node.target_id).first(); if (targetNode) node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id, network: targetNode.network }; } }
         let proxyCfg = { global: {}, toggle: { enable: false } };
         try {
             const r = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_config'").first();
@@ -1215,7 +1268,7 @@ export async function onRequest(context) {
         } catch (ex) {}
         let socks5_outbound = { enabled: false };
         let egress = { desired_mode: 'native', applied_mode: 'native', revision: 0, applied_revision: 0, status: 'applied', error: '', applied_at: 0 };
-        let residential_outbound = { available: false };
+        let residential_outbound = { available: false, ready: false, reason: '住宅代理尚未上报可用状态' };
         try {
             const s = await db.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, egress_ip, socks5_addr, socks5_port, socks5_user, socks5_pass FROM servers WHERE ip = ?").bind(ip).first();
             if (s) egress = { desired_mode: s.egress_mode || 'native', applied_mode: s.egress_applied_mode || 'native', revision: Number(s.egress_revision || 0), applied_revision: Number(s.egress_applied_revision || 0), status: s.egress_status || 'applied', error: s.egress_error || '', applied_at: Number(s.egress_applied_at || 0), proxy_mode: s.proxy_mode || 'global', proxy_categories: s.proxy_categories || '', egress_ip: s.egress_ip || '', socks5_addr: s.socks5_addr || '', socks5_port: Number(s.socks5_port || 0), socks5_user: s.socks5_user || '', socks5_pass: s.socks5_pass || '' };
@@ -1224,11 +1277,34 @@ export async function onRequest(context) {
             let port = 7920; try { port = parseInt(JSON.parse(slot?.value || '{}').port) || 7920; } catch (_) {}
             try { port = parseInt(JSON.parse(globalSlot?.value || '{}').port) || 7920; } catch (_) {}
             const localResidential = !env.PROXY_CTRL_URL;
-            residential_outbound = { available: localResidential && !!(env.PROXY_USER && env.PROXY_PASS), reason: localResidential ? '' : '外部住宅控制器模式未在本机安装 proxy-lite', addr: '127.0.0.1', port, user: agentAuthenticated && localResidential ? env.PROXY_USER || '' : '', pass: agentAuthenticated && localResidential ? env.PROXY_PASS || '' : '' };
+            const proxyState = await db.prepare('SELECT details, last_seen FROM proxy_ctrl_servers WHERE ip = ?').bind(ip).first();
+            let details = [];
+            try { details = JSON.parse(proxyState?.details || '[]'); } catch (_) {}
+            const active = Array.isArray(details) ? details.find(item => item?.active && Number(item.port || port) >= 1 && Number(item.port || port) <= 65535) : null;
+            const fresh = Number(proxyState?.last_seen || 0) >= Date.now() - 5 * 60 * 1000;
+            const credentialsReady = !!(env.PROXY_USER && env.PROXY_PASS);
+            const ready = localResidential && credentialsReady && fresh && !!active;
+            let reason = '';
+            if (!localResidential) reason = '外部住宅控制器模式不支持本机住宅出口';
+            else if (!credentialsReady) reason = 'Worker 未配置住宅代理凭据';
+            else if (!proxyState) reason = 'proxy-lite 尚未上报状态';
+            else if (!fresh) reason = 'proxy-lite 状态已过期';
+            else if (!active) reason = '住宅 OpenVPN 主通道尚未就绪';
+            residential_outbound = {
+                available: ready,
+                ready,
+                reason,
+                addr: '127.0.0.1',
+                port: Number(active?.port || port),
+                active_exit_ip: active?.node_ip || '',
+                last_seen: Number(proxyState?.last_seen || 0),
+                user: agentAuthenticated && localResidential ? env.PROXY_USER || '' : '',
+                pass: agentAuthenticated && localResidential ? env.PROXY_PASS || '' : ''
+            };
         } catch (ex) {}
         const serverAuth = await db.prepare("SELECT agent_token FROM servers WHERE ip = ?").bind(ip).first();
         const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
-        return Response.json({ success: true, configs: machineNodes, agent_token: serverAuth && serverAuth.agent_token || '', proxy: proxyCfg, residential_outbound, egress, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' });
+        return Response.json({ success: true, deployment_id: deploymentId, configs: machineNodes, agent_token: serverAuth && serverAuth.agent_token || '', proxy: proxyCfg, residential_outbound, egress, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' });
     }
 
         if (action === "egress_result" && method === "POST") {
@@ -1239,6 +1315,8 @@ export async function onRequest(context) {
             const modes = ['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5'];
         const revision = Number(body.revision);
         if (!Number.isSafeInteger(revision) || revision < 0 || !modes.includes(body.applied_mode)) return Response.json({ error: 'Invalid egress result' }, { status: 400 });
+        const deploymentId = await getDeploymentId(db);
+        if (body.deployment_id && body.deployment_id !== deploymentId) return Response.json({ error: 'Stale deployment state', deployment_id: deploymentId }, { status: 409 });
         const success = body.success === true;
         const status = success ? 'applied' : 'failed';
         const error = success ? '' : String(body.error || 'Egress apply failed').slice(0, 500);
@@ -1334,6 +1412,8 @@ export async function onRequest(context) {
         let subLinks = [];
         let clashProxies = [];
         let proxyNames = [];
+        let surgeProxies = [];
+        let surgeUnsupported = new Set();
 
         for (let node of results) {
             const vpsInfo = await db.prepare("SELECT name FROM servers WHERE ip = ?").bind(node.vps_ip).first(); 
@@ -1350,6 +1430,7 @@ export async function onRequest(context) {
                 case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
                 case "Hysteria2": link = `hysteria2://${encodeURIComponent(node.uuid || node.private_key)}@${nodeIp}:${node.port}/?insecure=1&sni=${encodeURIComponent(nodeSni)}&alpn=h3#${remark}`; break;
                 case "TUIC": link = `tuic://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?sni=${nodeSni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
+                case "Shadowsocks2022": link = `ss://${btoa(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
                 case "Trojan": link = `trojan://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&allowInsecure=1&type=tcp#${remark}`; break;
                 case "H2-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
                 case "gRPC-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=grpc&serviceName=grpc#${remark}`; break;
@@ -1359,6 +1440,12 @@ export async function onRequest(context) {
                 case "VLESS-Argo": if (!(node.sni || '').includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
             }
             if (link) subLinks.push(link);
+
+            if (format === 'surge') {
+                const surgeLine = buildSurgeProxyLine({ name: rawRemark, protocol: node.protocol, host: nodeIp, port: node.port, method: node.uuid, uuid: node.uuid, password: node.private_key, sni: nodeSni });
+                if (surgeLine) surgeProxies.push(surgeLine);
+                else surgeUnsupported.add(node.protocol);
+            }
 
             // --- 动态拼装 Clash YAML 代理字典 (支持 Clash Meta / Mihomo) ---
             if (format === 'clash') {
@@ -1384,6 +1471,8 @@ export async function onRequest(context) {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: hysteria2\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    password: ${yamlString(node.uuid || node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "TUIC") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
+                } else if (node.protocol === "Shadowsocks2022") {
+                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: ss\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    cipher: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: false`;
                 }
                 
                 if (cProxy) {
@@ -1429,6 +1518,16 @@ export async function onRequest(context) {
                     case "SSR": link = `ssr://${btoa(unescape(encodeURIComponent(`${thirdIp}:${node.port}:origin:${node.uuid}:plain:${btoa(node.password || '')}/?remarks=${btoa(unescape(encodeURIComponent(node.name || 'SSR')))}`)))}`; break;
                 }
                 if (link) subLinks.push(link);
+
+                if (format === 'surge') {
+                    let surgeMethod = node.uuid;
+                    if (node.protocol === 'SS' && !surgeMethod) {
+                        try { surgeMethod = JSON.parse(node.extra || '{}').method || ''; } catch {}
+                    }
+                    const surgeLine = buildSurgeProxyLine({ name: node.name || `TP_${node.protocol}_${node.port}`, protocol: node.protocol, host: thirdIp, port: node.port, method: surgeMethod, uuid: node.uuid, password: node.password, sni: thirdSni });
+                    if (surgeLine) surgeProxies.push(surgeLine);
+                    else surgeUnsupported.add(node.protocol);
+                }
 
                 if (format === 'clash') {
                     let cProxy = "";
@@ -1483,7 +1582,7 @@ export async function onRequest(context) {
         // regular protocol nodes, so append them explicitly for the admin.
         // They include shared proxy credentials and must never be exposed to
         // ordinary user subscriptions.
-        if (reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS) {
+        if (reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS && env.PROXY_PUBLIC_LISTENER === 'true') {
             try {
                 const cutoff = Date.now() - 1800000;
                 const { results: proxyServers } = await db.prepare('SELECT ip, details FROM proxy_ctrl_servers WHERE last_seen >= ?').bind(cutoff).all();
@@ -1498,6 +1597,7 @@ export async function onRequest(context) {
                     const name = `住宅 SOCKS5 | ${active.country || 'AUTO'} | ${server.ip}:${port}`;
                     const encodedCredentials = btoa(unescape(encodeURIComponent(`${env.PROXY_USER}:${env.PROXY_PASS}`)));
                     subLinks.push(`socks5://${encodedCredentials}@${serverIp}:${port}#${encodeURIComponent(name)}`);
+                    if (format === 'surge') surgeProxies.push(buildSurgeProxyLine({ name, protocol: 'Socks5', host: serverIp, port, uuid: env.PROXY_USER, password: env.PROXY_PASS }));
                     if (format === 'clash') {
                         clashProxies.push(`  - name: ${yamlString(name)}\n    type: socks5\n    server: ${yamlString(serverIp)}\n    port: ${port}\n    username: ${yamlString(env.PROXY_USER)}\n    password: ${yamlString(env.PROXY_PASS)}\n    udp: true`);
                         proxyNames.push(yamlString(name));
@@ -1547,6 +1647,18 @@ rules:
             });
         }
 
+        if (format === 'surge') {
+            const unsupportedComments = [...surgeUnsupported].sort().map(protocol => `# 已跳过 Surge 不原生支持的协议：${protocol}`);
+            const surgeConfig = ['[Proxy]', ...surgeProxies, ...(unsupportedComments.length ? ['', ...unsupportedComments] : [])].join('\n') + '\n';
+            return new Response(surgeConfig, {
+                headers: {
+                    'Content-Type': 'text/plain; charset=utf-8',
+                    'Content-Disposition': 'attachment; filename=kui-surge.conf',
+                    'Cache-Control': 'no-store',
+                }
+            });
+        }
+
         // --- 否则走默认的 Base64 普通订阅格式 ---
         return new Response(btoa(unescape(encodeURIComponent(subLinks.join('\n')))), { headers: { "Content-Type": "text/plain; charset=utf-8" }});
     }
@@ -1582,11 +1694,29 @@ rules:
                 ? (await db.prepare("SELECT * FROM servers").all()).results
                 : (await db.prepare("SELECT ip, name, cpu, mem, last_report, disk, load, uptime, net_in_speed, net_out_speed, tcp_conn, udp_conn FROM servers").all()).results;
             if (isAdmin) {
+                const cutoff = Date.now() - 300000;
+                const { results: proxyStates } = await db.prepare('SELECT ip, details, last_seen FROM proxy_ctrl_servers').all();
+                const proxyStateByIp = new Map((proxyStates || []).map(row => [row.ip, row]));
                 for (const server of servers) {
                     if (!server.agent_token) {
                         server.agent_token = crypto.randomUUID();
                         await db.prepare("UPDATE servers SET agent_token = ? WHERE ip = ? AND agent_token IS NULL").bind(server.agent_token, server.ip).run();
                     }
+                    const state = proxyStateByIp.get(server.ip);
+                    let details = [];
+                    try { details = JSON.parse(state?.details || '[]'); } catch {}
+                    const active = Array.isArray(details) ? details.find(item => item?.active && item?.exit_ip) : null;
+                    const localResidential = !env.PROXY_CTRL_URL;
+                    const credentialsReady = !!(env.PROXY_USER && env.PROXY_PASS);
+                    server.residential_ready = !!(localResidential && credentialsReady && state && Number(state.last_seen || 0) >= cutoff && active);
+                    server.residential_active_exit_ip = active?.exit_ip || '';
+                    server.residential_last_seen = Number(state?.last_seen || 0);
+                    if (!localResidential) server.residential_reason = '外部住宅控制器模式不支持本机住宅出口';
+                    else if (!credentialsReady) server.residential_reason = 'Worker 未配置住宅代理凭据';
+                    else if (!state) server.residential_reason = '住宅代理控制器尚未上报';
+                    else if (Number(state.last_seen || 0) < cutoff) server.residential_reason = '住宅代理控制器心跳已过期';
+                    else if (!active) server.residential_reason = '住宅 OpenVPN 主通道尚未就绪';
+                    else server.residential_reason = '';
                 }
             }
             const nodes = isAdmin ? (await db.prepare("SELECT * FROM nodes").all()).results : (await db.prepare("SELECT DISTINCT n.* FROM nodes n WHERE n.username = ? OR EXISTS (SELECT 1 FROM user_group_members gm JOIN user_group_resources gr ON gr.group_id = gm.group_id WHERE gm.username = ? AND ((gr.resource_type = 'node' AND gr.resource_id = n.id) OR (gr.resource_type = 'vps' AND gr.resource_id = n.vps_ip)))").bind(currentUser, currentUser).all()).results;
@@ -1603,7 +1733,12 @@ rules:
             }
             else { const u = await db.prepare("SELECT sub_token FROM users WHERE username = ?").bind(currentUser).first(); if(u && u.sub_token) mySubToken = u.sub_token; }
             const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
-            return Response.json({ servers, nodes, users, groups, siteTitle, mySubToken, realtimeUrl: env.REALTIME_URL || realtime && realtime.val || '' });
+            const securityWarnings = isAdmin ? [
+                env.ADMIN_PASSWORD === 'admin' ? '管理员仍在使用默认密码，请立即在 Cloudflare 中轮换 ADMIN_PASSWORD。' : '',
+                env.PROXY_USER === 'kui' && env.PROXY_PASS === 'kui' ? '住宅代理仍在使用默认凭据，请立即轮换 PROXY_USER / PROXY_PASS。' : '',
+                env.PROXY_PUBLIC_LISTENER === 'true' ? '住宅 SOCKS 服务已开放公网监听，请确认防火墙和代理凭据足够安全。' : '',
+            ].filter(Boolean) : [];
+            return Response.json({ servers, nodes, users, groups, siteTitle, mySubToken, securityWarnings, realtimeUrl: env.REALTIME_URL || realtime && realtime.val || '' });
         }
         
         if (action === "settings" && method === "POST" && isAdmin) {
@@ -1683,7 +1818,7 @@ rules:
         }
 
         if (action === "nodes" && isAdmin) {
-            if (method === "POST") { const n = await request.json(); const protocols = ['VLESS','XTLS-Reality','Reality','Hysteria2','TUIC','Trojan','H2-Reality','gRPC-Reality','AnyTLS','Naive','Socks5','VLESS-Argo','dokodemo-door']; if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(n.id || ''))) return Response.json({ error: 'Invalid node id' }, { status: 400 }); if (!protocols.includes(n.protocol)) return Response.json({ error: 'Invalid protocol' }, { status: 400 }); if (!Number.isInteger(Number(n.port)) || Number(n.port) < 1 || Number(n.port) > 65535) return Response.json({ error: 'Invalid port' }, { status: 400 }); if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 }); if (n.protocol === 'dokodemo-door') { if (!['internal','external'].includes(n.relay_type)) return Response.json({error:'Invalid relay type'},{status:400}); if (n.relay_type === 'external' && (!String(n.target_ip||'').trim() || !Number.isInteger(Number(n.target_port)) || Number(n.target_port)<1 || Number(n.target_port)>65535)) return Response.json({error:'Invalid relay target'},{status:400}); if (n.relay_type === 'internal' && !(await db.prepare('SELECT id FROM nodes WHERE id = ? AND vps_ip = ?').bind(n.target_id,n.vps_ip).first())) return Response.json({error:'Internal relay target not found on VPS'},{status:400}); } if (await db.prepare("SELECT id FROM nodes WHERE id = ?").bind(n.id).first()) return Response.json({ error: "Node already exists" }, { status: 409 }); let nodeUser = n.username || currentUser; if (nodeUser === 'admin') nodeUser = currentUser; await db.prepare(`INSERT INTO nodes (id, uuid, vps_ip, protocol, port, sni, private_key, public_key, short_id, relay_type, target_ip, target_port, target_id, enable, traffic_used, traffic_limit, expire_time, username, network) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(n.id, n.uuid, n.vps_ip, n.protocol, Number(n.port), n.sni||null, n.private_key||null, n.public_key||null, n.short_id||null, n.relay_type||null, n.target_ip||null, n.target_port||null, n.target_id||null, 1, 0, Math.max(0, Number(n.traffic_limit)||0), Math.max(0, Number(n.expire_time)||0), nodeUser, n.network||'tcp').run(); context.waitUntil(notifyRealtimeVps(env, db, n.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
+            if (method === "POST") { const n = await request.json(); const protocols = ['VLESS','XTLS-Reality','Reality','Hysteria2','TUIC','Shadowsocks2022','Trojan','H2-Reality','gRPC-Reality','AnyTLS','Naive','Socks5','VLESS-Argo','dokodemo-door']; if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(n.id || ''))) return Response.json({ error: 'Invalid node id' }, { status: 400 }); if (!protocols.includes(n.protocol)) return Response.json({ error: 'Invalid protocol' }, { status: 400 }); if (!Number.isInteger(Number(n.port)) || Number(n.port) < 1 || Number(n.port) > 65535) return Response.json({ error: 'Invalid port' }, { status: 400 }); if (n.protocol === 'Shadowsocks2022') { try { validateSs2022Credentials(n.uuid, n.private_key); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); } n.network = 'tcp'; } if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 }); if (n.protocol === 'dokodemo-door') { if (!['internal','external'].includes(n.relay_type)) return Response.json({error:'Invalid relay type'},{status:400}); if (n.relay_type === 'external' && (!String(n.target_ip||'').trim() || !Number.isInteger(Number(n.target_port)) || Number(n.target_port)<1 || Number(n.target_port)>65535)) return Response.json({error:'Invalid relay target'},{status:400}); if (n.relay_type === 'internal' && !(await db.prepare('SELECT id FROM nodes WHERE id = ? AND vps_ip = ?').bind(n.target_id,n.vps_ip).first())) return Response.json({error:'Internal relay target not found on VPS'},{status:400}); } if (await db.prepare("SELECT id FROM nodes WHERE id = ?").bind(n.id).first()) return Response.json({ error: "Node already exists" }, { status: 409 }); let nodeUser = n.username || currentUser; if (nodeUser === 'admin') nodeUser = currentUser; await db.prepare(`INSERT INTO nodes (id, uuid, vps_ip, protocol, port, sni, private_key, public_key, short_id, relay_type, target_ip, target_port, target_id, enable, traffic_used, traffic_limit, expire_time, username, network) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(n.id, n.uuid, n.vps_ip, n.protocol, Number(n.port), n.sni||null, n.private_key||null, n.public_key||null, n.short_id||null, n.relay_type||null, n.target_ip||null, n.target_port||null, n.target_id||null, 1, 0, Math.max(0, Number(n.traffic_limit)||0), Math.max(0, Number(n.expire_time)||0), nodeUser, n.network||'tcp').run(); context.waitUntil(notifyRealtimeVps(env, db, n.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
             if (method === "PUT") { const { id, enable, reset_traffic } = await request.json(); const node = await db.prepare('SELECT vps_ip FROM nodes WHERE id = ?').bind(id).first(); if (!node) return Response.json({ error: 'Node not found' }, { status: 404 }); const statements = []; if (reset_traffic) statements.push(db.prepare("UPDATE nodes SET traffic_used = 0 WHERE id = ?").bind(id)); if (enable !== undefined) statements.push(db.prepare("UPDATE nodes SET enable = ? WHERE id = ?").bind(enable ? 1 : 0, id)); if (statements.length) await db.batch(statements); context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
             if (method === "DELETE") { const id = new URL(request.url).searchParams.get("id"); const node = await db.prepare('SELECT vps_ip FROM nodes WHERE id = ?').bind(id).first(); await db.batch([db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'node' AND resource_id = ?").bind(id), db.prepare("DELETE FROM nodes WHERE id = ?").bind(id)]); if (node) context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
         }
@@ -1744,3 +1879,8 @@ rules:
 export async function onRequestScheduled(context) {
     try { await checkOfflineServers(context.env); } catch (error) { console.error('[cron] offline check failed:', error); throw error; }
 }
+
+export const __test = {
+    buildSurgeProxyLine,
+    validateSs2022Credentials,
+};

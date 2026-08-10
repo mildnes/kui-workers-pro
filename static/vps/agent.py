@@ -75,6 +75,21 @@ PROXY_API = os.environ.get("PROXY_API_URL") or (env.get("proxy_api") if isinstan
 PROXY_CTRL_USER = os.environ.get("PROXY_CTRL_USER", env.get("proxy_ctrl_user", "") if isinstance(env, dict) else "")
 PROXY_CTRL_PASS = os.environ.get("PROXY_CTRL_PASS", env.get("proxy_ctrl_pass", "") if isinstance(env, dict) else "")
 REALTIME_URL = env.get("realtime_url", "") if isinstance(env, dict) else ""
+SS2022_KEY_BYTES = {
+    "2022-blake3-aes-128-gcm": 16,
+    "2022-blake3-aes-256-gcm": 32,
+}
+
+def validate_ss2022_credentials(method, password):
+    expected_bytes = SS2022_KEY_BYTES.get(method)
+    if not expected_bytes:
+        raise ValueError("invalid Shadowsocks 2022 method")
+    try:
+        decoded = base64.b64decode(password, validate=True)
+    except (TypeError, ValueError, base64.binascii.Error):
+        raise ValueError("invalid Shadowsocks 2022 key")
+    if len(decoded) != expected_bytes or base64.b64encode(decoded).decode() != password:
+        raise ValueError(f"Shadowsocks 2022 key must decode to {expected_bytes} bytes")
 
 def _require_https_url(value, name):
     parsed = urllib.parse.urlsplit(value or "")
@@ -235,14 +250,14 @@ def _load_warp_state():
             state = json.load(state_file)
         mode = state.get("applied_mode", "native")
         if mode in {"off", "ipv4", "ipv6", "dual"}: mode = "native" if mode == "off" else f"warp_{mode}"
-        return {"applied_mode": mode, "applied_revision": int(state.get("applied_revision", 0)), "pending_result": state.get("pending_result")}
+        return {"applied_mode": mode, "applied_revision": int(state.get("applied_revision", 0)), "pending_result": state.get("pending_result"), "deployment_id": str(state.get("deployment_id", ""))}
     except Exception:
-        return {"applied_mode": "native", "applied_revision": 0, "pending_result": None}
+        return {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": ""}
 
-def _save_warp_state(mode, revision, pending_result=None):
+def _save_warp_state(mode, revision, pending_result=None, deployment_id=""):
     descriptor, temp_path = tempfile.mkstemp(prefix="warp-state.", suffix=".tmp", dir="/opt/kui")
     with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
-        json.dump({"applied_mode": mode, "applied_revision": int(revision), "pending_result": pending_result}, state_file)
+        json.dump({"applied_mode": mode, "applied_revision": int(revision), "pending_result": pending_result, "deployment_id": str(deployment_id or "")}, state_file)
         state_file.flush(); os.fsync(state_file.fileno())
     os.chmod(temp_path, 0o600)
     os.replace(temp_path, WARP_STATE_PATH)
@@ -760,6 +775,9 @@ def build_chain_outbound(target, tag):
         outbound.update({"type": "hysteria2", "password": target.get("uuid") or target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     elif proto == "TUIC":
         outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
+    elif proto == "Shadowsocks2022":
+        validate_ss2022_credentials(target.get("uuid", ""), target.get("password", ""))
+        outbound.update({"type": "shadowsocks", "method": target["uuid"], "password": target["password"], "network": "tcp"})
     elif proto == "AnyTLS":
         outbound.update({"type": "anytls", "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     else:
@@ -790,15 +808,17 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             listener_key = (transport, port)
             if listener_key in listener_keys: raise ValueError(f"duplicate {transport} listener port {port}")
             listener_keys.add(listener_key)
-            supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door"}
+            supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Shadowsocks2022", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door"}
             if proto not in supported:
                 raise ValueError(f"unsupported protocol {proto}")
             if proto != "dokodemo-door" and not isinstance(node.get("uuid"), str):
                 raise ValueError("uuid is required")
             if proto in {"XTLS-Reality", "Reality", "H2-Reality", "gRPC-Reality"} and (not node.get("private_key") or not node.get("short_id")):
                 raise ValueError("Reality private_key and short_id are required")
-            if proto in {"TUIC", "Trojan", "AnyTLS", "Naive", "Socks5"} and not node.get("private_key"):
+            if proto in {"TUIC", "Shadowsocks2022", "Trojan", "AnyTLS", "Naive", "Socks5"} and not node.get("private_key"):
                 raise ValueError(f"{proto} password is required")
+            if proto == "Shadowsocks2022":
+                validate_ss2022_credentials(node.get("uuid", ""), node.get("private_key", ""))
             if proto == "dokodemo-door" and node.get("relay_type") != "internal" and (not node.get("target_ip") or not node.get("target_port")):
                 raise ValueError("dokodemo target_ip and target_port are required")
         except (KeyError, TypeError, ValueError) as error:
@@ -825,6 +845,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
         elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "Shadowsocks2022": singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": "::", "listen_port": port, "network": "tcp", "method": node["uuid"], "password": node["private_key"]})
         elif proto == "Trojan": singbox_config["inbounds"].append({"type": "trojan", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "server_name": sni, "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "H2-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2", "http/1.1"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "http", "host": [sni], "path": "/"}})
         elif proto == "gRPC-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "grpc", "service_name": "grpc"}})
@@ -1258,12 +1279,24 @@ def fetch_and_apply_configs():
             egress = data.get("egress", {})
             desired_egress = egress.get("desired_mode", "native")
             revision = int(egress.get("revision", 0))
+            deployment_id = str(data.get("deployment_id") or "")
             local_warp = _load_warp_state()
+            local_deployment_id = str(local_warp.get("deployment_id") or "")
+            deployment_changed = bool(deployment_id and local_deployment_id != deployment_id)
+            if deployment_changed:
+                if local_deployment_id:
+                    print(f"[agent] deployment changed ({local_deployment_id} -> {deployment_id}); resetting local egress revision", flush=True)
+                else:
+                    print("[agent] binding legacy egress state to current deployment; resetting local revision", flush=True)
+                local_warp = {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": deployment_id}
+            elif not deployment_id and local_warp["applied_revision"] > revision and local_warp["applied_mode"] != desired_egress:
+                print("[agent] remote desired egress conflicts with a newer legacy local revision; trusting remote state", flush=True)
+                local_warp = {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": ""}
             if local_warp.get("pending_result"):
                 try:
                     ack = _post_warp_result(local_warp["pending_result"])
                     if (local_warp["pending_result"].get("success") is True and ack.get("accepted")) or revision != int(local_warp["pending_result"].get("revision", -1)):
-                        _save_warp_state(local_warp["applied_mode"], local_warp["applied_revision"])
+                        _save_warp_state(local_warp["applied_mode"], local_warp["applied_revision"], deployment_id=deployment_id)
                 except Exception:
                     pass
                 retry_after = int(local_warp["pending_result"].get("retry_after", 0))
@@ -1296,11 +1329,11 @@ def fetch_and_apply_configs():
                 build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp)
                 if apply_egress_change:
                     egress_ip = _warp_exit_ip if runtime_egress.startswith("warp_") else (_residential_exit_ip if runtime_egress == "residential" else "")
-                    result = {"success": True, "component": "egress", "revision": revision, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": egress_ip}
-                    _save_warp_state(desired_egress, revision, result)
+                    result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": egress_ip}
+                    _save_warp_state(desired_egress, revision, result, deployment_id)
                     try:
                         ack = _post_warp_result(result)
-                        if ack.get("accepted"): _save_warp_state(desired_egress, revision)
+                        if ack.get("accepted"): _save_warp_state(desired_egress, revision, deployment_id=deployment_id)
                     except Exception: pass
                     if realtime_channel and realtime_channel.connected: realtime_channel.send(result, "config.result")
                 elif realtime_channel and realtime_channel.connected:
@@ -1333,8 +1366,8 @@ def fetch_and_apply_configs():
                         rollback_healthy = False
                     retries = int(pending_failure.get("retries", 0)) + 1
                     retry_delay = min(300, 30 * (2 ** min(retries - 1, 4)))
-                    result = {"success": False, "component": "egress", "revision": revision, "desired_mode": desired_egress, "applied_mode": applied_egress, "rolled_back": rollback_healthy, "rollback_healthy": rollback_healthy, "error": str(error)[:500], "retries": retries, "retry_after": int(time.time() + retry_delay), "applied_at": int(time.time() * 1000)}
-                    _save_warp_state(applied_egress, applied_revision, result)
+                    result = {"success": False, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": applied_egress, "rolled_back": rollback_healthy, "rollback_healthy": rollback_healthy, "error": str(error)[:500], "retries": retries, "retry_after": int(time.time() + retry_delay), "applied_at": int(time.time() * 1000)}
+                    _save_warp_state(applied_egress, applied_revision, result, deployment_id)
                     _schedule_egress_retry(retry_delay)
                     try:
                         ack = _post_warp_result(result)

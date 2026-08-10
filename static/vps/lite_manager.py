@@ -44,6 +44,7 @@ if not AGENT_TOKEN:
 VPS_IP = os.environ.get("VPS_IP", "")
 
 PROXY_PORT = 7920
+PROXY_PUBLIC_LISTENER = False
 target_country = "JP"
 last_switch_trigger = 0
 config_generation = 0
@@ -224,7 +225,7 @@ def fetch_controller_config():
     return None
 
 def update_config_loop():
-    global target_country, last_switch_trigger, PROXY_PORT, tun_main, tun_backup, last_config_log, REALTIME_URL, realtime_channel, config_generation
+    global target_country, last_switch_trigger, PROXY_PORT, PROXY_PUBLIC_LISTENER, tun_main, tun_backup, last_config_log, REALTIME_URL, realtime_channel, config_generation
     while True:
         config_wakeup.clear()
         while realtime_channel and realtime_channel.enabled and not realtime_channel.connected:
@@ -259,6 +260,7 @@ def update_config_loop():
                 pc = data.get("proxy") or {}
                 if isinstance(pc, dict):
                     enabled = pc.get("enabled") is not False
+                    new_public_listener = pc.get("public_listener") is True
                     pu = str(pc.get("user", "")) or env_secret("PROXY_USER")
                     pp = str(pc.get("pass", "")) or env_secret("PROXY_PASS")
                     os.environ["PROXY_USER"] = pu
@@ -270,6 +272,10 @@ def update_config_loop():
                         proxy_server.PROXY_PASS = pp.encode()
                     if not pu or not pp:
                         print("[cfg] 代理凭证未配置，监听器保持拒绝连接状态", flush=True)
+                    if new_public_listener != PROXY_PUBLIC_LISTENER:
+                        PROXY_PUBLIC_LISTENER = new_public_listener
+                        print("[cfg] 监听范围变化，重启代理服务以应用", flush=True)
+                        os._exit(0)
             except Exception as e:
                 print(f"[cfg] 凭证同步失败: {e}", flush=True)
             if new_port != PROXY_PORT:
@@ -732,7 +738,7 @@ def maintain_pool():
         time.sleep(2)
 
 def main():
-    global PROXY_PORT, tun_main, target_country, last_switch_trigger, REALTIME_URL, realtime_channel
+    global PROXY_PORT, PROXY_PUBLIC_LISTENER, tun_main, target_country, last_switch_trigger, REALTIME_URL, realtime_channel
     if os.geteuid() != 0: return
     check_for_updates()
     get_public_ip()
@@ -747,6 +753,7 @@ def main():
             pc = initial.get("proxy") or {}
             if pc:
                 enabled = pc.get("enabled") is not False
+                PROXY_PUBLIC_LISTENER = pc.get("public_listener") is True
                 proxy_server.set_credentials((str(pc.get("user", "")) or env_secret("PROXY_USER")) if enabled else "", (str(pc.get("pass", "")) or env_secret("PROXY_PASS")) if enabled else "")
     except Exception as error:
         print(f"[cfg] initial controller sync failed, using fallback values: {error}", flush=True)
@@ -759,15 +766,15 @@ def main():
 
     realtime_channel = create_realtime_channel()
     realtime_channel.start()
-    print(f"  Proxy Controller (主备双活引擎) 启动！端口: {PROXY_PORT}", flush=True)
+    print(f"  Proxy Controller (主备双活引擎) 启动！端口: {PROXY_PORT}，监听: {'公网' if PROXY_PUBLIC_LISTENER else '仅本机'}", flush=True)
     print("========================================", flush=True)
 
     threading.Thread(target=vpngate_fetch_loop, daemon=True).start()
     threading.Thread(target=update_config_loop, daemon=True).start()
-    # 启用全局 IPv6 ANY 监听
+    # 默认仅监听本机；显式开启公网监听时同时绑定 IPv4/IPv6 ANY。
     def run_proxy_server():
         try:
-            proxy_server.start_proxy_server("::", PROXY_PORT)
+            proxy_server.start_proxy_server("::" if PROXY_PUBLIC_LISTENER else "127.0.0.1", PROXY_PORT)
         except Exception as error:
             print(f"[proxy] listener stopped: {error}; tunnel manager remains online", flush=True)
     threading.Thread(target=run_proxy_server, daemon=True).start()

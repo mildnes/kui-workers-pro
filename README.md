@@ -31,7 +31,7 @@ ByteVirt 提供多地域 VPS，适合部署 KUI VPS Agent、探针与代理节�
 
 KUI 是一个部署在 **单一 Cloudflare Worker** 的代理节点管理与服务器探针面板。Worker Assets 托管前端和 VPS 安装组件，D1 保存配置、用户、流量和探针数据，Durable Objects 提供实时 WebSocket；无需部署传统面板服务器或额外 Realtime Worker。
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/a6216abcd/K-UI-workers)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yuanlam/kui-worker)
 
 ## 一键部署
 
@@ -89,6 +89,14 @@ PROXY_PASS=kui
 
 启用住宅代理前，应在 Worker 的 **Variables and Secrets** 中将两项覆盖为独立的强 Secret 并重新部署。
 
+住宅 SOCKS 服务默认只监听 VPS 本机 `127.0.0.1`，供 KUI Agent 链式出口使用。如果确实需要从公网直连住宅 SOCKS，可显式设置：
+
+```text
+PROXY_PUBLIC_LISTENER=true
+```
+
+开放公网监听前请先轮换代理凭据并限制防火墙来源；面板会持续显示安全告警。
+
 ## 自定义域名
 
 在 Worker 的 **Settings → Domains & Routes → Add** 中绑定域名或子域名。绑定后直接使用该域名访问面板。
@@ -98,8 +106,8 @@ PROXY_PASS=kui
 适用于需要使用已有 D1、固定 Worker 名称或自行维护发布流程的场景。
 
 ```bash
-git clone https://github.com/a6216abcd/K-UI-workers.git
-cd K-UI-workers
+git clone https://github.com/yuanlam/kui-worker.git
+cd kui-worker
 npm install
 npx wrangler login
 npx wrangler deploy
@@ -136,14 +144,15 @@ npm run dev
 1. 登录 KUI，进入 **服务器与节点**。
 2. 添加 VPS 名称和公网 IP。
 3. 复制页面生成的 Full Deploy Command，以 `root` 在 VPS 执行。
-4. 等待 Agent 回连后创建节点或使用"8 合 1"批量部署。
+4. 等待 Agent 回连后创建节点或使用“9 合 1”批量部署。
 
-支持 XTLS-Reality、Hysteria2、TUIC、Trojan、H2/gRPC-Reality、AnyTLS、Naive、VLESS-Argo、Socks5 与 Dokodemo-door。
+支持 XTLS-Reality、Hysteria2、TUIC、Shadowsocks 2022、Trojan、H2/gRPC-Reality、AnyTLS、Naive、VLESS-Argo、Socks5 与 Dokodemo-door。
 
 ## 主要能力
 
 - 多用户、订阅令牌、流量配额和到期管理。
-- Mihomo/Clash 订阅导出，包括 AnyTLS。
+- 普通链接与 Mihomo/Clash 订阅导出，包括 Shadowsocks 2022 与 AnyTLS。
+- Surge `[Proxy]` 配置段直接复制；自动跳过 Surge 不原生支持的协议并附加注释。
 - CPU、内存、磁盘、网络、TCP/UDP 与线路延迟探针。
 - 多种预设探针主题、自定义 CSS 和背景。
 - 原生、WARP、住宅代理和手动 SOCKS5 节点出口。
@@ -167,11 +176,21 @@ Cloudflare Worker
 ## 注意事项
 
 - 一键部署默认使用 `admin/admin` 和住宅代理凭据 `kui/kui`。公开使用前必须将 `ADMIN_PASSWORD`、`PROXY_USER`、`PROXY_PASS` 覆盖为 Secret。
+- `PROXY_PUBLIC_LISTENER` 默认为 `false`；除非确实需要外部直连住宅 SOCKS，否则不要开启。
 - 不要提交自定义 `ADMIN_PASSWORD`、D1 ID、Telegram Token 或代理凭据。
 - `DB` 是固定 binding 名称，修改会导致后端无法访问数据库。
 - 修改 Worker Variables 或 Bindings 后需要重新部署。
 - 使用已有 D1 时，确认 `DB` 绑定指向正确数据库。
 - `workspace-preview.html` 仅用于本地预览，不参与 Worker 静态资源发布。
+
+## 开发验证
+
+```bash
+npm ci
+npm run check
+```
+
+GitHub Actions 会在 `main`、`dev` 和 Pull Request 上执行同一套测试、语法检查及 Wrangler dry-run。
 
 ## 开源协议
 

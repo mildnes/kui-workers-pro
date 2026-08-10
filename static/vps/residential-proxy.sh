@@ -265,6 +265,12 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+        install -d -m 755 /etc/systemd/system/kui-agent.service.d
+        cat > /etc/systemd/system/kui-agent.service.d/proxy-lite.conf << 'EOF'
+[Unit]
+Wants=proxy-lite.service
+After=proxy-lite.service
+EOF
         systemctl daemon-reload
         systemctl enable proxy-lite.service
         systemctl restart proxy-lite.service
@@ -373,6 +379,22 @@ main() {
     setup_tun
     download_agents
     install_service
+    echo "[*] 等待住宅代理主通道就绪后再启动 KUI Agent..."
+    PROXY_READY=0
+    for _ in $(seq 1 90); do
+        if { [ "$INIT_SYS" = "systemd" ] && systemctl is-active --quiet proxy-lite; } || { [ "$INIT_SYS" = "openrc" ] && rc-service proxy-lite --quiet status; }; then
+            if ip link show tun_main >/dev/null 2>&1 || ip link show tun_backup >/dev/null 2>&1; then
+                PROXY_READY=1
+                break
+            fi
+        fi
+        sleep 1
+    done
+    if [ "$PROXY_READY" -eq 1 ]; then
+        echo "[+] 住宅代理隧道已就绪，继续启动 Agent。"
+    else
+        echo "⚠️ 住宅代理在 90 秒内未就绪；Agent 将继续启动并等待后续自动重试。"
+    fi
     if [ "$INIT_SYS" = "systemd" ]; then
         systemctl restart kui-agent 2>/dev/null || true
     elif [ "$INIT_SYS" = "openrc" ]; then

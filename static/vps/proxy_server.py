@@ -241,6 +241,8 @@ def proxy_client(client: socket.socket, address: tuple[str, int]) -> None:
 
 def start_proxy_server(host: str, port: int) -> None:
     servers = []
+    public_listener = host in {"0.0.0.0", "::", "*"}
+    ipv4_host = "0.0.0.0" if public_listener else "127.0.0.1"
     retry_delay = 1
     attempts = 0
     while attempts < 5:
@@ -248,7 +250,7 @@ def start_proxy_server(host: str, port: int) -> None:
         try:
             server4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server4.bind(("0.0.0.0", port))
+            server4.bind((ipv4_host, port))
             server4.listen(256)
             servers.append(server4)
             break
@@ -262,17 +264,18 @@ def start_proxy_server(host: str, port: int) -> None:
     if not servers:
         print(f"[proxy] IPv4 unavailable after {attempts} attempts; trying IPv6-only mode", flush=True)
 
-    try:
-        server6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        server6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-        server6.bind(("::", port))
-        server6.listen(256)
-        servers.append(server6)
-    except Exception as error:
-        print(f"[proxy] IPv6 listener unavailable on {port}: {error}", flush=True)
-        try: server6.close()
-        except Exception: pass
+    if public_listener:
+        try:
+            server6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            server6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            server6.bind(("::", port))
+            server6.listen(256)
+            servers.append(server6)
+        except Exception as error:
+            print(f"[proxy] IPv6 listener unavailable on {port}: {error}", flush=True)
+            try: server6.close()
+            except Exception: pass
     if not servers:
         raise OSError(f"unable to bind proxy port {port} on IPv4 or IPv6")
     listener_ready.set()
