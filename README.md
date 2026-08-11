@@ -1,5 +1,7 @@
 # KUI x Server Monitor Pro
 
+> 本项目是从 [a6216abcd/K-UI-workers](https://github.com/a6216abcd/K-UI-workers) Fork 后持续修改维护的版本。
+
 ## 项目赞助商
 
 <p align="center">
