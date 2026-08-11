@@ -701,9 +701,9 @@
                         <div class="lg:col-span-1 bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20">
                             <div class="flex items-center gap-2 mb-4">
                                 <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                <h2 class="text-lg font-bold text-slate-200">全量国家代码库</h2>
-                            </div>
-                            <p class="text-xs text-slate-500 mb-4 leading-relaxed">系统已合并预设代码及实时的网络探测代码，提供最全面的目标锁定选择。</p>
+                            <h2 class="text-lg font-bold text-slate-200">国家代码与候选节点</h2>
+                        </div>
+                            <p class="text-xs text-slate-500 mb-4 leading-relaxed">数量来自 VPN Gate 当前可见节点，仅代表可尝试的候选池，不等于已建立的住宅隧道。点击代码可填入目标地区。</p>
                             <div id="countries-list" class="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto pr-1">
                                 <span class="text-slate-600 text-sm animate-pulse">正在同步数据库...</span>
                             </div>
@@ -1944,7 +1944,20 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 const list = await res.json();
                 const container = document.getElementById('countries-list');
                 if (!container) return;
-                container.innerHTML = list.map(c => `<span class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-default">${pcEscapeHtml(c)}</span>`).join('');
+                const entries = Array.isArray(list) ? list.map(item => {
+                    if (typeof item === 'string') return { code: item, nodes: null };
+                    return { code: item?.code || item?.country || '', nodes: Number.isFinite(Number(item?.nodes)) ? Number(item.nodes) : null };
+                }).filter(item => /^[A-Za-z]{2}$/.test(item.code)) : [];
+                container.innerHTML = entries.map(item => {
+                    const code = pcEscapeHtml(item.code.toUpperCase());
+                    const count = item.nodes === null ? '—' : item.nodes;
+                    return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-pointer">${code}<span class="ml-1 text-slate-500">${count}</span></button>`;
+                }).join('');
+                container.onclick = event => {
+                    const button = event.target.closest('[data-country-code]');
+                    const input = document.getElementById('slot-cfg-0');
+                    if (button && input) { input.value = button.dataset.countryCode; input.focus(); }
+                };
             } catch(e) {}
         }
 

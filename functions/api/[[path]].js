@@ -1030,18 +1030,22 @@ async function proxyLocal(method, subPath, req, env, body = null) {
             const res = await fetch('https://www.vpngate.net/api/iphone/', { signal: AbortSignal.timeout(8000) });
             const text = await res.text();
             const lines = text.split('\n');
-            const countries = new Set();
+            const countries = new Map();
             for (let i = 2; i < lines.length; i++) {
                 const parts = lines[i].split(',');
                 if (parts.length > 6) {
-                    const c = parts[6];
-                    if (c && c.length === 2 && c !== 'xx' && c !== '--') countries.add(c.toUpperCase());
+                    const c = String(parts[6] || '').replace(/^"|"$/g, '').trim().toUpperCase();
+                    const nodeIp = String(parts[1] || '').replace(/^"|"$/g, '').trim();
+                    if (c && /^[A-Z]{2}$/.test(c) && c !== 'XX' && c !== '--' && nodeIp) {
+                        countries.set(c, (countries.get(c) || 0) + 1);
+                    }
                 }
             }
             const preset = ["US","JP","KR","SG","HK","TW","GB","DE","FR","NL","CA","AU","IN","VN","BR","AE","MY","TH","PH","ID","TR","ZA","IT","ES","RU","CH","SE","PL","NO","DK","FI","IE","AT","NZ","BE","PT","CZ","GR","HU","RO","BG","HR","SK","SI","LT","LV","EE","UA","RS","BA","CY","MT","IS","LU"];
-            return new Response(JSON.stringify(Array.from(new Set([...preset, ...Array.from(countries)])).sort()), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+            const result = Array.from(new Set([...preset, ...countries.keys()])).sort().map(code => ({ code, nodes: countries.get(code) || 0 }));
+            return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
         } catch {
-            return new Response(JSON.stringify(["US","JP","KR","SG","HK","TW"]), { headers: { 'Content-Type': 'application/json' } });
+            return new Response(JSON.stringify(["US","JP","KR","SG","HK","TW"].map(code => ({ code, nodes: 0 }))), { headers: { 'Content-Type': 'application/json' } });
         }
     }
 
