@@ -72,14 +72,22 @@ test('server card header and deployment actions use the compact explicit layout'
     assert.match(appStyles, /\.kui-server-name \{ font-size: 28px;/);
 });
 
-test('server subscription exports live in the overflow menu and purge copy is a bottom button', () => {
+test('server subscription exports live in the overflow menu', () => {
     const menu = serversPage.slice(serversPage.indexOf('kui-server-menu'), serversPage.indexOf('kui-server-metric'));
-    const delivery = serversPage.slice(serversPage.indexOf('kui-server-delivery-section'));
     assert.match(menu, /generateSubLink\(vps\.ip, ''\)/);
     assert.match(menu, /generateSubLink\(vps\.ip, 'clash'\)/);
     assert.match(menu, /copySurgeConfig\(vps\.ip\)/);
-    assert.doesNotMatch(delivery, /grid-cols-3/);
-    assert.match(delivery, /<button @click="copyPurgeCommand\(vps\)" class="kui-copy-purge-button"/);
     assert.match(appStyles, /\.kui-server-menu-panel/);
-    assert.match(appStyles, /\.kui-copy-purge-button \{ width: 100%;/);
+});
+
+test('deployment command frame is collapsed by default and contains all three actions', () => {
+    const start = serversPage.indexOf('<details class="kui-deploy-panel');
+    const deployPanel = serversPage.slice(start, serversPage.indexOf('</details>', start));
+    assert.ok(start >= 0);
+    assert.doesNotMatch(deployPanel.match(/<details[^>]*>/)?.[0] || '', /\sopen(?:\s|>)/);
+    assert.equal((deployPanel.match(/<button\b/g) || []).length, 3);
+    assert.match(deployPanel, /copyCommand\(generateCmd\(vps\.ip\)/);
+    assert.match(deployPanel, /copyUninstallCommand\(vps\)/);
+    assert.match(deployPanel, /copyPurgeCommand\(vps\)/);
+    assert.match(appStyles, /\.kui-deploy-panel-body \{ padding:/);
 });
