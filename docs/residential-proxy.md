@@ -1,0 +1,58 @@
+# 住宅代理与 Docker 接入
+
+## 必需配置
+
+在 Worker 的 **Settings → Variables and Secrets** 中设置：
+
+```text
+PROXY_USER=使用独立用户名
+PROXY_PASS=使用独立强密码
+```
+
+缺少任一项时，住宅代理接口不会下发凭据。修改后需要重新部署 Worker。
+
+## 监听范围
+
+住宅 SOCKS 默认只监听 VPS 本机 `127.0.0.1`，供 KUI Agent 链式出口使用。除非确实需要从公网直连，否则不要开启公网监听。
+
+如需公网监听，可设置：
+
+```text
+PROXY_PUBLIC_LISTENER=true
+```
+
+开启前应先轮换代理凭据，并通过防火墙限制来源地址。面板会持续显示公网监听安全告警。
+
+## Docker 容器接入
+
+Docker 容器不需要开启公网监听。在面板的 **住宅 IP 代理** 页面填写该 VPS 的 Docker 网桥地址，通常为 `172.17.0.1`，然后下发策略。
+
+该地址同时用于：
+
+- `proxy-lite`：端口 `7920`
+- Agent sing-box 检查入口：端口 `39482`
+
+Compose 服务需要加入宿主机别名：
+
+```yaml
+services:
+  your-service:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+容器内使用：
+
+```text
+socks5h://代理用户名:代理密码@host.docker.internal:7920
+```
+
+`39482` 是本机无认证检查入口，不应暴露到公网。清空面板中的 Docker 网桥字段后，服务会恢复为仅监听 `127.0.0.1`。
+
+## 排查建议
+
+1. 确认面板显示 `residential_outbound.ready=true`。
+2. 检查 VPS 实时日志中的主备通道和出口 IP。
+3. 确认 `proxy-lite` 正常运行，端口与面板配置一致。
+4. Docker 场景下确认网桥地址存在，且容器能解析 `host.docker.internal`。
+5. 不要为解决容器访问问题直接开启公网监听。
