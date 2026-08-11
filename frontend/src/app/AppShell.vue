@@ -1,0 +1,57 @@
+<template>
+  <div v-if="isLoggedIn && activeTab !== 'probe'" class="kui-admin-shell">
+    <DesktopNavigation />
+    <div class="kui-admin-workspace">
+      <TopBar />
+      <main class="kui-admin-content">
+        <div v-if="role === 'admin' && securityWarnings.length" class="kui-alert kui-alert-danger">
+          <div v-for="warning in securityWarnings" :key="warning">⚠ {{ warning }}</div>
+        </div>
+        <ServersPage />
+        <UsersPage />
+        <RealmPage />
+        <ServicesPage />
+        <ResidentialProxyPage />
+        <UserDashboardPage />
+        <ThirdPartyPage />
+        <SettingsPage />
+      </main>
+    </div>
+    <MobileNavigation />
+  </div>
+</template>
+
+<script>
+import { inject } from 'vue';
+import DesktopNavigation from './DesktopNavigation.vue';
+import MobileNavigation from './MobileNavigation.vue';
+import TopBar from './TopBar.vue';
+import { KUI_KEY } from './context.js';
+import RealmPage from '../pages/RealmPage.vue';
+import ResidentialProxyPage from '../pages/ResidentialProxyPage.vue';
+import ServersPage from '../pages/ServersPage.vue';
+import ServicesPage from '../pages/ServicesPage.vue';
+import SettingsPage from '../pages/SettingsPage.vue';
+import ThirdPartyPage from '../pages/ThirdPartyPage.vue';
+import UserDashboardPage from '../pages/UserDashboardPage.vue';
+import UsersPage from '../pages/UsersPage.vue';
+
+export default {
+  components: {
+    DesktopNavigation,
+    MobileNavigation,
+    TopBar,
+    RealmPage,
+    ResidentialProxyPage,
+    ServersPage,
+    ServicesPage,
+    SettingsPage,
+    ThirdPartyPage,
+    UserDashboardPage,
+    UsersPage,
+  },
+  setup() {
+    return inject(KUI_KEY);
+  },
+};
+</script>

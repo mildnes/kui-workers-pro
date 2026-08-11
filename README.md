@@ -85,7 +85,7 @@ npm ci
 npm run check
 ```
 
-修改 Tailwind 类名后先运行 `npm run build:css`。更多说明见 [开发与验证](docs/development.md)。
+前端已使用 Vue 3 SFC + Vite，并按功能页面拆分在 `frontend/`。`npm run check` 会自动构建前端；更多说明见 [开发与验证](docs/development.md)。
 
 ## License
 

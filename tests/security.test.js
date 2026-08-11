@@ -4,6 +4,13 @@ import test from 'node:test';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const html = fs.readFileSync(new URL('../static/index.html', import.meta.url), 'utf8');
+const frontend = [
+    '../frontend/src/composables/useKuiState.js',
+    '../frontend/src/pages/ProbePage.vue',
+    '../frontend/src/pages/ServersPage.vue',
+    '../frontend/src/pages/ResidentialProxyPage.vue',
+    '../frontend/src/proxy/legacyProxy.js',
+].map(path => fs.readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n');
 const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const wrangler = fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
@@ -22,8 +29,8 @@ test('deployments preserve dashboard variables and document secret types', () =>
 });
 
 test('proxy list opens as text instead of document-written markup', () => {
-    assert.doesNotMatch(html, /document\.write\('<pre>'\+t\+'<\/pre>'\)/);
-    assert.match(html, /pre\.textContent\s*=\s*t/);
+    assert.doesNotMatch(frontend, /document\.write\('<pre>'\+t\+'<\/pre>'\)/);
+    assert.match(frontend, /pre\.textContent\s*=\s*t/);
 });
 
 test('login throttling does not use the Authorization request header', () => {
@@ -39,9 +46,9 @@ test('login uses a minimal batched auth schema and exposes request progress', ()
     assert.match(api, /async function ensureAuthSchema\(db\)[\s\S]*db\.batch\(\[/);
     assert.match(loginRoute, /await ensureAuthSchema\(db\)/);
     assert.doesNotMatch(loginRoute, /ensureDbSchema/);
-    assert.match(html, /:disabled="loginPending"/);
-    assert.match(html, /AbortSignal\.timeout\(15000\)/);
-    assert.match(html, /finally[\s\S]{0,100}loginPending\.value = false/);
+    assert.match(frontend, /:disabled="loginPending"/);
+    assert.match(frontend, /AbortSignal\.timeout\(15000\)/);
+    assert.match(frontend, /finally[\s\S]{0,100}loginPending\.value = false/);
 });
 
 test('private probe authorization is checked before the public cache', () => {
@@ -53,27 +60,28 @@ test('private probe authorization is checked before the public cache', () => {
 });
 
 test('proxy config is loaded for a selected VPS and batch results are explicit', () => {
-    assert.match(html, /\/api\/proxy\/config\?ip=\$\{encodeURIComponent\(targetIp\)\}/);
-    assert.match(html, /Promise\.allSettled/);
-    assert.match(html, /成功.*失败/s);
+    assert.match(frontend, /\/api\/proxy\/config\?ip=\$\{encodeURIComponent\(targetIp\)\}/);
+    assert.match(frontend, /Promise\.allSettled/);
+    assert.match(frontend, /成功.*失败/s);
 });
 
 test('residential proxy target options show VPS aliases with IPs', () => {
-    assert.match(html, /window\.kuiManagedServers\s*=\s*\(\)\s*=>/);
-    assert.match(html, /pcEscapeHtml\(server\.name \|\| server\.ip\)[\s\S]{0,80}\s:\s[\s\S]{0,80}pcEscapeHtml\(server\.ip\)/);
+    assert.match(frontend, /window\.kuiManagedServers\s*=\s*\(\)\s*=>/);
+    assert.match(frontend, /pcEscapeHtml\(server\.name \|\| server\.ip\)[\s\S]{0,80}\s:\s[\s\S]{0,80}pcEscapeHtml\(server\.ip\)/);
 });
 
 test('egress synchronization uses user-facing status copy', () => {
-    assert.match(html, /配置已同步/);
-    assert.match(html, /正在应用新配置/);
-    assert.match(html, /新配置应用失败，当前配置保持不变/);
-    assert.match(html, /等待 VPS 上线后同步/);
-    assert.doesNotMatch(html, /revision 期望/);
+    assert.match(frontend, /配置已同步/);
+    assert.match(frontend, /正在应用新配置/);
+    assert.match(frontend, /新配置应用失败，当前配置保持不变/);
+    assert.match(frontend, /等待 VPS 上线后同步/);
+    assert.doesNotMatch(frontend, /revision 期望/);
 });
 
 test('manual refresh propagates data loading failures', () => {
-    assert.match(html, /await refreshData\(true\)/);
-    assert.match(html, /await fetchProbeData\(false, true\)/);
+    assert.match(frontend, /await refreshData\(true\)/);
+    assert.match(frontend, /await fetchProbeData\(false, true\)/);
+    assert.match(frontend, /Object\.assign\(window, \{ pcFetchCountries, pcFetchNodes, pcLoadConfig/);
 });
 
 test('schema initialization does not silently accept failed migrations', () => {
@@ -90,8 +98,8 @@ test('API data never returns password hashes and logout revokes sessions', () =>
 });
 
 test('browser sessions are not persisted in localStorage', () => {
-    assert.doesNotMatch(html, /localStorage\.(?:getItem|setItem)\('kui_auth_key'/);
-    assert.match(html, /sessionStorage\.setItem\('kui_auth_key'/);
+    assert.doesNotMatch(frontend, /localStorage\.(?:getItem|setItem)\('kui_auth_key'/);
+    assert.match(frontend, /sessionStorage\.setItem\('kui_auth_key'/);
 });
 
 test('external Worker fetches use bounded timeouts', () => {
@@ -100,8 +108,15 @@ test('external Worker fetches use bounded timeouts', () => {
 });
 
 test('proxy diagnostics follow the selected VPS', () => {
-    assert.match(html, /const selectedServer =/);
-    assert.match(html, /selectedServer\.logs/);
+    assert.match(frontend, /const selectedServer =/);
+    assert.match(frontend, /selectedServer\.logs/);
+});
+
+test('SFC frontend preserves residential controller integration points', () => {
+    assert.match(html, /\/ui-assets\/app\.js/);
+    for (const id of ['slot-target-ip', 'countries-list', 'pc-nodes-table', 'pc-terminal-output', 'pc-native-score-container']) {
+        assert.match(frontend, new RegExp(`id="${id}"`));
+    }
 });
 
 test('realtime patches invalidate the snapshot cache', () => {
