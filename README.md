@@ -103,17 +103,73 @@ PROXY_PUBLIC_LISTENER=true
 
 在 Worker 的 **Settings → Domains & Routes → Add** 中绑定域名或子域名。绑定后直接使用该域名访问面板。
 
-## 本地部署
+## 手动部署（CLI）
 
-适用于需要使用已有 D1、固定 Worker 名称或自行维护发布流程的场景。
+适用于不想让 Cloudflare 创建 GitHub 副本、需要固定 Worker 名称，或希望自行维护 D1/发布流程的场景。手动部署只会使用当前本地工作区，不会修改本仓库。
+
+### 1. 准备代码和 Cloudflare 登录
 
 ```bash
 git clone https://github.com/yuanlam/kui-workers-pro.git
 cd kui-workers-pro
-npm install
+npm ci
 npx wrangler login
-npx wrangler deploy
 ```
+
+### 2. 创建并绑定 D1
+
+每个独立部署需要自己的 D1 数据库。先创建数据库：
+
+```bash
+npx wrangler d1 create kui-worker-db
+```
+
+将命令输出的 `database_id` 填入本地 `wrangler.jsonc`，不要提交到公开仓库：
+
+```json
+"d1_databases": [
+  {
+    "binding": "DB",
+    "database_name": "kui-worker-db",
+    "database_id": "替换为你的 database_id"
+  }
+]
+```
+
+项目会在首次请求时自动创建表结构，不需要额外执行 SQL migration。`DB` 是固定 binding 名称，不能改成其他名称。
+
+### 3. 设置 Worker 名称和密钥
+
+可以直接修改 `wrangler.jsonc` 中的 `name`，或部署时传入名称：
+
+```bash
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put PROXY_USER
+npx wrangler secret put PROXY_PASS
+```
+
+三个命令会交互式读取 Secret。公开部署不要继续使用默认的 `admin`、`kui`、`kui` 凭据。
+
+### 4. 部署并验证
+
+```bash
+npx wrangler deploy --name my-kui-worker
+```
+
+部署完成后打开 Cloudflare 输出的 Worker 地址，使用你设置的管理员密码登录。也可以检查：
+
+```bash
+curl -fsS https://你的-worker-域名/health
+```
+
+手动部署不会自动创建 GitHub 仓库；后续更新时在本地执行 `git pull` 后再次运行 `npx wrangler deploy` 即可。
+
+### 一键部署与手动部署的区别
+
+| 方式 | 代码来源 | Cloudflare 资源 | 是否可能创建 GitHub 副本 |
+| --- | --- | --- | --- |
+| 一键部署 | 公开 GitHub 仓库 | 部署者自己的 Worker、D1、Durable Objects | 取决于部署向导是否启用 GitHub 集成 |
+| 手动部署 | 当前本地目录 | 部署者明确指定的资源 | 不会 |
 
 当前 `wrangler.jsonc` 未指定 D1 ID，首次部署会自动创建数据库和实时 Durable Objects。若需要使用已有 D1，在 Cloudflare Dashboard 的 Worker **Settings → Bindings** 中将 `DB` 重绑到目标数据库后重新部署。
 
