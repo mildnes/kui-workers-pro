@@ -58,6 +58,20 @@ async function readJsonBody(request, maxBytes) {
 
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
 
+async function deleteVpsRecords(db, ip) {
+    await db.batch([
+        db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'vps' AND resource_id = ?").bind(ip),
+        db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'node' AND resource_id IN (SELECT id FROM nodes WHERE vps_ip = ?)").bind(ip),
+        db.prepare("DELETE FROM nodes WHERE vps_ip = ?").bind(ip),
+        db.prepare("DELETE FROM traffic_stats WHERE ip = ?").bind(ip),
+        db.prepare("DELETE FROM servers WHERE ip = ?").bind(ip),
+        db.prepare("DELETE FROM probe_servers WHERE id = ?").bind(ip),
+        db.prepare("DELETE FROM proxy_ctrl_servers WHERE ip = ?").bind(ip),
+        db.prepare("DELETE FROM server_logs WHERE ip = ?").bind(ip),
+        db.prepare("DELETE FROM probe_settings WHERE key = ?").bind(`proxy_slot_map_${ip}`)
+    ]);
+}
+
 const SS2022_KEY_BYTES = {
     '2022-blake3-aes-128-gcm': 16,
     '2022-blake3-aes-256-gcm': 32,
@@ -1684,6 +1698,21 @@ rules:
         return Response.json({ success: isAdminUser, admin: isAdminUser }, { status: isAdminUser ? 200 : 403, headers: { "Cache-Control": "no-store" } });
     }
 
+    // Full VPS purge is intentionally authenticated by the VPS Agent Token,
+    // because the Agent invokes it after local component cleanup.
+    if (action === "vps_purge" && method === "POST") {
+        await ensureDbSchema(db);
+        let body;
+        try { body = await readJsonBody(request, 8 * 1024); }
+        catch (error) { return Response.json({ error: error.message || 'Invalid request' }, { status: 400 }); }
+        const ip = String(body.ip || request.headers.get('X-KUI-IP') || '');
+        if (!validIp(ip) || !(await verifyAgent(request.headers.get('Authorization'), ip, db, env))) return new Response('Unauthorized', { status: 401 });
+        const existing = await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first();
+        if (!existing) return Response.json({ success: true, already_removed: true });
+        await deleteVpsRecords(db, ip);
+        return Response.json({ success: true, removed: ip });
+    }
+
     const currentUser = await verifyAuth(request.headers.get("Authorization"), request, db, env, context);
     const isAdmin = currentUser === (env.ADMIN_USERNAME || "admin");
     if (!currentUser) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -1812,7 +1841,7 @@ rules:
             if (method === "PUT") { const data = await request.json(); const ip = data.ip; if (!ip) return Response.json({ error: 'IP required' }, { status: 400 }); if (data.egress_mode === undefined) return Response.json({ error: 'Use egress_mode to configure node egress' }, { status: 400 }); const modes = ['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5']; if (!modes.includes(data.egress_mode)) return Response.json({ error: 'Invalid egress mode' }, { status: 400 }); if (data.egress_mode === 'residential' && env.PROXY_CTRL_URL) return Response.json({ error: '外部住宅控制器模式不支持本机住宅节点出口' }, { status: 409 }); if (data.egress_mode === 'residential' && (!env.PROXY_USER || !env.PROXY_PASS)) return Response.json({ error: 'Pages 未配置住宅代理凭据' }, { status: 503 }); const proxyMode = data.proxy_mode === 'selective' ? 'selective' : 'global'; const proxyCategories = data.proxy_categories ? String(data.proxy_categories) : ''; const socks5Addr = String(data.socks5_addr || '').slice(0, 128); const socks5Port = Math.min(65535, Math.max(1, Number(data.socks5_port) || 0)); const socks5User = String(data.socks5_user || '').slice(0, 64); const socks5Pass = String(data.socks5_pass || '').slice(0, 128); let changed; if (data.egress_mode === 'socks5' && socks5Addr && socks5Port) { changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', proxy_mode = ?, proxy_categories = ?, socks5_addr = ?, socks5_port = ?, socks5_user = ?, socks5_pass = ? WHERE ip = ? RETURNING egress_revision").bind(data.egress_mode, proxyMode, proxyCategories, socks5Addr, socks5Port, socks5User, socks5Pass, ip).first(); } else { changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', proxy_mode = ?, proxy_categories = ? WHERE ip = ? RETURNING egress_revision").bind(data.egress_mode, proxyMode, proxyCategories, ip).first(); } if (!changed) return Response.json({ error: 'VPS not found' }, { status: 404 }); context.waitUntil(notifyRealtimeVps(env, db, ip).catch(() => {})); return Response.json({ success: true, ip, egress_mode: data.egress_mode, egress_revision: Number(changed.egress_revision), egress_status: 'pending', proxy_mode: proxyMode, proxy_categories: proxyCategories, socks5_addr: data.egress_mode === 'socks5' ? socks5Addr : '', socks5_port: data.egress_mode === 'socks5' ? socks5Port : 0 }); }
             if (method === "DELETE") { 
                 const ip = new URL(request.url).searchParams.get("ip"); 
-                await db.batch([ db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'vps' AND resource_id = ?").bind(ip), db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'node' AND resource_id IN (SELECT id FROM nodes WHERE vps_ip = ?)").bind(ip), db.prepare("DELETE FROM nodes WHERE vps_ip = ?").bind(ip), db.prepare("DELETE FROM traffic_stats WHERE ip = ?").bind(ip), db.prepare("DELETE FROM servers WHERE ip = ?").bind(ip), db.prepare("DELETE FROM probe_servers WHERE id = ?").bind(ip), db.prepare("DELETE FROM proxy_ctrl_servers WHERE ip = ?").bind(ip), db.prepare("DELETE FROM server_logs WHERE ip = ?").bind(ip), db.prepare("DELETE FROM probe_settings WHERE key = ?").bind(`proxy_slot_map_${ip}`) ]);
+                await deleteVpsRecords(db, ip);
                 return Response.json({ success: true }); 
             }
         }

@@ -148,14 +148,14 @@ npm run dev
 3. 复制页面生成的 Full Deploy Command，以 `root` 在 VPS 执行。
 4. 等待 Agent 回连后创建节点或使用“9 合 1”批量部署。
 
-每台 VPS 卡片底部提供“复制卸载 Agent 命令”。在对应 VPS 的 `root` 终端执行后，将：
+每台 VPS 卡片提供两种清理入口。在对应 VPS 的 `root` 终端执行生成的命令后，将：
 
 - 先在 `/root/kui-agent-backup-时间戳.tar.gz` 创建权限为 `600` 的恢复备份。
 - 核对命令中的目标 IP 与本机 Agent 记录；粘贴到错误 VPS 时会拒绝卸载。
-- 停止并删除 `kui-agent`、KUI 安装的 `sing-box`、节点配置及证书。
-- 保留 `proxy-lite` 住宅代理、OpenVPN 通道以及面板中的 VPS/节点记录。
+- “仅卸载 Agent（保留住宅代理）”：停止并删除 `kui-agent`、KUI 安装的 `sing-box`、节点配置及证书，但保留 `proxy-lite`、OpenVPN 通道和面板记录。
+- “卸载全部组件并移除面板记录”：额外删除 `proxy-lite`、OpenVPN 通道及相关配置；本机清理成功后，命令会使用该 VPS 的 Agent Token 自动删除面板中的 VPS、节点、探针和住宅状态记录。
 
-如果确认不再使用该机器，还需要在面板中手动移除 VPS 记录。
+全量清理命令采用“先清理 VPS、后删除面板记录”的顺序；如果 VPS 无法访问 Worker，面板记录会保留，修复网络/DNS 后可重新执行同一条命令。
 
 支持 XTLS-Reality、Hysteria2、TUIC、Shadowsocks 2022、Trojan、H2/gRPC-Reality、AnyTLS、Naive、VLESS-Argo、Socks5 与 Dokodemo-door。
 

@@ -4,10 +4,16 @@ set -eu
 
 CONFIRMED=0
 EXPECTED_IP=""
+API_URL=""
+TOKEN=""
+PURGE_ALL=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --yes) CONFIRMED=1 ;;
         --ip) [ "$#" -ge 2 ] || { echo "--ip 缺少参数"; exit 1; }; EXPECTED_IP="$2"; shift ;;
+        --api) [ "$#" -ge 2 ] || { echo "--api 缺少参数"; exit 1; }; API_URL="$2"; shift ;;
+        --token) [ "$#" -ge 2 ] || { echo "--token 缺少参数"; exit 1; }; TOKEN="$2"; shift ;;
+        --all) PURGE_ALL=1 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
     shift
@@ -28,16 +34,26 @@ if [ -z "$EXPECTED_IP" ]; then
     exit 1
 fi
 
-if [ ! -f /opt/kui/config.json ]; then
+if [ "$PURGE_ALL" -eq 1 ]; then
+    case "$API_URL" in https://*) ;; *) echo "❌ --all 模式要求 --api 使用 https://"; exit 1 ;; esac
+    case "$API_URL" in *'@'*|*'#'*) echo "❌ --api 不能包含用户信息或 fragment"; exit 1 ;; esac
+    [ -n "$TOKEN" ] || { echo "❌ --all 模式缺少 --token"; exit 1; }
+fi
+
+if [ ! -f /opt/kui/config.json ] && [ "$PURGE_ALL" -ne 1 ]; then
     echo "[*] 当前机器未安装 KUI Agent，无需卸载。"
     exit 0
 fi
 
-ACTUAL_IP=$(python3 -c 'import json; print(json.load(open("/opt/kui/config.json")).get("ip", ""))' 2>/dev/null || true)
-if [ -z "$ACTUAL_IP" ] || [ "$ACTUAL_IP" != "$EXPECTED_IP" ]; then
-    echo "❌ VPS 身份校验失败：面板目标为 $EXPECTED_IP，本机 Agent 记录为 ${ACTUAL_IP:-未知}。"
-    echo "   请确认命令是在正确的 VPS 上执行。"
-    exit 1
+if [ -f /opt/kui/config.json ]; then
+    ACTUAL_IP=$(python3 -c 'import json; print(json.load(open("/opt/kui/config.json")).get("ip", ""))' 2>/dev/null || true)
+    if [ -z "$ACTUAL_IP" ] || [ "$ACTUAL_IP" != "$EXPECTED_IP" ]; then
+        echo "❌ VPS 身份校验失败：面板目标为 $EXPECTED_IP，本机 Agent 记录为 ${ACTUAL_IP:-未知}。"
+        echo "   请确认命令是在正确的 VPS 上执行。"
+        exit 1
+    fi
+else
+    echo "[*] 未发现 KUI Agent 配置，将继续清理住宅代理组件。"
 fi
 
 detect_init_system() {
@@ -63,7 +79,13 @@ for item in \
     etc/systemd/system/sing-box.service \
     etc/init.d/kui-agent \
     etc/init.d/sing-box \
-    etc/sysctl.d/99-kui-optimize.conf; do
+    etc/sysctl.d/99-kui-optimize.conf \
+    opt/proxy_lite \
+    etc/proxy-lite \
+    etc/systemd/system/proxy-lite.service \
+    etc/init.d/proxy-lite \
+    etc/conf.d/proxy-lite \
+    etc/sysctl.d/99-proxy-lite.conf; do
     [ ! -e "/$item" ] || BACKUP_ITEMS="$BACKUP_ITEMS $item"
 done
 
@@ -82,15 +104,22 @@ echo "[*] 停止并禁用 KUI Agent 与 KUI sing-box..."
 if [ "$INIT_SYS" = "systemd" ]; then
     systemctl disable --now kui-agent.service >/dev/null 2>&1 || true
     systemctl disable --now sing-box.service >/dev/null 2>&1 || true
+    if [ "$PURGE_ALL" -eq 1 ]; then systemctl disable --now proxy-lite.service >/dev/null 2>&1 || true; fi
 elif [ "$INIT_SYS" = "openrc" ]; then
     rc-service kui-agent stop >/dev/null 2>&1 || true
     rc-service sing-box stop >/dev/null 2>&1 || true
     rc-update del kui-agent default >/dev/null 2>&1 || true
     rc-update del sing-box default >/dev/null 2>&1 || true
+    if [ "$PURGE_ALL" -eq 1 ]; then rc-service proxy-lite stop >/dev/null 2>&1 || true; rc-update del proxy-lite default >/dev/null 2>&1 || true; fi
 fi
 
 pkill -f '/opt/kui/run-agent.sh' >/dev/null 2>&1 || true
 pkill -f '/opt/kui/agent.py' >/dev/null 2>&1 || true
+if [ "$PURGE_ALL" -eq 1 ]; then
+    pkill -f 'python3 -u /opt/proxy_lite/lite_manager.py' >/dev/null 2>&1 || true
+    pkill -f 'openvpn.*tun_main' >/dev/null 2>&1 || true
+    pkill -f 'openvpn.*tun_backup' >/dev/null 2>&1 || true
+fi
 pkill -x sing-box >/dev/null 2>&1 || true
 
 echo "[*] 删除 KUI Agent、sing-box 及其服务配置..."
@@ -112,16 +141,45 @@ rm -f /etc/sysctl.d/99-kui-optimize.conf
 rm -f /run/kui-agent.pid /run/sing-box.pid
 rm -f /var/log/kui-agent.log /var/log/sing-box.log
 
+if [ "$PURGE_ALL" -eq 1 ]; then
+    rm -rf /opt/proxy_lite /etc/proxy-lite
+    rm -f /etc/systemd/system/proxy-lite.service /etc/init.d/proxy-lite /etc/conf.d/proxy-lite
+    rm -f /etc/sysctl.d/99-proxy-lite.conf /var/log/proxy-lite.log
+    ip link del tun_main >/dev/null 2>&1 || true
+    ip link del tun_backup >/dev/null 2>&1 || true
+fi
+
 if [ "$INIT_SYS" = "systemd" ]; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl reset-failed kui-agent.service sing-box.service >/dev/null 2>&1 || true
+    systemctl reset-failed kui-agent.service sing-box.service proxy-lite.service >/dev/null 2>&1 || true
+fi
+
+if [ "$PURGE_ALL" -eq 1 ]; then
+    echo "[*] 本机组件清理完成，正在移除面板记录..."
+    PAYLOAD=$(printf '{"ip":"%s"}' "$EXPECTED_IP")
+    if curl -fsS --connect-timeout 10 --max-time 30 \
+        -X POST \
+        -H "Authorization: $TOKEN" \
+        -H "Content-Type: application/json" \
+        --data "$PAYLOAD" \
+        "$API_URL/api/vps_purge" >/dev/null; then
+        echo "✅ 面板记录已移除。"
+    else
+        echo "❌ VPS 本地组件已清理，但面板记录移除请求失败。"
+        echo "   请修复网络/DNS 后重新执行同一条命令，或在面板手动移除记录。"
+        exit 1
+    fi
 fi
 
 echo ""
 echo "✅ KUI Agent 卸载完成。"
-echo "   - 已移除：kui-agent、KUI sing-box、节点配置与证书"
-echo "   - 已保留：proxy-lite 住宅代理、OpenVPN 通道、面板中的 VPS/节点记录"
+if [ "$PURGE_ALL" -eq 1 ]; then
+    echo "   - 已移除：KUI Agent、KUI sing-box、proxy-lite、OpenVPN 通道与相关配置"
+else
+    echo "   - 已移除：kui-agent、KUI sing-box、节点配置与证书"
+    echo "   - 已保留：proxy-lite 住宅代理、OpenVPN 通道、面板中的 VPS/节点记录"
+fi
 if [ -n "$BACKUP_PATH" ]; then
     echo "   - 恢复备份：$BACKUP_PATH"
 fi
-echo "   如需彻底删除面板记录，请回到 KUI 面板手动移除该 VPS。"
+if [ "$PURGE_ALL" -ne 1 ]; then echo "   如需彻底删除面板记录，请回到 KUI 面板手动移除该 VPS。"; fi
