@@ -23,12 +23,19 @@
                               <div class="flex justify-between items-start mb-4">
                                   <div class="kui-server-heading min-w-0 flex-1 pr-2">
                                       <h3 class="font-black text-2xl text-slate-800 flex items-center gap-2 min-w-0">
-                                          <span class="truncate">{{ vps.name }}</span>
+                                          <span class="kui-server-name truncate">{{ vps.name }}</span>
                                           <span :class="vps.realtime_state === 'stale' ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]' : (isOnline(vps.last_report, vps.realtime_state) ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.8)]')" class="kui-server-status-dot w-3 h-3 rounded-full inline-block"></span>
                                           <span class="kui-server-ip text-xs font-mono text-slate-400 font-medium">{{ vps.ip }}</span>
                                       </h3>
                                   </div>
-                                  <button @click="copyPurgeCommand(vps)" class="kui-card-menu" title="卸载全部组件并移除面板记录" aria-label="卸载全部组件并移除面板记录">•••</button>
+                                  <details class="kui-server-menu">
+                                      <summary class="kui-card-menu" title="订阅导出" aria-label="打开订阅导出菜单">•••</summary>
+                                      <div class="kui-server-menu-panel">
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, ''), '单机节点普通订阅已复制！')">复制普通订阅</button>
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, 'clash'), '单机节点Clash订阅已复制！')">复制 Clash 订阅</button>
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copySurgeConfig(vps.ip)">复制 Surge 配置段</button>
+                                      </div>
+                                  </details>
                               </div>
                               <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-6">
                                   <div class="kui-server-metric bg-white/50 p-3 rounded-2xl border border-white shadow-sm flex flex-col justify-between"><div class="text-[9px] text-slate-400 font-bold tracking-wider mb-1">CPU</div><div class="font-black text-lg text-slate-700">{{ vps.cpu || 0 }}%</div><div class="w-full bg-slate-200/50 rounded-full h-1 mt-1 overflow-hidden"><div class="bg-indigo-400 h-1 rounded-full" :style="{ width: (vps.cpu || 0) + '%' }"></div></div></div>
@@ -177,11 +184,7 @@
                                   <button @click="copyCommand(generateCmd(vps.ip), '部署指令已复制！')" class="kui-copy-deploy-button">复制完整部署命令</button>
                                   <button @click="copyUninstallCommand(vps)" class="mt-3 w-full rounded-xl border border-rose-400/60 bg-rose-950/70 py-2 text-[11px] font-black text-rose-200 transition hover:bg-rose-900">⚠ 仅卸载 Agent（保留住宅代理）</button>
                               </div>
-                              <div class="grid grid-cols-3 gap-2">
-                                  <div class="min-w-0 bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-[1.25rem] cursor-pointer transition flex items-center justify-center text-white font-bold shadow-lg hover:scale-[1.02] active:scale-95 text-[11px] leading-tight text-center break-words" @click="copyCommand(generateSubLink(vps.ip, ''), '单机节点普通订阅已复制！')">复制该机普通订阅</div>
-                                  <div class="min-w-0 bg-gradient-to-br from-orange-500 to-red-500 p-2.5 rounded-[1.25rem] cursor-pointer transition flex items-center justify-center text-white font-bold shadow-lg hover:scale-[1.02] active:scale-95 text-[11px] leading-tight text-center break-words" @click="copyCommand(generateSubLink(vps.ip, 'clash'), '单机节点Clash订阅已复制！')">复制该机Clash订阅</div>
-                                  <div class="min-w-0 bg-gradient-to-br from-cyan-600 to-blue-600 p-2.5 rounded-[1.25rem] cursor-pointer transition flex items-center justify-center text-white font-bold shadow-lg hover:scale-[1.02] active:scale-95 text-[11px] leading-tight text-center break-words" @click="copySurgeConfig(vps.ip)">复制该机 Surge 配置段</div>
-                              </div>
+                              <button @click="copyPurgeCommand(vps)" class="kui-copy-purge-button" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
                           </div>
                       </div>
                   </div>

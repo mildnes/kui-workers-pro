@@ -68,4 +68,18 @@ test('server card header and deployment actions use the compact explicit layout'
     assert.doesNotMatch(serversPage, /UP:|LOAD:|vps\.uptime|vps\.load/);
     assert.match(serversPage, /<button @click="copyCommand\(generateCmd\(vps\.ip\)[\s\S]{0,180}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
     assert.match(appStyles, /\.kui-copy-deploy-button \{ display: flex; width: 100%;/);
+    assert.match(serversPage, /class="kui-server-name truncate">\{\{ vps\.name \}\}/);
+    assert.match(appStyles, /\.kui-server-name \{ font-size: 28px;/);
+});
+
+test('server subscription exports live in the overflow menu and purge copy is a bottom button', () => {
+    const menu = serversPage.slice(serversPage.indexOf('kui-server-menu'), serversPage.indexOf('kui-server-metric'));
+    const delivery = serversPage.slice(serversPage.indexOf('kui-server-delivery-section'));
+    assert.match(menu, /generateSubLink\(vps\.ip, ''\)/);
+    assert.match(menu, /generateSubLink\(vps\.ip, 'clash'\)/);
+    assert.match(menu, /copySurgeConfig\(vps\.ip\)/);
+    assert.doesNotMatch(delivery, /grid-cols-3/);
+    assert.match(delivery, /<button @click="copyPurgeCommand\(vps\)" class="kui-copy-purge-button"/);
+    assert.match(appStyles, /\.kui-server-menu-panel/);
+    assert.match(appStyles, /\.kui-copy-purge-button \{ width: 100%;/);
 });
