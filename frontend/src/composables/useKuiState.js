@@ -11,7 +11,8 @@ export function useKuiState() {
                   const loginUser = ref(''); const password = ref(''); const loginPending = ref(false);
                   localStorage.removeItem('kui_auth_key'); localStorage.removeItem('kui_user'); localStorage.removeItem('kui_role');
                   const currentUser = ref(sessionStorage.getItem('kui_user') || ''); const authKey = ref(sessionStorage.getItem('kui_auth_key') || ''); const role = ref(sessionStorage.getItem('kui_role') || '');
-                  const activeTab = ref(localStorage.getItem('monitor_preferred_tab') || 'probe'); 
+                  const preferredTab = localStorage.getItem('monitor_preferred_tab') || 'probe';
+                  const activeTab = ref(['services', 'realm'].includes(preferredTab) ? (role.value === 'admin' ? 'nodes' : 'dashboard') : preferredTab);
                   const currentDomain = window.location.origin;
 
                   const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);

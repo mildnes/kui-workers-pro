@@ -32,12 +32,11 @@ const primaryAdminItems = [
   { id: 'proxy', icon: '⌁', label: '住宅' },
 ];
 const moreItems = [
-  { id: 'realm', icon: '⇄', label: 'Realm' }, { id: 'services', icon: '◇', label: '服务' },
   { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'settings', icon: '⚙', label: '设置' },
-  { id: 'probe', icon: '◉', label: '探针' },
+  { id: 'probe', icon: '◉', label: '探针监控' },
 ];
 const userItems = [
-  { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针' },
+  { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针监控' },
 ];
 const moreIds = moreItems.map(item => item.id);
 

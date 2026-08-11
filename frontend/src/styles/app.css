@@ -17,6 +17,10 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-sidebar-nav button:hover { color: #334155; background: #f1f5f9; }
 .kui-sidebar-nav button.active { color: #4338ca; background: #eef2ff; }
 .kui-nav-icon { display: grid; width: 22px; place-items: center; color: currentColor; font-size: 16px; }
+.kui-sidebar-secondary { margin: 8px 0 12px; border-top: 1px solid var(--kui-color-border); padding: 12px 0 0; }
+.kui-sidebar-secondary button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 10px; border: 0; border-radius: 11px; padding: 0 12px; color: #64748b; background: transparent; font-size: 13px; font-weight: 650; text-align: left; transition: .15s ease; }
+.kui-sidebar-secondary button:hover { color: #334155; background: #f1f5f9; }
+.kui-sidebar-secondary button.active { color: #4338ca; background: #eef2ff; }
 .kui-sidebar-footer { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--kui-color-border); padding: 14px 6px 0; }
 .kui-user-avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: #4338ca; background: #eef2ff; font-size: 13px; font-weight: 800; }
 

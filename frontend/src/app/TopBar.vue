@@ -8,6 +8,7 @@
       <p class="kui-page-subtitle">{{ siteTitle || 'Cluster Gateway' }}</p>
     </div>
     <div class="kui-topbar-actions">
+      <button @click="openProbe" class="kui-button kui-button-ghost kui-desktop-only">◉ 探针监控</button>
       <a href="https://github.com/yuanlam/kui-workers-pro" target="_blank" rel="noreferrer" class="kui-button kui-button-ghost kui-desktop-only">GitHub</a>
       <details v-if="role === 'admin'" class="kui-action-menu">
         <summary class="kui-button kui-button-ghost">订阅与导出 <span>⌄</span></summary>
@@ -30,14 +31,15 @@ import { computed, inject } from 'vue';
 import { KUI_KEY } from './context.js';
 
 const titles = {
-  nodes: '服务器与节点', users: '用户与授权', proxy: '住宅 IP 代理', realm: 'Realm 中转',
-  services: '第三方服务', thirdparty: '第三方订阅', settings: '系统设置', dashboard: '我的主页',
+  nodes: '服务器与节点', users: '用户与授权', proxy: '住宅 IP 代理',
+  thirdparty: '第三方订阅', settings: '系统设置', dashboard: '我的主页',
 };
 
 export default {
   setup() {
     const state = inject(KUI_KEY);
-    return { ...state, pageTitle: computed(() => titles[state.activeTab.value] || '控制面板') };
+    const openProbe = () => { state.probeDetailId.value = null; state.activeTab.value = 'probe'; };
+    return { ...state, openProbe, pageTitle: computed(() => titles[state.activeTab.value] || '控制面板') };
   },
 };
 </script>

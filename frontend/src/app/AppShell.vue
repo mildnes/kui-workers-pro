@@ -9,8 +9,6 @@
         </div>
         <ServersPage />
         <UsersPage />
-        <RealmPage />
-        <ServicesPage />
         <ResidentialProxyPage />
         <UserDashboardPage />
         <ThirdPartyPage />
@@ -27,10 +25,8 @@ import DesktopNavigation from './DesktopNavigation.vue';
 import MobileNavigation from './MobileNavigation.vue';
 import TopBar from './TopBar.vue';
 import { KUI_KEY } from './context.js';
-import RealmPage from '../pages/RealmPage.vue';
 import ResidentialProxyPage from '../pages/ResidentialProxyPage.vue';
 import ServersPage from '../pages/ServersPage.vue';
-import ServicesPage from '../pages/ServicesPage.vue';
 import SettingsPage from '../pages/SettingsPage.vue';
 import ThirdPartyPage from '../pages/ThirdPartyPage.vue';
 import UserDashboardPage from '../pages/UserDashboardPage.vue';
@@ -41,10 +37,8 @@ export default {
     DesktopNavigation,
     MobileNavigation,
     TopBar,
-    RealmPage,
     ResidentialProxyPage,
     ServersPage,
-    ServicesPage,
     SettingsPage,
     ThirdPartyPage,
     UserDashboardPage,

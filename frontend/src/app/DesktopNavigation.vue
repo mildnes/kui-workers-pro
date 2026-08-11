@@ -21,6 +21,12 @@
       </template>
     </nav>
 
+    <div v-if="role === 'admin'" class="kui-sidebar-secondary">
+      <button @click="go('settings')" :class="{ active: activeTab === 'settings' }">
+        <span class="kui-nav-icon">⚙</span><span>系统设置</span>
+      </button>
+    </div>
+
     <div class="kui-sidebar-footer">
       <div class="kui-user-avatar">{{ (currentUser || 'U').slice(0, 1).toUpperCase() }}</div>
       <div class="min-w-0 flex-1"><strong class="block truncate text-sm">{{ currentUser }}</strong><span class="text-[11px] text-slate-400">{{ role === 'admin' ? '管理员' : '用户' }}</span></div>
@@ -35,18 +41,13 @@ import { KUI_KEY } from './context.js';
 
 const adminItems = [
   { id: 'nodes', icon: '▣', label: '服务器与节点' },
-  { id: 'users', icon: '◎', label: '用户与授权' },
   { id: 'proxy', icon: '⌁', label: '住宅 IP 代理' },
-  { id: 'realm', icon: '⇄', label: 'Realm 中转' },
-  { id: 'services', icon: '◇', label: '第三方服务' },
+  { id: 'users', icon: '◎', label: '用户与授权' },
   { id: 'thirdparty', icon: '↗', label: '第三方订阅' },
-  { id: 'settings', icon: '⚙', label: '系统设置' },
-  { id: 'probe', icon: '◉', label: '探针全景大盘' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '我的主页' },
   { id: 'settings', icon: '⚙', label: '账号设置' },
-  { id: 'probe', icon: '◉', label: '探针全景大盘' },
 ];
 
 export default {
