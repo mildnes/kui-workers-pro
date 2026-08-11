@@ -82,6 +82,16 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-servers-page .mb-6 { margin-bottom: .875rem; }
 .kui-servers-page .mb-5 { margin-bottom: .75rem; }
 .kui-servers-page .mt-4 { margin-top: .75rem; }
+.kui-server-card { border-color: #cbd5e1 !important; background: rgba(255,255,255,.82); box-shadow: 0 2px 8px rgba(15,23,42,.07) !important; }
+.kui-server-card > * + * { border-top-color: #d7dfeb !important; }
+.kui-server-metric, .kui-server-chart { border-color: #d7dfeb !important; background: rgba(248,250,252,.92) !important; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+.kui-quick-deploy-panel { border-color: #a5b4fc !important; box-shadow: inset 0 0 0 1px rgba(199,210,254,.4); }
+.kui-node-deploy-panel { border-color: #cbd5e1 !important; background: #fff !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.kui-egress-panel { border-color: #bae6fd !important; box-shadow: 0 1px 3px rgba(14,116,144,.07); }
+.kui-node-list-section { border-color: #d7dfeb !important; background: #f8fafc !important; }
+.kui-node-card { border-color: #d7dfeb !important; background: #fff !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.kui-server-delivery-section { border-color: #d7dfeb !important; background: #f1f5f9 !important; }
+.kui-deploy-panel { border: 1px solid #334155; box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
 .kui-server-tools { border-top: 1px solid #e2e8f0; background: rgba(248,250,252,.75); }
 .kui-server-tools > summary { min-height: 44px; }
 .kui-server-tools > div { padding-top: 14px; }

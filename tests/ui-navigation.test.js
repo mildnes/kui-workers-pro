@@ -52,3 +52,11 @@ test('servers page uses compact Chinese overview and a clearly bordered VPS form
     assert.match(appStyles, /\.kui-add-server-form input, \.kui-add-server-form select \{ border: 1px solid #cbd5e1/);
     assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
 });
+
+test('server cards expose clear visual boundaries between operational modules', () => {
+    for (const className of ['kui-server-card', 'kui-server-metric', 'kui-server-chart', 'kui-quick-deploy-panel', 'kui-node-deploy-panel', 'kui-egress-panel', 'kui-node-list-section', 'kui-node-card', 'kui-server-delivery-section', 'kui-deploy-panel']) {
+        assert.match(serversPage, new RegExp(className));
+        assert.match(appStyles, new RegExp(`\\.${className}`));
+    }
+    assert.match(appStyles, /\.kui-server-card > \* \+ \* \{ border-top-color: #d7dfeb/);
+});
