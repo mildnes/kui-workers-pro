@@ -325,7 +325,8 @@ def c2_heartbeat_loop():
                         "country": tun.country, 
                         "port": PROXY_PORT, 
                         "connected_time": int(uptime), 
-                        "node_ip": tun.egress_ip if tun.egress_ip else tun.entry_ip
+                        "node_ip": tun.egress_ip if tun.egress_ip else tun.entry_ip,
+                        "exit_ip": tun.egress_ip if tun.egress_ip else tun.entry_ip,
                     })
         
         status = {"ip": VPS_IP, "socks_ip": public_ip, "details": details, "logs": get_recent_logs()}

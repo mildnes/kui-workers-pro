@@ -1734,11 +1734,12 @@ rules:
                     const state = proxyStateByIp.get(server.ip);
                     let details = [];
                     try { details = JSON.parse(state?.details || '[]'); } catch {}
-                    const active = Array.isArray(details) ? details.find(item => item?.active && item?.exit_ip) : null;
+                    const active = Array.isArray(details) ? details.find(item => item?.active && Number(item.port || 0) >= 1 && Number(item.port || 0) <= 65535 && (item.exit_ip || item.node_ip)) : null;
+                    const activeExitIp = active?.exit_ip || active?.node_ip || '';
                     const localResidential = !env.PROXY_CTRL_URL;
                     const credentialsReady = !!(env.PROXY_USER && env.PROXY_PASS);
                     server.residential_ready = !!(localResidential && credentialsReady && state && Number(state.last_seen || 0) >= cutoff && active);
-                    server.residential_active_exit_ip = active?.exit_ip || '';
+                    server.residential_active_exit_ip = activeExitIp;
                     server.residential_last_seen = Number(state?.last_seen || 0);
                     if (!localResidential) server.residential_reason = '外部住宅控制器模式不支持本机住宅出口';
                     else if (!credentialsReady) server.residential_reason = 'Worker 未配置住宅代理凭据';

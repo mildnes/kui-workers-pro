@@ -34,5 +34,7 @@ test('full purge removes all components and reports panel cleanup', () => {
     assert.match(script, /KUI Agent、KUI sing-box、proxy-lite、OpenVPN/);
     assert.match(api, /action === "vps_purge" && method === "POST"/);
     assert.match(api, /deleteVpsRecords\(db, ip\)/);
-    assert.ok(api.indexOf('action === "vps_purge" && method === "POST"') < api.indexOf('const currentUser = await verifyAuth'), 'purge route must precede admin session auth');
+    const purgeIndex = api.indexOf('action === "vps_purge" && method === "POST"');
+    const authIndex = api.indexOf('const currentUser = await verifyAuth', purgeIndex);
+    assert.ok(purgeIndex >= 0 && authIndex > purgeIndex, 'purge route must precede admin session auth');
 });
