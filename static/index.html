@@ -379,7 +379,7 @@
                     <button v-if="role === 'admin'" @click="copyCommand(generateSubLink('', 'clash'), '全量Clash订阅已复制！')" class="bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:scale-105 active:scale-95 transition-all">🔗 Clash订阅</button>
                     <button v-if="role === 'admin'" @click="copySurgeConfig('')" class="bg-gradient-to-r from-cyan-600 to-blue-600 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:scale-105 active:scale-95 transition-all">📋 Surge 配置段</button>
                     <button v-if="role === 'admin'" @click="showQrCode(generateSubLink('', ''))" class="bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md hover:scale-105 active:scale-95 transition-all">📱 二维码</button>
-                    <button @click="refreshData" class="bg-white/50 hover:bg-white/80 border border-slate-200 px-4 py-2 rounded-full text-xs font-medium transition-all shadow-sm">🔄 刷新</button>
+                    <button @click="refreshPanel" :disabled="refreshing" :class="refreshing ? 'opacity-60 cursor-wait' : 'hover:bg-white/80'" class="bg-white/50 border border-slate-200 px-4 py-2 rounded-full text-xs font-medium transition-all shadow-sm">{{ refreshing ? '⏳ 刷新中…' : '🔄 刷新' }}</button>
                     <button @click="logout" class="text-rose-500 hover:bg-rose-50 px-4 py-2 rounded-full text-xs font-bold transition-all border border-transparent hover:border-rose-200">退出</button>
                 </div>
             </div>
@@ -1093,6 +1093,7 @@
                 const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);
                 const realtimeUrl = ref('');
                 const realtimeConnected = ref(false);
+                const refreshing = ref(false);
                 let realtimeSocket = null; let realtimeReconnectTimer = null; let realtimeFallbackTimer = null; let realtimeConnectTimer = null; let realtimePingTimer = null; let realtimeGeneration = 0; let realtimeDisconnectedAt = 0; let lastRealtimePing = 0; let realtimeRetryDelay = 5000;
                 let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeConnectTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
                 const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
@@ -1496,6 +1497,29 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     if (activeTab.value === 'settings' && role.value === 'admin') loadAdminProbeServers();
                     } catch(e) {} finally { isFetchingKUI = false; }
                 };
+                const refreshPanel = async () => {
+                    if (refreshing.value) return;
+                    refreshing.value = true;
+                    try {
+                        await refreshData();
+                        await fetchProbeData();
+                        if (activeTab.value === 'proxy') {
+                            // Realtime mode stops the proxy polling timer, so a
+                            // manual refresh must explicitly reload this page's
+                            // HTTP snapshots and form values.
+                            await Promise.all([
+                                window.pcFetchCountries?.(),
+                                window.pcLoadConfig?.(),
+                                window.pcFetchNodes?.(),
+                            ]);
+                        }
+                    } catch (error) {
+                        console.error('[panel] refresh failed', error);
+                        alert(`刷新失败：${error.message || error}`);
+                    } finally {
+                        refreshing.value = false;
+                    }
+                };
 
                 const renderKUICharts = async () => {
                     await nextTick();
@@ -1880,7 +1904,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 });
 
                 return { 
-                    isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, 
+                    isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, refreshing, refreshPanel,
                     servers, nodes, users, groups, securityWarnings, newVps, newNodeParams, newUser, newGroupName,
                     login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,

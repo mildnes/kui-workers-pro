@@ -1025,7 +1025,9 @@ async function proxyLocal(method, subPath, req, env, body = null) {
 
     if (subPath === 'countries' && method === 'GET') {
         try {
-            const res = await fetch('https://www.vpngate.net/api/iphone/');
+            // Country discovery is supplemental; VPN Gate must not block the
+            // proxy page when its public API is unavailable.
+            const res = await fetch('https://www.vpngate.net/api/iphone/', { signal: AbortSignal.timeout(8000) });
             const text = await res.text();
             const lines = text.split('\n');
             const countries = new Set();
