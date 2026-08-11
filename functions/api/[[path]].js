@@ -57,6 +57,7 @@ async function readJsonBody(request, maxBytes) {
 }
 
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
+function safeProxyAddress(value) { const address = String(value || '').trim(); return validIp(address) ? address : ''; }
 
 // Proxy listeners may be exposed to a private Docker bridge, but never accept
 // arbitrary hostnames here (a hostname could resolve outside the VPS later).
@@ -118,7 +119,7 @@ function validateProxyReport(data) {
         if (!item || typeof item !== 'object') throw new Error('Invalid proxy detail');
         const port = Number(item.port || 0);
         if (port && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('Invalid proxy port');
-        return { tunnel: String(item.tunnel || '').slice(0, 32), active: item.active === true, country: String(item.country || '').toUpperCase().slice(0, 2), port, node_ip: String(item.node_ip || '').slice(0, 64), exit_ip: String(item.exit_ip || '').slice(0, 64), ready: item.ready === true, connected_time: Math.max(0, Math.min(Number(item.connected_time) || 0, 31536000)) };
+        return { tunnel: String(item.tunnel || '').slice(0, 32), active: item.active === true, country: String(item.country || '').toUpperCase().slice(0, 2), port, node_ip: safeProxyAddress(item.node_ip), exit_ip: safeProxyAddress(item.exit_ip), ready: item.ready === true, connected_time: Math.max(0, Math.min(Number(item.connected_time) || 0, 31536000)) };
     });
     return { ip: data.ip, details: normalized, logs: data.logs?.slice(0, 16 * 1024) || '' };
 }
@@ -145,6 +146,7 @@ async function notifyRealtimePublicPolicy(env, db, enabled, pagesOrigin = '') {
         method: 'POST',
         headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
         body: JSON.stringify({ public: enabled }),
+        signal: AbortSignal.timeout(10000),
     });
 }
 
@@ -165,6 +167,7 @@ async function notifyRealtimeFrequencyPolicy(env, db, settings, pagesOrigin = ''
         method: 'POST',
         headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
         body: JSON.stringify(policy),
+        signal: AbortSignal.timeout(10000),
     });
 }
 
@@ -172,7 +175,7 @@ async function notifyRealtimeVps(env, db, ip, pagesOrigin = '') {
     const authorization = await realtimeAdminHeader(env);
     const configured = env.REALTIME_URL || (await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first())?.val;
     if (!authorization || !configured || !/^https:\/\//i.test(configured)) return;
-    await fetch(`${configured.replace(/\/$/, '')}/notify`, { method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin }, body: JSON.stringify({ ip }) });
+    await fetch(`${configured.replace(/\/$/, '')}/notify`, { method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin }, body: JSON.stringify({ ip }), signal: AbortSignal.timeout(10000) });
 }
 
 async function chunkBatch(db, statements, size = 100) {
@@ -529,7 +532,7 @@ async function parseThirdPartySubscription(content) {
 let schemaReadyPromise = null;
 let lastReceiptCleanup = 0;
 
-function loginThrottleKey(request) { return `${request.headers.get('CF-Connecting-IP') || 'unknown'}:${String(request.headers.get('Authorization') || '').split('.')[0].slice(0, 128)}`; }
+function loginThrottleKey(request) { return request.headers.get('CF-Connecting-IP') || 'unknown'; }
 
 async function loginAllowed(db, request) {
     const row = await db.prepare('SELECT failures, window_started_at, blocked_until FROM login_throttles WHERE key = ?').bind(loginThrottleKey(request)).first();
@@ -566,14 +569,16 @@ async function initializeDbSchema(db) {
         `CREATE INDEX IF NOT EXISTS idx_group_members_user ON user_group_members(username)`,
         `CREATE INDEX IF NOT EXISTS idx_group_resources_resource ON user_group_resources(resource_type, resource_id)`
     ];
-    for (let query of initQueries) { try { await db.prepare(query).run(); } catch (e) {} }
-    try {
-        const deployment = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
-        if (!deployment?.val) await db.prepare("INSERT OR IGNORE INTO sys_config (key, val, ts) VALUES ('deployment_id', ?, ?)").bind(crypto.randomUUID(), Date.now()).run();
-    } catch (e) {}
-    try { await db.prepare("ALTER TABLE nodes ADD COLUMN network TEXT DEFAULT 'tcp'").run(); } catch (e) {}
-    try { await db.prepare("UPDATE nodes SET network = 'http' WHERE protocol = 'H2-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run(); } catch (e) {}
-    try { await db.prepare("UPDATE nodes SET network = 'grpc' WHERE protocol = 'gRPC-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run(); } catch (e) {}
+    for (const query of initQueries) await db.prepare(query).run();
+    const ensureColumn = async (table, name, definition) => {
+        const { results = [] } = await db.prepare(`PRAGMA table_info(${table})`).all();
+        if (!results.some(column => column.name === name)) await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`).run();
+    };
+    const deployment = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
+    if (!deployment?.val) await db.prepare("INSERT OR IGNORE INTO sys_config (key, val, ts) VALUES ('deployment_id', ?, ?)").bind(crypto.randomUUID(), Date.now()).run();
+    await ensureColumn('nodes', 'network', "TEXT DEFAULT 'tcp'");
+    await db.prepare("UPDATE nodes SET network = 'http' WHERE protocol = 'H2-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run();
+    await db.prepare("UPDATE nodes SET network = 'grpc' WHERE protocol = 'gRPC-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run();
 
     const probeQueries = [
         `CREATE TABLE IF NOT EXISTS probe_settings (key TEXT PRIMARY KEY, value TEXT)`,
@@ -590,40 +595,23 @@ async function initializeDbSchema(db) {
         )`,
         `CREATE TABLE IF NOT EXISTS proxy_servers (ip TEXT PRIMARY KEY, socks_ip TEXT, port INTEGER, user TEXT, pass TEXT, country TEXT DEFAULT '', enabled INTEGER DEFAULT 1, last_seen INTEGER)`
     ];
-    for (let query of probeQueries) { try { await db.prepare(query).run(); } catch (e) {} }
+    for (const query of probeQueries) await db.prepare(query).run();
 
-    try { await db.prepare("SELECT username FROM nodes LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE nodes ADD COLUMN username TEXT DEFAULT 'admin'").run(); } catch(e){} }
-    try { await db.prepare("SELECT disk FROM servers LIMIT 1").first(); } catch (e) { const newCols = ['disk INTEGER DEFAULT 0', 'load TEXT DEFAULT ""', 'uptime TEXT DEFAULT ""', 'net_in_speed INTEGER DEFAULT 0', 'net_out_speed INTEGER DEFAULT 0', 'tcp_conn INTEGER DEFAULT 0', 'udp_conn INTEGER DEFAULT 0']; for (let col of newCols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
-    try { await db.prepare("SELECT sub_token FROM users LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE users ADD COLUMN sub_token TEXT").run(); } catch(err){} }
-    try {
-        const { results: usersWithoutToken } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = '' LIMIT 100").all();
-        if (usersWithoutToken && usersWithoutToken.length) await db.batch(usersWithoutToken.map(user => db.prepare("UPDATE users SET sub_token = ? WHERE username = ? AND (sub_token IS NULL OR sub_token = '')").bind(crypto.randomUUID(), user.username)));
-    } catch (error) {}
-    try { await db.prepare("SELECT reset_day FROM probe_servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE probe_servers ADD COLUMN reset_day TEXT DEFAULT '1'").run(); } catch(e){} }
-    try { await db.prepare("SELECT socks5_enable FROM servers LIMIT 1").first(); } catch (e) { const s5Cols = ['socks5_enable INTEGER DEFAULT 0', 'socks5_addr TEXT DEFAULT ""', 'socks5_port INTEGER DEFAULT 0', 'socks5_user TEXT DEFAULT ""', 'socks5_pass TEXT DEFAULT ""']; for (let col of s5Cols) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${col}`).run(); } catch(err){} } }
-    try { await db.prepare("SELECT socks5_mode FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN socks5_mode TEXT DEFAULT 'global'").run(); } catch(err){} try { await db.prepare("ALTER TABLE servers ADD COLUMN socks5_domains TEXT DEFAULT ''").run(); } catch(err){} }
-    try { await db.prepare("SELECT agent_token FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN agent_token TEXT").run(); } catch(err){} }
-    const ensureWarpColumn = async (name, definition) => { try { await db.prepare(`SELECT ${name} FROM servers LIMIT 1`).first(); } catch (error) { try { await db.prepare(`ALTER TABLE servers ADD COLUMN ${name} ${definition}`).run(); } catch (alterError) { if (!/duplicate column/i.test(String(alterError?.message || alterError))) throw alterError; } } };
-    await ensureWarpColumn('warp_mode', "TEXT NOT NULL DEFAULT 'off'");
-    await ensureWarpColumn('warp_applied_mode', "TEXT NOT NULL DEFAULT 'off'");
-    await ensureWarpColumn('warp_revision', 'INTEGER NOT NULL DEFAULT 0');
-    await ensureWarpColumn('warp_applied_revision', 'INTEGER NOT NULL DEFAULT 0');
-    await ensureWarpColumn('warp_status', "TEXT NOT NULL DEFAULT 'off'");
-    await ensureWarpColumn('warp_error', "TEXT NOT NULL DEFAULT ''");
-    await ensureWarpColumn('warp_applied_at', 'INTEGER NOT NULL DEFAULT 0');
-    await ensureWarpColumn('egress_pending', "TEXT NOT NULL DEFAULT ''");
-    await ensureWarpColumn('egress_mode', "TEXT NOT NULL DEFAULT 'native'");
-    await ensureWarpColumn('egress_applied_mode', "TEXT NOT NULL DEFAULT 'native'");
-    await ensureWarpColumn('egress_revision', 'INTEGER NOT NULL DEFAULT 0');
-    await ensureWarpColumn('egress_applied_revision', 'INTEGER NOT NULL DEFAULT 0');
-    await ensureWarpColumn('egress_status', "TEXT NOT NULL DEFAULT 'applied'");
-    await ensureWarpColumn('egress_error', "TEXT NOT NULL DEFAULT ''");
-    await ensureWarpColumn('egress_applied_at', 'INTEGER NOT NULL DEFAULT 0');
-    try { await db.prepare("SELECT proxy_mode FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN proxy_mode TEXT DEFAULT 'global'").run(); } catch(err){} }
-    try { await db.prepare("SELECT proxy_categories FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN proxy_categories TEXT DEFAULT ''").run(); } catch(err){} }
-    try { await db.prepare("SELECT egress_ip FROM servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE servers ADD COLUMN egress_ip TEXT DEFAULT ''").run(); } catch(err){} }
-    try { await db.prepare("SELECT last_report_id FROM probe_servers LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE probe_servers ADD COLUMN last_report_id TEXT DEFAULT ''").run(); } catch(err){} }
-    try { await db.prepare("SELECT applied FROM report_receipts LIMIT 1").first(); } catch (e) { try { await db.prepare("ALTER TABLE report_receipts ADD COLUMN applied INTEGER DEFAULT 1").run(); } catch(err){} }
+    const columns = [
+        ['nodes', 'username', "TEXT DEFAULT 'admin'"],
+        ['servers', 'disk', 'INTEGER DEFAULT 0'], ['servers', 'load', 'TEXT DEFAULT ""'], ['servers', 'uptime', 'TEXT DEFAULT ""'],
+        ['servers', 'net_in_speed', 'INTEGER DEFAULT 0'], ['servers', 'net_out_speed', 'INTEGER DEFAULT 0'], ['servers', 'tcp_conn', 'INTEGER DEFAULT 0'], ['servers', 'udp_conn', 'INTEGER DEFAULT 0'],
+        ['users', 'sub_token', 'TEXT'], ['probe_servers', 'reset_day', "TEXT DEFAULT '1'"],
+        ['servers', 'socks5_enable', 'INTEGER DEFAULT 0'], ['servers', 'socks5_addr', 'TEXT DEFAULT ""'], ['servers', 'socks5_port', 'INTEGER DEFAULT 0'], ['servers', 'socks5_user', 'TEXT DEFAULT ""'], ['servers', 'socks5_pass', 'TEXT DEFAULT ""'],
+        ['servers', 'socks5_mode', "TEXT DEFAULT 'global'"], ['servers', 'socks5_domains', "TEXT DEFAULT ''"], ['servers', 'agent_token', 'TEXT'],
+        ['servers', 'warp_mode', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_applied_mode', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'warp_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'warp_status', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'warp_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
+        ['servers', 'egress_pending', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_applied_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_status', "TEXT NOT NULL DEFAULT 'applied'"], ['servers', 'egress_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
+        ['servers', 'proxy_mode', "TEXT DEFAULT 'global'"], ['servers', 'proxy_categories', "TEXT DEFAULT ''"], ['servers', 'egress_ip', "TEXT DEFAULT ''"],
+        ['probe_servers', 'last_report_id', "TEXT DEFAULT ''"], ['report_receipts', 'applied', 'INTEGER DEFAULT 1'],
+    ];
+    for (const [table, name, definition] of columns) await ensureColumn(table, name, definition);
+    const { results: usersWithoutToken = [] } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = ''").all();
+    await chunkBatch(db, usersWithoutToken.map(user => db.prepare("UPDATE users SET sub_token = ? WHERE username = ? AND (sub_token IS NULL OR sub_token = '')").bind(crypto.randomUUID(), user.username)));
 
     // 初始化云端测速数据
     const checkNodes = await db.prepare("SELECT value FROM probe_settings WHERE key = 'cached_nodes_data'").first();
@@ -643,7 +631,7 @@ async function initializeDbSchema(db) {
         `CREATE TABLE IF NOT EXISTS third_party_subscriptions (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, is_enable INTEGER DEFAULT 1, added_at INTEGER, last_fetched_at INTEGER)`,
         `CREATE TABLE IF NOT EXISTS third_party_nodes (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, name TEXT, protocol TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, uuid TEXT, password TEXT, sni TEXT, public_key TEXT, short_id TEXT, flow TEXT, network TEXT, host TEXT, path TEXT, extra TEXT, enable INTEGER DEFAULT 1, created_at INTEGER, FOREIGN KEY(subscription_id) REFERENCES third_party_subscriptions(id) ON DELETE CASCADE)`
     ];
-    for (let query of tpsQueries) { try { await db.prepare(query).run(); } catch (e) {} }
+    for (const query of tpsQueries) await db.prepare(query).run();
 }
 
 async function ensureDbSchema(db) {
@@ -712,6 +700,10 @@ async function verifyAgent(authHeader, ip, db, env) {
     return false;
 }
 
+async function invalidatePublicProbeCache(origin) {
+    await Promise.all(['0', '1'].map(isAjax => caches.default.delete(new Request(`${origin}/api/probe/public?ajax=${isAjax}`))));
+}
+
 // ==============================================
 // 探针纯净 API 子系统处理
 // ==============================================
@@ -731,8 +723,8 @@ async function handleProbeAPI(request, env, context, pathArray) {
             let tgBotToken = ''; let tgChatId = '';
             try { const { results } = await db.prepare("SELECT key, value FROM probe_settings WHERE key IN ('tg_bot_token', 'tg_chat_id')").all(); results.forEach(r => { if(r.key === 'tg_bot_token') tgBotToken = r.value; if(r.key === 'tg_chat_id') tgChatId = r.value; }); } catch(e){}
             
-            const tgSend = async (chatId, text, kb=null) => { const p = { chat_id: chatId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)}); };
-            const tgEdit = async (chatId, msgId, text, kb=null) => { const p = { chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/editMessageText`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p)}); };
+            const tgSend = async (chatId, text, kb=null) => { const p = { chat_id: chatId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p), signal: AbortSignal.timeout(10000)}); };
+            const tgEdit = async (chatId, msgId, text, kb=null) => { const p = { chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML' }; if (kb) p.reply_markup = kb; await fetch(`https://api.telegram.org/bot${tgBotToken}/editMessageText`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(p), signal: AbortSignal.timeout(10000)}); };
 
             let chatId, text, msgId;
             if (message) { chatId = message.chat.id.toString(); text = message.text || ''; msgId = message.message_id; } 
@@ -768,6 +760,7 @@ async function handleProbeAPI(request, env, context, pathArray) {
                     let cur = 'true'; try { const r = await db.prepare('SELECT value FROM probe_settings WHERE key=?').bind(key).first(); if(r) cur = r.value; } catch(e){}
                     const next = cur === 'true' ? 'false' : 'true';
                     await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, next).run();
+                    context.waitUntil(invalidatePublicProbeCache(url.origin).catch(() => {}));
                     if (key === 'is_public') await notifyRealtimePublicPolicy(env, db, next === 'true', url.origin).catch(() => {});
                     await tgSend(chatId, `✅ 属性 ${key} 已成功切换！`);
                 }
@@ -785,13 +778,15 @@ async function handleProbeAPI(request, env, context, pathArray) {
     if (method === 'GET' && subPath === 'public') {
         const isAjax = url.searchParams.get('ajax') === '1';
         const cacheKey = new Request(`${url.origin}/api/probe/public?ajax=${isAjax ? '1' : '0'}`);
-        const cached = await caches.default.match(cacheKey);
-        if (cached) return cached;
+        const publicSetting = await db.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
+        const isPublic = !publicSetting || publicSetting.value === 'true';
+        if (!isPublic && !(await verifyAuth(request.headers.get("Authorization"), request, db, env, context))) return Response.json({ error: "Private Dashboard" }, { status: 401 });
+        if (isPublic) {
+            const cached = await caches.default.match(cacheKey);
+            if (cached) return cached;
+        }
         const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
-        const authHeader = request.headers.get("Authorization");
-        const isLoggedIn = await verifyAuth(authHeader, request, db, env, context);
-        if (settings.is_public !== 'true' && !isLoggedIn) return Response.json({ error: "Private Dashboard" }, { status: 401 });
         const servers = (await db.prepare('SELECT p.id, p.name, p.cpu, p.ram, p.disk, p.load_avg, p.uptime, p.last_updated, p.net_in_speed, p.net_out_speed, p.os, p.arch, p.virt, p.tcp_conn, p.udp_conn, p.country, p.ip_v4, p.ip_v6, p.server_group, p.price, p.expire_date, p.bandwidth, p.traffic_limit, p.ping_ct, p.ping_cu, p.ping_cm, p.ping_bd, p.monthly_rx, p.monthly_tx, p.net_rx, p.net_tx, p.cpu_info, p.ram_used, p.ram_total, p.disk_used, p.disk_total FROM probe_servers p INNER JOIN servers s ON s.ip = p.id WHERE p.is_hidden != "true"').all()).results;
         const publicKeys = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'visits_total', 'visits_today', 'visits_date']);
         for (const key of Object.keys(settings)) if (!publicKeys.has(key)) delete settings[key];
@@ -845,13 +840,15 @@ async function handleProbeAPI(request, env, context, pathArray) {
             if (!realtimeFrequencyPolicy(frequencySettings)) return Response.json({ error: 'Invalid realtime frequency policy' }, { status: 400 });
         }
         for (const [k, v] of Object.entries(settings)) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, v).run(); }
+        context.waitUntil(invalidatePublicProbeCache(url.origin).catch(() => {}));
         if (Object.prototype.hasOwnProperty.call(settings, 'is_public')) await notifyRealtimePublicPolicy(env, db, settings.is_public === 'true', url.origin).catch(() => {});
         if (frequencyKeys.some(key => Object.prototype.hasOwnProperty.call(settings, key))) await notifyRealtimeFrequencyPolicy(env, db, frequencySettings, url.origin).catch(() => {});
         if (settings.tg_bot_token) {
             try {
                await fetch(`https://api.telegram.org/bot${settings.tg_bot_token}/setWebhook`, {
                   method: 'POST', headers: {'Content-Type': 'application/json'},
-                   body: JSON.stringify({ url: `${url.origin}/api/probe/tg_webhook`, ...(env.TG_WEBHOOK_SECRET ? { secret_token: env.TG_WEBHOOK_SECRET } : {}) })
+                  body: JSON.stringify({ url: `${url.origin}/api/probe/tg_webhook`, ...(env.TG_WEBHOOK_SECRET ? { secret_token: env.TG_WEBHOOK_SECRET } : {}) }),
+                  signal: AbortSignal.timeout(10000)
                });
             } catch(e) {}
         }
@@ -1056,7 +1053,8 @@ async function proxyLocal(method, subPath, req, env, body = null) {
         if (!/^[0-9a-fA-F:.]+$/.test(targetIp)) return new Response(JSON.stringify({ error: 'Invalid IP' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         try {
             const resp = await fetch(`https://testisp.info/api/check?ip=${encodeURIComponent(targetIp)}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+                headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
+                signal: AbortSignal.timeout(10000)
             });
             const text = await resp.text();
             return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
@@ -1082,7 +1080,7 @@ async function checkOfflineServers(env) {
         let delivered = !tgBotToken || !tgChatId;
         if (tgBotToken && tgChatId) {
             const text = `⚠️ [KUI 节点失联告警]\n\n节点别名: ${vps.name}\n公网IP: ${vps.ip}\n最后在线: ${new Date(vps.last_report).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`;
-            try { const response = await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChatId, text }) }); const result = await response.json().catch(()=>({ok:false})); delivered = response.ok && result.ok === true; }
+            try { const response = await fetch(`https://api.telegram.org/bot${tgBotToken}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChatId, text }), signal: AbortSignal.timeout(10000) }); const result = await response.json().catch(()=>({ok:false})); delivered = response.ok && result.ok === true; }
             catch (error) { console.error(`[cron] Telegram alert failed for ${vps.ip}:`, error); }
         }
         if (delivered) updates.push(db.prepare("UPDATE servers SET alert_sent = 1 WHERE ip = ?").bind(vps.ip));
@@ -1709,6 +1707,7 @@ rules:
 
     if (action === "login" && method === "POST") {
         await ensureDbSchema(db);
+        if (!env.ADMIN_PASSWORD) return Response.json({ error: "ADMIN_PASSWORD is not configured" }, { status: 503 });
         if (!(await loginAllowed(db, request))) return Response.json({ error: "Too many attempts" }, { status: 429, headers: { 'Retry-After': '900' } });
         let credentials;
         try { credentials = await readJsonBody(request, 8 * 1024); } catch { credentials = {}; }
@@ -1719,6 +1718,14 @@ rules:
         if (valid) { const token = await sessionToken(); await db.prepare('INSERT INTO auth_sessions (token_hash, username, expires_at) VALUES (?, ?, ?)').bind(await sha256(token), username, Date.now() + 12 * 60 * 60 * 1000).run(); context.waitUntil(db.prepare('DELETE FROM auth_sessions WHERE expires_at < ?').bind(Date.now()).run().catch(() => {})); await db.prepare('DELETE FROM login_throttles WHERE key = ?').bind(loginThrottleKey(request)).run(); return Response.json({ success: true, token, role: username === (env.ADMIN_USERNAME || "admin") ? 'admin' : 'user' }); }
         await recordLoginFailure(db, request);
         return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (action === "logout" && method === "POST") {
+        await ensureDbSchema(db);
+        const header = request.headers.get('Authorization') || '';
+        const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+        if (/^[A-Za-z0-9_-]{32,128}$/.test(token)) await db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').bind(await sha256(token)).run();
+        return Response.json({ success: true }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     if (action === "realtime_auth" && method === "POST") {
@@ -1780,7 +1787,8 @@ rules:
                 }
             }
             const nodes = isAdmin ? (await db.prepare("SELECT * FROM nodes").all()).results : (await db.prepare("SELECT DISTINCT n.* FROM nodes n WHERE n.username = ? OR EXISTS (SELECT 1 FROM user_group_members gm JOIN user_group_resources gr ON gr.group_id = gm.group_id WHERE gm.username = ? AND ((gr.resource_type = 'node' AND gr.resource_id = n.id) OR (gr.resource_type = 'vps' AND gr.resource_id = n.vps_ip)))").bind(currentUser, currentUser).all()).results;
-            const users = isAdmin ? (await db.prepare("SELECT * FROM users").all()).results : (await db.prepare("SELECT * FROM users WHERE username = ?").bind(currentUser).all()).results;
+            const userFields = 'username, traffic_limit, traffic_used, expire_time, enable';
+            const users = isAdmin ? (await db.prepare(`SELECT ${userFields} FROM users`).all()).results : (await db.prepare(`SELECT ${userFields} FROM users WHERE username = ?`).bind(currentUser).all()).results;
             const groups = isAdmin ? (await db.prepare("SELECT g.*, COALESCE((SELECT json_group_array(username) FROM user_group_members WHERE group_id = g.id), '[]') AS members, COALESCE((SELECT json_group_array(json_object('type', resource_type, 'id', resource_id)) FROM user_group_resources WHERE group_id = g.id), '[]') AS resources FROM user_groups g ORDER BY g.name").all()).results : [];
             let siteTitle = "Cluster Gateway"; try { const r = await db.prepare("SELECT val FROM sys_config WHERE key='site_title'").first(); if(r && r.val) siteTitle = r.val; } catch(e){}
             let mySubToken = "";
@@ -1794,8 +1802,8 @@ rules:
             else { const u = await db.prepare("SELECT sub_token FROM users WHERE username = ?").bind(currentUser).first(); if(u && u.sub_token) mySubToken = u.sub_token; }
             const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
             const securityWarnings = isAdmin ? [
-                env.ADMIN_PASSWORD === 'admin' ? '管理员仍在使用默认密码，请立即在 Cloudflare 中轮换 ADMIN_PASSWORD。' : '',
-                env.PROXY_USER === 'kui' && env.PROXY_PASS === 'kui' ? '住宅代理仍在使用默认凭据，请立即轮换 PROXY_USER / PROXY_PASS。' : '',
+                !env.ADMIN_PASSWORD ? '尚未配置 ADMIN_PASSWORD Secret。' : (env.ADMIN_PASSWORD === 'admin' ? '管理员仍在使用默认密码，请立即在 Cloudflare 中轮换 ADMIN_PASSWORD。' : ''),
+                !env.PROXY_USER || !env.PROXY_PASS ? '尚未完整配置住宅代理 PROXY_USER / PROXY_PASS Secret。' : (env.PROXY_USER === 'kui' && env.PROXY_PASS === 'kui' ? '住宅代理仍在使用默认凭据，请立即轮换 PROXY_USER / PROXY_PASS。' : ''),
                 env.PROXY_PUBLIC_LISTENER === 'true' ? '住宅 SOCKS 服务已开放公网监听，请确认防火墙和代理凭据足够安全。' : '',
             ].filter(Boolean) : [];
             return Response.json({ servers, nodes, users, groups, siteTitle, mySubToken, securityWarnings, realtimeUrl: env.REALTIME_URL || realtime && realtime.val || '' });
@@ -1814,7 +1822,7 @@ rules:
             await db.batch(statements);
             return Response.json({ success: true });
         }
-        if (action === "user" && params.path[1] === "password" && method === "PUT") { const { password } = await readJsonBody(request, 8 * 1024); if (isAdmin) return Response.json({error: "管理员密码受绝对安全保护，仅可通过 Cloudflare Pages 环境变量修改！"}, {status: 400}); if (String(password || '').length < 12) return Response.json({ error: 'Password must be at least 12 characters' }, { status: 400 }); await db.prepare("UPDATE users SET password = ? WHERE username = ?").bind(await passwordHash(password), currentUser).run(); return Response.json({ success: true }); }
+        if (action === "user" && params.path[1] === "password" && method === "PUT") { const { password } = await readJsonBody(request, 8 * 1024); if (isAdmin) return Response.json({error: "管理员密码受绝对安全保护，仅可通过 Cloudflare Pages 环境变量修改！"}, {status: 400}); if (String(password || '').length < 12) return Response.json({ error: 'Password must be at least 12 characters' }, { status: 400 }); await db.batch([db.prepare("UPDATE users SET password = ? WHERE username = ?").bind(await passwordHash(password), currentUser), db.prepare("DELETE FROM auth_sessions WHERE username = ?").bind(currentUser)]); return Response.json({ success: true }); }
         if (action === "user" && params.path[1] === "sub_token" && method === "PUT") { const newToken = crypto.randomUUID(); if (isAdmin) await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('admin_sub_token', ?, ?)").bind(newToken, Date.now()).run(); else await db.prepare("UPDATE users SET sub_token = ? WHERE username = ?").bind(newToken, currentUser).run(); return Response.json({ success: true, token: newToken }); }
         if (action === "stats" && method === "GET" && isAdmin) { const query = `SELECT strftime('%m-%d', datetime(timestamp / 1000, 'unixepoch', 'localtime')) as day, SUM(delta_bytes) as total_bytes FROM traffic_stats WHERE ip = ? AND timestamp > ? GROUP BY day ORDER BY day ASC`; const { results } = await db.prepare(query).bind(new URL(request.url).searchParams.get("ip"), Date.now() - 604800000).all(); return Response.json(results || []); }
         
@@ -1944,4 +1952,5 @@ export const __test = {
     buildSurgeProxyLine,
     validateSs2022Credentials,
     sanitizeProxyListenHost,
+    validateProxyReport,
 };

@@ -6,15 +6,12 @@
   "workers_dev": true,
   "vars": {
     "ADMIN_USERNAME": "admin",
-    "ADMIN_PASSWORD": "admin",
-    "PROXY_USER": "kui",
-    "PROXY_PASS": "kui",
     "PROXY_PUBLIC_LISTENER": "false"
   },
   "assets": {
     "directory": "static",
     "binding": "ASSETS",
-    "run_worker_first": ["/api", "/api/*", "/health", "/agent/ws", "/dashboard/*", "/public/*", "/notify", "/public-policy", "/frequency-policy"]
+    "run_worker_first": true
   },
   "d1_databases": [
     {

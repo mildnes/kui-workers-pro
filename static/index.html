@@ -8,17 +8,17 @@
     <meta http-equiv="Expires" content="0">
     <title>KUI x Server Monitor</title>
     
-    <script src="https://unpkg.com/vue@3.5.17/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/vue@3.5.17/dist/vue.global.prod.js" integrity="sha384-H2xBKUDQ/xne/c7DBZjrLhCc6tXYiUu5WAyegWsUsKWMopvozacrKINTNsuJHeFG" crossorigin="anonymous"></script>
     <script>
-        if (!window.Vue) document.write('<script src="https://cdn.jsdelivr.net/npm/vue@3.5.17/dist/vue.global.prod.js"><\/script>');
+        if (!window.Vue) document.write('<script src="https://cdn.jsdelivr.net/npm/vue@3.5.17/dist/vue.global.prod.js" integrity="sha384-H2xBKUDQ/xne/c7DBZjrLhCc6tXYiUu5WAyegWsUsKWMopvozacrKINTNsuJHeFG" crossorigin="anonymous"><\/script>');
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="/tailwind.css">
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js" integrity="sha384-05+sicyRJQ56XpL4U9HJ8YbtSzFDvAg7apPKOGV6A0JsAJKFM68jp5oLnUjG5mEp" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js" integrity="sha384-o5uz97et3bErHvpKfD4Jz4n0JfhJDWABFuF4NP+iEEDxE1VwMWJ19QGR0lqFZnr6" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js" integrity="sha384-Dr98ddmUw2QkdCarNQ+OL7xLty7cSxgR0T7v1tq4UErS/qLV0132sBYTolRAFuOV" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
@@ -667,7 +667,7 @@
                             <h1 class="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 tracking-tight drop-shadow-sm">Proxy Controller</h1>
                             <p class="text-slate-400 mt-2 text-sm flex items-center gap-2">
                                 <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                                 鉴权提取 API: <a href="javascript:void(0)" @click="fetchApi('/api/proxy/proxies').then(r=>r.text()).then(t=>{const w=window.open('','_blank');w.document.write('<pre>'+t+'</pre>')})" class="text-indigo-400 hover:text-indigo-300 border-b border-indigo-400/30 hover:border-indigo-300 transition-colors cursor-pointer">/api/proxy/proxies</a>
+                                 鉴权提取 API: <a href="javascript:void(0)" @click="openProxyList" class="text-indigo-400 hover:text-indigo-300 border-b border-indigo-400/30 hover:border-indigo-300 transition-colors cursor-pointer">/api/proxy/proxies</a>
                             </p>
                         </div>
 
@@ -720,6 +720,10 @@
                             </div>
 
                             <div class="flex flex-wrap items-center bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 relative z-10 gap-y-4">
+                                <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
+                                    <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标 VPS:</span>
+                                    <select id="slot-target-ip" onchange="pcLoadConfig(); pcFetchNodes()" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 max-w-48 text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner"></select>
+                                </div>
                                 <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
                                     <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标地区:</span>
                                     <input type="text" id="slot-cfg-0" value="JP" maxlength="2" class="bg-slate-900 border border-slate-700 rounded-lg py-2 w-16 text-white font-bold text-lg uppercase text-center focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner" placeholder="US" />
@@ -1086,7 +1090,8 @@
             setup() {
                 const isLoggedIn = ref(false); const showLoginModal = ref(false); 
                 const loginUser = ref(''); const password = ref('');
-                const currentUser = ref(localStorage.getItem('kui_user') || ''); const authKey = ref(localStorage.getItem('kui_auth_key') || ''); const role = ref(localStorage.getItem('kui_role') || '');
+                localStorage.removeItem('kui_auth_key'); localStorage.removeItem('kui_user'); localStorage.removeItem('kui_role');
+                const currentUser = ref(sessionStorage.getItem('kui_user') || ''); const authKey = ref(sessionStorage.getItem('kui_auth_key') || ''); const role = ref(sessionStorage.getItem('kui_role') || '');
                 const activeTab = ref(localStorage.getItem('monitor_preferred_tab') || 'probe'); 
                 const currentDomain = window.location.origin;
 
@@ -1308,6 +1313,20 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     }
                     return res;
                 };
+                const openProxyList = async () => {
+                    const popup = window.open('', '_blank');
+                    if (!popup) return alert('浏览器阻止了新窗口，请允许本站打开弹窗');
+                    try {
+                        const response = await fetchApi('/api/proxy/proxies');
+                        const text = await response.text();
+                        popup.document.title = 'KUI Proxy List';
+                        const pre = popup.document.createElement('pre');
+                        pre.textContent = text;
+                        popup.document.body.replaceChildren(pre);
+                    } catch (error) {
+                        popup.close();
+                    }
+                };
                 window.kuiAdminAuthHeader = async () => {
                     if (!authKey.value || !currentUser.value || role.value !== 'admin') return {};
                     return { 'Authorization': `Bearer ${authKey.value}` };
@@ -1321,16 +1340,19 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                         if (res.ok) {
                             authGeneration++;
                             const data = await res.json(); authKey.value = data.token; currentUser.value = loginUser.value; role.value = data.role;
-                            localStorage.setItem('kui_auth_key', authKey.value); localStorage.setItem('kui_user', currentUser.value); localStorage.setItem('kui_role', role.value);
+                            sessionStorage.setItem('kui_auth_key', authKey.value); sessionStorage.setItem('kui_user', currentUser.value); sessionStorage.setItem('kui_role', role.value);
                             isLoggedIn.value = true; showLoginModal.value = false; password.value = ''; const publicSocket = publicRealtimeSocket; publicRealtimeSocket = null; publicSocket?.close(); clearTimeout(publicRealtimeReconnectTimer); clearTimeout(publicRealtimeFallbackTimer); clearInterval(publicRealtimeActivityTimer);
                             activeTab.value = role.value === 'admin' ? 'nodes' : 'dashboard';
                             startPolling(); fetchProbeData(); queueMicrotask(connectRealtime);
-                        } else alert('⚠️ 账户名或密码错误');
+                        } else {
+                            const data = await res.json().catch(() => ({}));
+                            alert(res.status === 503 ? '⚠️ Worker 尚未配置 ADMIN_PASSWORD Secret' : `⚠️ ${data.error || '账户名或密码错误'}`);
+                        }
                     } catch (e) { alert('登录异常'); }
                 };
                 
                 const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
-                const logout = () => { authGeneration++; localStorage.removeItem('kui_auth_key'); localStorage.removeItem('kui_user'); localStorage.removeItem('kui_role'); isLoggedIn.value = false; currentUser.value = ''; authKey.value = ''; clearPrivateState(); activeTab.value = 'probe'; realtimeGeneration++; realtimeDisconnectedAt = 0; clearTimeout(realtimeFallbackTimer); clearTimeout(realtimeReconnectTimer); clearTimeout(realtimeConnectTimer); clearInterval(realtimePingTimer); const socket = realtimeSocket; realtimeSocket = null; socket?.close(); realtimeConnected.value = false; window.kuiRealtimeConnected = false; stopPolling(); startProbePolling();};
+                const logout = () => { const token = authKey.value; if (token) fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, keepalive: true }).catch(() => {}); authGeneration++; sessionStorage.removeItem('kui_auth_key'); sessionStorage.removeItem('kui_user'); sessionStorage.removeItem('kui_role'); isLoggedIn.value = false; currentUser.value = ''; authKey.value = ''; clearPrivateState(); activeTab.value = 'probe'; realtimeGeneration++; realtimeDisconnectedAt = 0; clearTimeout(realtimeFallbackTimer); clearTimeout(realtimeReconnectTimer); clearTimeout(realtimeConnectTimer); clearInterval(realtimePingTimer); const socket = realtimeSocket; realtimeSocket = null; socket?.close(); realtimeConnected.value = false; window.kuiRealtimeConnected = false; stopPolling(); startProbePolling();};
                 const sendUiPing = async () => { try { await fetchApi('/api/ui_ping', { method: 'POST' }); } catch(e) {} };
 
                 let mapInitialized = false; let myMap = null; let markersLayer = null; let geoJsonLayer = null; let worldGeoJson = null; let currentMapDataStr = "";
@@ -1405,9 +1427,12 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 let isFirstLoad = true;
                 let isFetchingProbe = false;
                 let probeDetailRequestGeneration = 0;
-                const fetchProbeData = async (isDetail = false) => {
+                const fetchProbeData = async (isDetail = false, throwOnError = false) => {
                     const detailRequest = !!probeDetailId.value;
-                    if (!detailRequest && isFetchingProbe) return;
+                    if (!detailRequest && isFetchingProbe) {
+                        if (throwOnError) throw new Error('探针数据正在刷新，请稍后重试');
+                        return;
+                    }
                     if (!detailRequest) isFetchingProbe = true;
                     try {
                         let authHeader = {};
@@ -1453,10 +1478,13 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                                 if (!lastSeen || Date.now() - parseInt(lastSeen) > 86400000) showWelcomePopup.value = true;
                             }
                         }
-                    } catch(e) {} finally { if (!detailRequest) isFetchingProbe = false; }
+                    } catch(e) {
+                        console.error('[probe] refresh failed', e);
+                        if (throwOnError) throw e;
+                    } finally { if (!detailRequest) isFetchingProbe = false; }
                 };
 
-                let isFetchingKUI = false;
+                let kuiFetchPromise = null;
                 let isLoadingAdminProbeServers = false;
                 const loadAdminProbeServers = async () => {
                     if (isLoadingAdminProbeServers || !isLoggedIn.value || role.value !== 'admin') return;
@@ -1474,8 +1502,8 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                         isLoadingAdminProbeServers = false;
                     }
                 };
-                const refreshData = async () => {
-                    if (isFetchingKUI) return; isFetchingKUI = true;
+                const refreshData = async (throwOnError = false) => {
+                    if (!kuiFetchPromise) kuiFetchPromise = (async () => {
                     try {
                         const res = await fetchApi('/api/data'); const data = await res.json();
                         const liveByIp = new Map(servers.value.filter(item => item._realtime_ts).map(item => [normalizeRealtimeKey(item.ip), item]));
@@ -1495,22 +1523,31 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     if (activeTab.value === 'thirdparty') loadThirdPartySubscriptions();
                     
                     if (activeTab.value === 'settings' && role.value === 'admin') loadAdminProbeServers();
-                    } catch(e) {} finally { isFetchingKUI = false; }
+                    } finally {
+                        kuiFetchPromise = null;
+                    }
+                    })();
+                    try {
+                        return await kuiFetchPromise;
+                    } catch (error) {
+                        console.error('[panel] data refresh failed', error);
+                        if (throwOnError) throw error;
+                    }
                 };
                 const refreshPanel = async () => {
                     if (refreshing.value) return;
                     refreshing.value = true;
                     try {
-                        await refreshData();
-                        await fetchProbeData();
+                        await refreshData(true);
+                        await fetchProbeData(false, true);
                         if (activeTab.value === 'proxy') {
                             // Realtime mode stops the proxy polling timer, so a
                             // manual refresh must explicitly reload this page's
                             // HTTP snapshots and form values.
                             await Promise.all([
-                                window.pcFetchCountries?.(),
-                                window.pcLoadConfig?.(),
-                                window.pcFetchNodes?.(),
+                                window.pcFetchCountries?.(true),
+                                window.pcLoadConfig?.(true),
+                                window.pcFetchNodes?.(true),
                             ]);
                         }
                     } catch (error) {
@@ -1906,7 +1943,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 return { 
                     isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, refreshing, refreshPanel,
                     servers, nodes, users, groups, securityWarnings, newVps, newNodeParams, newUser, newGroupName,
-                    login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
+                    login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
@@ -1931,13 +1968,31 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
         }
 
         async function getPcAuthHeader(method, path) {
-            const user = localStorage.getItem('kui_user') || 'admin';
-            const key = localStorage.getItem('kui_auth_key') || '';
+            const user = sessionStorage.getItem('kui_user') || 'admin';
+            const key = sessionStorage.getItem('kui_auth_key') || '';
             if (!key) return '';
             return `Bearer ${key}`;
         }
 
-        async function pcFetchCountries() {
+        function pcPopulateTargets() {
+            const select = document.getElementById('slot-target-ip');
+            if (!select) return [];
+            const targets = window.kuiManagedServerIps?.() || [];
+            const previous = select.value;
+            select.innerHTML = targets.length
+                ? targets.map(ip => `<option value="${pcEscapeHtml(ip)}">${pcEscapeHtml(ip)}</option>`).join('') + (targets.length > 1 ? '<option value="*">全部 VPS</option>' : '')
+                : '<option value="">暂无 VPS</option>';
+            select.value = (previous === '*' || targets.includes(previous)) ? previous : (targets[0] || '');
+            return targets;
+        }
+
+        function pcSelectedTargets() {
+            const targets = pcPopulateTargets();
+            const selected = document.getElementById('slot-target-ip')?.value || '';
+            return selected === '*' ? targets : (selected ? [selected] : []);
+        }
+
+        async function pcFetchCountries(throwOnError = false) {
             try {
                 const auth = await getPcAuthHeader('GET', '/api/proxy/countries');
                 const res = await fetch('/api/proxy/countries', { headers: { 'Authorization': auth } });
@@ -1959,13 +2014,20 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     const input = document.getElementById('slot-cfg-0');
                     if (button && input) { input.value = button.dataset.countryCode; input.focus(); }
                 };
-            } catch(e) {}
+            } catch(e) {
+                console.warn('[pc] countries failed:', e);
+                if (throwOnError) throw e;
+            }
         }
 
-        async function pcLoadConfig() {
+        async function pcLoadConfig(throwOnError = false) {
             try {
+                const targets = pcPopulateTargets();
+                const selected = document.getElementById('slot-target-ip')?.value || '';
+                const targetIp = selected === '*' ? targets[0] : selected;
+                if (!targetIp) throw new Error('暂无已接入 VPS');
                 const auth = await getPcAuthHeader('GET', '/api/proxy/config');
-                const res = await fetch('/api/proxy/config', { headers: { 'Authorization': auth } });
+                const res = await fetch(`/api/proxy/config?ip=${encodeURIComponent(targetIp)}`, { headers: { 'Authorization': auth } });
                 if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
                 const map = await res.json();
                 const cfg0 = document.getElementById('slot-cfg-0');
@@ -1975,7 +2037,10 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 if (cfg0) cfg0.value = String(country).toUpperCase();
                 if (port) port.value = map["port"] || map.proxy?.port || 7920;
                 if (listenHost) listenHost.value = map.proxy?.listen_host || map.listen_host || '';
-            } catch(e) { console.warn('[pc] loadConfig failed:', e); }
+            } catch(e) {
+                console.warn('[pc] loadConfig failed:', e);
+                if (throwOnError) throw e;
+            }
         }
 
         async function pcSaveConfig() {
@@ -1984,26 +2049,30 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
             const listenHost = document.getElementById('slot-listen-host')?.value.trim() || '';
             if (listenHost && !/^(?:\d{1,3}\.){3}\d{1,3}$/.test(listenHost)) { alert('❌ Docker 网桥地址必须是 IPv4 地址，例如 172.17.0.1'); return; }
             try {
-                const targets = window.kuiManagedServerIps?.() || [];
+                const targets = pcSelectedTargets();
                 if (!targets.length) throw new Error('暂无已接入 VPS');
-                let text = '';
-                for (const ip of targets) {
+                const results = await Promise.allSettled(targets.map(async ip => {
                     const auth = await getPcAuthHeader('POST', '/api/proxy/config');
                     const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port, "listen_host": listenHost }) });
-                    text = await res.text();
+                    const text = await res.text();
                     if (!res.ok) throw new Error(text || res.status);
                     window.kuiNotifyRealtime?.(ip);
-                }
+                    return { ip, text };
+                }));
+                const succeeded = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+                const failed = results.map((result, index) => ({ result, ip: targets[index] })).filter(item => item.result.status === 'rejected');
+                if (!succeeded.length) throw new Error(failed.map(item => `${item.ip}: ${item.result.reason?.message || item.result.reason}`).join('\n'));
                 // 直接从 POST 响应体更新输入字段，避免立即回读时 D1 最终一致性导致读到旧数据
                 try {
-                    const resp = JSON.parse(text);
+                    const resp = JSON.parse(succeeded[succeeded.length - 1].text);
                     const saved = resp.slot_map || resp.proxy || {};
                     const cfg0 = document.getElementById('slot-cfg-0');
                     const portEl = document.getElementById('slot-port');
                     if (cfg0) cfg0.value = String(saved["0"] || saved.country || val).toUpperCase();
                     if (portEl) portEl.value = saved.port || port;
                 } catch(e) { console.warn('[pc] parse response failed', e); }
-                alert(`🚀 策略及端口已实时下发到 ${targets.length} 台 VPS！`);
+                if (failed.length) alert(`⚠️ 下发完成：成功 ${succeeded.length} 台，失败 ${failed.length} 台\n${failed.map(item => `${item.ip}: ${item.result.reason?.message || item.result.reason}`).join('\n')}`);
+                else alert(`🚀 策略及端口已实时下发到 ${succeeded.length} 台 VPS！`);
             } catch (e) { alert('❌ 下发失败: ' + e.message); }
         }
 
@@ -2011,16 +2080,21 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
             const val = document.getElementById(`slot-cfg-0`).value.toUpperCase().trim() || 'JP';
             const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
             try {
-                const targets = window.kuiManagedServerIps?.() || [];
+                const targets = pcSelectedTargets();
                 if (!targets.length) throw new Error('暂无已接入 VPS');
                 const trigger = Date.now();
-                for (const ip of targets) {
+                const results = await Promise.allSettled(targets.map(async ip => {
                     const auth = await getPcAuthHeader('POST', '/api/proxy/config');
                     const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port, "switch_trigger": trigger }) });
                     if (!res.ok) { const err = await res.text(); throw new Error(err || res.status); }
                     window.kuiNotifyRealtime?.(ip);
-                }
-                alert(`🔄 重拨指令已实时下发到 ${targets.length} 台 VPS！`);
+                    return ip;
+                }));
+                const succeeded = results.filter(result => result.status === 'fulfilled');
+                const failed = results.map((result, index) => ({ result, ip: targets[index] })).filter(item => item.result.status === 'rejected');
+                if (!succeeded.length) throw new Error(failed.map(item => `${item.ip}: ${item.result.reason?.message || item.result.reason}`).join('\n'));
+                if (failed.length) alert(`⚠️ 重拨完成：成功 ${succeeded.length} 台，失败 ${failed.length} 台\n${failed.map(item => `${item.ip}: ${item.result.reason?.message || item.result.reason}`).join('\n')}`);
+                else alert(`🔄 重拨指令已实时下发到 ${succeeded.length} 台 VPS！`);
             } catch (e) { alert('❌ 下发失败: ' + e.message); }
         }
 
@@ -2109,7 +2183,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
 
         let lastPcHttpFetch = 0;
         let pcHttpServers = [];
-        async function pcFetchNodes() {
+        async function pcFetchNodes(throwOnError = false) {
             try {
                 let servers = [];
                 const realtimeSnapshots = Object.values(window.kuiRealtimeProxySnapshots || {});
@@ -2210,8 +2284,10 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     `;
                 }).join('');
 
-                if (servers.length > 0 && servers[0].details) {
-                    const details = JSON.parse(servers[0].details);
+                const selectedIp = document.getElementById('slot-target-ip')?.value || '';
+                const selectedServer = (selectedIp && selectedIp !== '*' ? servers.find(server => server.ip === selectedIp) : null) || servers[0];
+                if (selectedServer?.details) {
+                    const details = JSON.parse(selectedServer.details);
                     const activeNode = details.find(d => d.active) || details[0];
                     if (activeNode && activeNode.node_ip) {
                         const newIp = activeNode.node_ip;
@@ -2237,10 +2313,10 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     }
                 }
 
-                if (terminal && servers[0] && servers[0].logs) {
+                if (terminal && selectedServer?.logs) {
                     const isAtBottom = terminal.scrollHeight - terminal.scrollTop <= terminal.clientHeight + 30;
 
-                    let logHTML = servers[0].logs
+                    let logHTML = selectedServer.logs
                         .replace(/</g, '&lt;').replace(/>/g, '&gt;')
                         .replace(/\[\*\]/g, '<span class="text-indigo-400 font-bold">[*]</span>')
                         .replace(/\[\+\]/g, '<span class="text-emerald-400 font-bold">[+]</span>')
@@ -2252,9 +2328,14 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     if (isAtBottom) {
                         terminal.scrollTop = terminal.scrollHeight;
                     }
+                } else if (terminal) {
+                    terminal.textContent = '当前 VPS 暂无日志。';
                 }
 
-            } catch (err) {}
+            } catch (err) {
+                console.warn('[pc] nodes failed:', err);
+                if (throwOnError) throw err;
+            }
         }
 
         function pcInitProxy() {
@@ -2267,6 +2348,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 if (el) el.textContent = '住宅代理已合并到服务器 Full Deploy Command，无需二次安装。';
             } catch (e) {}
 
+            pcPopulateTargets();
             pcFetchCountries();
             pcLoadConfig();
             pcFetchNodes();

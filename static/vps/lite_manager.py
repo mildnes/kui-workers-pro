@@ -57,12 +57,21 @@ realtime_channel = None
 config_wakeup = threading.Event()
 heartbeat_wakeup = threading.Event()
 last_http_report = 0
+last_http_report_attempt = 0
 # Persist a regular HTTP snapshot even while realtime is connected. This keeps
 # the dashboard usable when a Durable Object websocket reconnects or is stale.
 REALTIME_HTTP_INTERVAL = 60
 REALTIME_STATUS_ACTIVE_INTERVAL = 5
 REALTIME_STATUS_IDLE_INTERVAL = 30
 realtime_status_interval = REALTIME_STATUS_ACTIVE_INTERVAL
+C2_REQUEST_TIMEOUT = 12
+C2_REQUEST_ATTEMPTS = 3
+CONTROL_FAILURE_LOG_INTERVAL = 1800
+http_report_lock = threading.Lock()
+control_health = {
+    "config": {"failures": 0, "last_log": 0, "logged": False},
+    "report": {"failures": 0, "last_log": 0, "logged": False},
+}
 
 def normalize_listener_host(value):
     """Accept only a concrete IPv4 address for private bridge binding."""
@@ -84,6 +93,7 @@ public_ip = ""
 
 global_node_reservoir = {} 
 reservoir_lock = threading.Lock()
+last_reservoir_log_count = None
 
 class Tunnel:
     def __init__(self, name: str, table_id: int):
@@ -140,15 +150,65 @@ def get_c2_headers():
 def c2_request(url, *, data=None, method=None):
     """Retry transient Cloudflare/control-plane read stalls before failing."""
     last_error = None
-    for attempt in range(3):
+    for attempt in range(C2_REQUEST_ATTEMPTS):
         try:
             request = urllib.request.Request(url, data=data, headers=get_c2_headers(), method=method)
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=C2_REQUEST_TIMEOUT) as response:
                 return response.read()
         except Exception as error:
             last_error = error
-            if attempt < 2: time.sleep(2 ** attempt)
+            if attempt < C2_REQUEST_ATTEMPTS - 1: time.sleep(2 ** attempt)
     raise last_error
+
+def record_control_failure(kind, error, realtime_ok=False):
+    state = control_health[kind]
+    state["failures"] += 1
+    threshold = 3 if kind == "report" and realtime_ok else 1
+    now = time.time()
+    if state["failures"] < threshold:
+        return
+    if state["failures"] > threshold and now - state["last_log"] < CONTROL_FAILURE_LOG_INTERVAL:
+        return
+    state["last_log"] = now
+    state["logged"] = True
+    if kind == "config":
+        print(f"[cfg] 控制面暂时不可达，继续使用上次配置 (连续 {state['failures']} 次): {error}", flush=True)
+    elif realtime_ok:
+        print(f"[c2] HTTP 快照连续失败 {state['failures']} 次，Realtime 状态通道仍正常: {error}", flush=True)
+    else:
+        print(f"[c2] 状态上报失败 (连续 {state['failures']} 次): {error}", flush=True)
+
+def record_control_success(kind):
+    state = control_health[kind]
+    if state["logged"]:
+        label = "配置同步" if kind == "config" else "HTTP 状态上报"
+        print(f"[{('cfg' if kind == 'config' else 'c2')}] {label}已恢复", flush=True)
+    state.update({"failures": 0, "last_log": 0, "logged": False})
+
+def submit_http_report(status, background=False):
+    """Serialize HTTP snapshots and keep them off the realtime heartbeat path."""
+    global last_http_report, last_http_report_attempt
+    if not http_report_lock.acquire(blocking=False):
+        return False
+    last_http_report_attempt = time.time()
+    realtime_ok = background
+
+    def send():
+        global last_http_report
+        try:
+            c2_request(f"{C2_URL}{C2_API_PREFIX}/report", data=json.dumps(status).encode("utf-8"), method="POST")
+            last_http_report = time.time()
+            record_control_success("report")
+        except Exception as error:
+            record_control_failure("report", error, realtime_ok=realtime_ok)
+        finally:
+            http_report_lock.release()
+
+    if background:
+        threading.Thread(target=send, daemon=True).start()
+    else:
+        send()
+    return True
 
 def check_for_updates():
     global last_update_check
@@ -232,10 +292,11 @@ def fetch_controller_config():
         raw = c2_request(url).decode("utf-8")
         data = json.loads(raw)
         if isinstance(data, dict) and (data.get("0") or data.get("country")):
+            record_control_success("config")
             return data
-        print(f"[cfg] 端点返回数据缺少地区字段(0/country)，跳过: {raw}", flush=True)
+        raise ValueError("端点返回数据缺少地区字段 (0/country)")
     except Exception as e:
-        print(f"[cfg] 拉取配置失败({url}): {e}", flush=True)
+        record_control_failure("config", f"{url}: {e}", realtime_ok=bool(realtime_channel and realtime_channel.connected))
     return None
 
 def update_config_loop():
@@ -327,7 +388,7 @@ def update_config_loop():
         config_wakeup.wait(timeout=REALTIME_HTTP_INTERVAL if realtime_channel and realtime_channel.connected else 300)
 
 def c2_heartbeat_loop():
-    global public_ip, PROXY_PORT, tun_main, tun_backup, last_http_report
+    global public_ip, PROXY_PORT, tun_main, tun_backup
     while True:
         if not public_ip or public_ip == "Unknown_IP": get_public_ip()
         details = []
@@ -347,15 +408,13 @@ def c2_heartbeat_loop():
         
         status = {"ip": VPS_IP, "socks_ip": public_ip, "details": details, "logs": get_recent_logs()}
         websocket_sent = realtime_channel.send(status) if realtime_channel and realtime_channel.connected else False
-        try:
-            fallback_ready = not realtime_channel or not realtime_channel.enabled or time.time() - (realtime_channel.last_disconnected or realtime_channel.started_at) >= 30
-            if realtime_channel and realtime_channel.enabled and not websocket_sent and time.time() - realtime_channel.last_disconnected < 30:
-                fallback_ready = False
-            if (websocket_sent and time.time() - last_http_report >= REALTIME_HTTP_INTERVAL) or (not websocket_sent and fallback_ready):
-                c2_request(f"{C2_URL}{C2_API_PREFIX}/report", data=json.dumps(status).encode('utf-8'), method='POST')
-                last_http_report = time.time()
-        except Exception as error:
-            print(f"[c2] 状态上报失败: {error}", flush=True)
+        fallback_ready = not realtime_channel or not realtime_channel.enabled or time.time() - (realtime_channel.last_disconnected or realtime_channel.started_at) >= 30
+        if realtime_channel and realtime_channel.enabled and not websocket_sent and time.time() - realtime_channel.last_disconnected < 30:
+            fallback_ready = False
+        if websocket_sent and time.time() - last_http_report_attempt >= REALTIME_HTTP_INTERVAL:
+            submit_http_report(status, background=True)
+        elif not websocket_sent and fallback_ready:
+            submit_http_report(status)
         if realtime_channel and realtime_channel.connected:
             interval = realtime_status_interval
         elif realtime_channel and realtime_channel.enabled and not realtime_channel.ever_connected and time.time() - realtime_channel.started_at < 30:
@@ -414,7 +473,7 @@ def harvest_snapshot_nodes() -> list:
     except Exception as e: return []
 
 def vpngate_fetch_loop():
-    global global_node_reservoir, dead_ips
+    global global_node_reservoir, dead_ips, last_reservoir_log_count
     while True:
         snapshot = harvest_snapshot_nodes()
         if snapshot:
@@ -424,7 +483,10 @@ def vpngate_fetch_loop():
                     if n["ip"] in global_node_reservoir:
                         n["ping"] = max(n["ping"], global_node_reservoir[n["ip"]]["ping"])
                     global_node_reservoir[n["ip"]] = n
-            print(f"[*] ⚡ 节点库更新，当前囤积有效节点 -> {len(global_node_reservoir)} 个", flush=True)
+                reservoir_count = len(global_node_reservoir)
+            if reservoir_count != last_reservoir_log_count:
+                print(f"[*] ⚡ 节点库更新，当前囤积有效节点 -> {reservoir_count} 个", flush=True)
+                last_reservoir_log_count = reservoir_count
         else:
             # FIX 3: 如果 VPNGate 接口被限流或不通，延长现有节点的生命周期，防止库干涸
             with reservoir_lock:

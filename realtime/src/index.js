@@ -110,6 +110,7 @@ async function verifyAdmin(header, request, env) {
         method: "POST",
         headers: { Authorization: header, "Content-Type": "application/json" },
         body: "{}",
+        signal: AbortSignal.timeout(10000),
       });
       if (response.ok && (await response.json()).admin === true) return true;
     }
@@ -513,6 +514,8 @@ export class DashboardHub extends DurableObject {
       if (request.headers.get("X-KUI-Presence") !== "1") return json({ error: "Forbidden" }, 403);
       const snapshot = await request.json();
       if (!snapshot.ip) return json({ error: "Invalid snapshot" }, 400);
+      this.snapshotCache = null;
+      this.snapshotCachedAt = 0;
       const payload = JSON.stringify({ type: "patch", data: snapshot, ts: Date.now() });
       for (const ws of this.ctx.getWebSockets("dashboard")) {
         try { ws.send(payload); } catch {}

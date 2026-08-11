@@ -73,23 +73,22 @@ KUI 是一个部署在 **单一 Cloudflare Worker** 的代理节点管理与服�
 - 确认编辑器中的代码与实际仓库代码一致
 - 如不一致，手动将 `src/worker.js` 内容复制进去，保存并重新部署
 
-预设登录信息：
+部署后先在 Worker 的 **Settings → Variables and Secrets** 配置管理员密码：
 
 ```text
-用户名：admin
-密码：admin
+ADMIN_PASSWORD=使用独立强密码
 ```
 
-这是为完整一键部署准备的默认值。首次登录后必须在 Worker 的 **Settings → Variables and Secrets** 将 `ADMIN_PASSWORD` 覆盖为强 Secret 并重新部署。
+管理员用户名默认为 `admin`。项目不再内置默认密码；未配置 `ADMIN_PASSWORD` 时登录接口会返回配置错误。
 
-内置住宅代理也已预设凭据：
+启用内置住宅代理前还必须配置独立凭据：
 
 ```text
-PROXY_USER=kui
-PROXY_PASS=kui
+PROXY_USER=使用独立用户名
+PROXY_PASS=使用独立强密码
 ```
 
-启用住宅代理前，应在 Worker 的 **Variables and Secrets** 中将两项覆盖为独立的强 Secret 并重新部署。
+缺少这两项时住宅代理接口不会下发凭据。
 
 住宅 SOCKS 服务默认只监听 VPS 本机 `127.0.0.1`，供 KUI Agent 链式出口使用。如果确实需要从公网直连住宅 SOCKS，可显式设置：
 
@@ -161,7 +160,7 @@ npx wrangler secret put PROXY_USER
 npx wrangler secret put PROXY_PASS
 ```
 
-三个命令会交互式读取 Secret。公开部署不要继续使用默认的 `admin`、`kui`、`kui` 凭据。
+三个命令会交互式读取 Secret。请为管理员和住宅代理分别使用独立强凭据。
 
 ### 4. 部署并验证
 
@@ -186,7 +185,7 @@ curl -fsS https://你的-worker-域名/health
 
 当前 `wrangler.jsonc` 未指定 D1 ID，首次部署会自动创建数据库和实时 Durable Objects。若需要使用已有 D1，在 Cloudflare Dashboard 的 Worker **Settings → Bindings** 中将 `DB` 重绑到目标数据库后重新部署。
 
-生产环境请立即替换默认密码：
+部署前必须设置管理员密码：
 
 ```bash
 npx wrangler secret put ADMIN_PASSWORD
@@ -255,7 +254,7 @@ Cloudflare Worker
 
 ## 注意事项
 
-- 一键部署默认使用 `admin/admin` 和住宅代理凭据 `kui/kui`。公开使用前必须将 `ADMIN_PASSWORD`、`PROXY_USER`、`PROXY_PASS` 覆盖为 Secret。
+- 项目不内置管理员密码或住宅代理凭据；部署后必须将 `ADMIN_PASSWORD`、`PROXY_USER`、`PROXY_PASS` 配置为 Secret。
 - `PROXY_PUBLIC_LISTENER` 默认为 `false`；除非确实需要外部直连住宅 SOCKS，否则不要开启。
 - 不要提交自定义 `ADMIN_PASSWORD`、D1 ID、Telegram Token 或代理凭据。
 - `DB` 是固定 binding 名称，修改会导致后端无法访问数据库。
@@ -264,6 +263,12 @@ Cloudflare Worker
 - `workspace-preview.html` 仅用于本地预览，不参与 Worker 静态资源发布。
 
 ## 开发验证
+
+修改 `static/index.html` 或 `src/tailwind.css` 中的 Tailwind 类名后，先重新生成静态样式：
+
+```bash
+npm run build:css
+```
 
 ```bash
 npm ci
