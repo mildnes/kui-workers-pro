@@ -51,6 +51,11 @@ test('proxy config is loaded for a selected VPS and batch results are explicit',
     assert.match(html, /成功.*失败/s);
 });
 
+test('residential proxy target options show VPS aliases with IPs', () => {
+    assert.match(html, /window\.kuiManagedServers\s*=\s*\(\)\s*=>/);
+    assert.match(html, /pcEscapeHtml\(server\.name \|\| server\.ip\)[\s\S]{0,80}\s:\s[\s\S]{0,80}pcEscapeHtml\(server\.ip\)/);
+});
+
 test('manual refresh propagates data loading failures', () => {
     assert.match(html, /await refreshData\(true\)/);
     assert.match(html, /await fetchProbeData\(false, true\)/);

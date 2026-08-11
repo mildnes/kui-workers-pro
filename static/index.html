@@ -722,7 +722,7 @@
                             <div class="flex flex-wrap items-center bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 relative z-10 gap-y-4">
                                 <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
                                     <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标 VPS:</span>
-                                    <select id="slot-target-ip" onchange="pcLoadConfig(); pcFetchNodes()" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 max-w-48 text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner"></select>
+                                    <select id="slot-target-ip" onchange="pcLoadConfig(); pcFetchNodes()" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 w-52 sm:w-64 max-w-full text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner"></select>
                                 </div>
                                 <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
                                     <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标地区:</span>
@@ -1331,6 +1331,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     if (!authKey.value || !currentUser.value || role.value !== 'admin') return {};
                     return { 'Authorization': `Bearer ${authKey.value}` };
                 };
+                window.kuiManagedServers = () => servers.value.map(server => ({ name: String(server.name || '').trim(), ip: server.ip })).filter(server => server.ip);
                 window.kuiManagedServerIps = () => servers.value.map(server => server.ip).filter(Boolean);
 
                 const login = async () => {
@@ -1983,10 +1984,11 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
         function pcPopulateTargets() {
             const select = document.getElementById('slot-target-ip');
             if (!select) return [];
-            const targets = window.kuiManagedServerIps?.() || [];
+            const managedServers = window.kuiManagedServers?.() || (window.kuiManagedServerIps?.() || []).map(ip => ({ name: '', ip }));
+            const targets = managedServers.map(server => server.ip);
             const previous = select.value;
             select.innerHTML = targets.length
-                ? targets.map(ip => `<option value="${pcEscapeHtml(ip)}">${pcEscapeHtml(ip)}</option>`).join('') + (targets.length > 1 ? '<option value="*">全部 VPS</option>' : '')
+                ? managedServers.map(server => `<option value="${pcEscapeHtml(server.ip)}">${pcEscapeHtml(server.name || server.ip)} : ${pcEscapeHtml(server.ip)}</option>`).join('') + (targets.length > 1 ? '<option value="*">全部 VPS</option>' : '')
                 : '<option value="">暂无 VPS</option>';
             select.value = (previous === '*' || targets.includes(previous)) ? previous : (targets[0] || '');
             return targets;
