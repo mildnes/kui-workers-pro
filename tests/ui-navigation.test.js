@@ -6,6 +6,8 @@ const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const appShell = read('../frontend/src/app/AppShell.vue');
 const desktopNavigation = read('../frontend/src/app/DesktopNavigation.vue');
 const mobileNavigation = read('../frontend/src/app/MobileNavigation.vue');
+const serversPage = read('../frontend/src/pages/ServersPage.vue');
+const appStyles = read('../frontend/src/styles/app.css');
 const topBar = read('../frontend/src/app/TopBar.vue');
 
 test('removed and hidden pages are absent from the active UI', () => {
@@ -39,4 +41,14 @@ test('mobile admin navigation places residential proxy before users and removes 
     const moreItems = mobileNavigation.slice(mobileNavigation.indexOf('const moreItems'), mobileNavigation.indexOf('const userItems'));
     assert.ok(nodes >= 0 && nodes < proxy && proxy < users);
     assert.doesNotMatch(moreItems, /id:\s*['"]probe['"]/);
+});
+
+test('servers page uses compact Chinese overview and a clearly bordered VPS form', () => {
+    assert.doesNotMatch(topBar, /kui-page-subtitle|siteTitle \|\| 'Cluster Gateway'/);
+    for (const label of ['在线服务器', '累计流量', '实时下载', '实时上传']) assert.match(serversPage, new RegExp(label));
+    assert.doesNotMatch(serversPage, /ONLINE SERVERS|AGGREGATE TRAFFIC|>DOWNLOAD<|>UPLOAD</);
+    assert.match(serversPage, /接入 VPS<\/span><small>添加服务器别名、公网 IP 与系统架构/);
+    assert.match(appStyles, /\.kui-add-server > summary \{ justify-content: flex-start; \}/);
+    assert.match(appStyles, /\.kui-add-server-form input, \.kui-add-server-form select \{ border: 1px solid #cbd5e1/);
+    assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
 });

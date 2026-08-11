@@ -66,11 +66,22 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-admin-content button { touch-action: manipulation; }
 .kui-add-server { overflow: hidden; border: 1px solid var(--kui-color-border); border-radius: var(--kui-radius-lg); background: var(--kui-color-surface); box-shadow: var(--kui-shadow-sm); }
 .kui-add-server > summary, .kui-server-tools > summary { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; cursor: pointer; list-style: none; }
+.kui-add-server > summary { justify-content: flex-start; }
 .kui-add-server > summary::-webkit-details-marker, .kui-server-tools > summary::-webkit-details-marker { display: none; }
 .kui-add-server > summary span, .kui-server-tools > summary span { color: #334155; font-size: 13px; font-weight: 800; }
 .kui-add-server > summary small, .kui-server-tools > summary small { color: #94a3b8; font-size: 11px; }
 .kui-add-server[open] > summary, .kui-server-tools[open] > summary { border-bottom: 1px solid var(--kui-color-border); }
 .kui-add-server-form { display: flex; align-items: flex-end; gap: 12px; padding: 14px 16px 16px; }
+.kui-add-server-form input, .kui-add-server-form select { border: 1px solid #cbd5e1; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.kui-add-server-form input:hover, .kui-add-server-form select:hover { border-color: #94a3b8; }
+.kui-add-server-form input:focus, .kui-add-server-form select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+.kui-servers-page > :not([hidden]) ~ :not([hidden]) { margin-top: 10px !important; }
+.kui-server-stats, .kui-server-grid { gap: 10px !important; }
+.kui-servers-page .gap-4 { gap: .75rem; }
+.kui-servers-page .gap-3 { gap: .625rem; }
+.kui-servers-page .mb-6 { margin-bottom: .875rem; }
+.kui-servers-page .mb-5 { margin-bottom: .75rem; }
+.kui-servers-page .mt-4 { margin-top: .75rem; }
 .kui-server-tools { border-top: 1px solid #e2e8f0; background: rgba(248,250,252,.75); }
 .kui-server-tools > summary { min-height: 44px; }
 .kui-server-tools > div { padding-top: 14px; }

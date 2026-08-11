@@ -5,7 +5,6 @@
         <h1 class="kui-page-title">{{ pageTitle }}</h1>
         <span class="kui-live-badge"><i></i><span class="hidden sm:inline">实时连接</span></span>
       </div>
-      <p class="kui-page-subtitle">{{ siteTitle || 'Cluster Gateway' }}</p>
     </div>
     <div class="kui-topbar-actions">
       <button @click="openProbe" class="kui-button kui-button-ghost kui-probe-button" title="探针监控" aria-label="探针监控">
