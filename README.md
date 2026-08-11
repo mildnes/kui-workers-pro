@@ -33,7 +33,7 @@ ByteVirt 提供多地域 VPS，适合部署 KUI VPS Agent、探针与代理节�
 
 KUI 是一个部署在 **单一 Cloudflare Worker** 的代理节点管理与服务器探针面板。Worker Assets 托管前端和 VPS 安装组件，D1 保存配置、用户、流量和探针数据，Durable Objects 提供实时 WebSocket；无需部署传统面板服务器或额外 Realtime Worker。
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yuanlam/kui-worker)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yuanlam/kui-workers-pro)
 
 ## 一键部署
 
@@ -108,8 +108,8 @@ PROXY_PUBLIC_LISTENER=true
 适用于需要使用已有 D1、固定 Worker 名称或自行维护发布流程的场景。
 
 ```bash
-git clone https://github.com/yuanlam/kui-worker.git
-cd kui-worker
+git clone https://github.com/yuanlam/kui-workers-pro.git
+cd kui-workers-pro
 npm install
 npx wrangler login
 npx wrangler deploy
