@@ -60,3 +60,12 @@ test('server cards expose clear visual boundaries between operational modules', 
     }
     assert.match(appStyles, /\.kui-server-card > \* \+ \* \{ border-top-color: #d7dfeb/);
 });
+
+test('server card header and deployment actions use the compact explicit layout', () => {
+    const status = serversPage.indexOf('kui-server-status-dot');
+    const ip = serversPage.indexOf('kui-server-ip');
+    assert.ok(status >= 0 && status < ip);
+    assert.doesNotMatch(serversPage, /UP:|LOAD:|vps\.uptime|vps\.load/);
+    assert.match(serversPage, /<button @click="copyCommand\(generateCmd\(vps\.ip\)[\s\S]{0,180}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
+    assert.match(appStyles, /\.kui-copy-deploy-button \{ display: flex; width: 100%;/);
+});
