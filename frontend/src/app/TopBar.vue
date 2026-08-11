@@ -8,7 +8,9 @@
       <p class="kui-page-subtitle">{{ siteTitle || 'Cluster Gateway' }}</p>
     </div>
     <div class="kui-topbar-actions">
-      <button @click="openProbe" class="kui-button kui-button-ghost kui-desktop-only">◉ 探针监控</button>
+      <button @click="openProbe" class="kui-button kui-button-ghost kui-probe-button" title="探针监控" aria-label="探针监控">
+        <span>◉</span><span class="kui-probe-button-label">探针监控</span>
+      </button>
       <a href="https://github.com/yuanlam/kui-workers-pro" target="_blank" rel="noreferrer" class="kui-button kui-button-ghost kui-desktop-only">GitHub</a>
       <details v-if="role === 'admin'" class="kui-action-menu">
         <summary class="kui-button kui-button-ghost">订阅与导出 <span>⌄</span></summary>

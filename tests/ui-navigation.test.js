@@ -24,9 +24,19 @@ test('desktop navigation keeps residential proxy below servers and settings abov
     assert.match(desktopNavigation, /kui-sidebar-secondary[\s\S]*go\('settings'\)/);
 });
 
-test('probe monitor is displayed immediately before GitHub in the desktop top bar', () => {
+test('probe monitor is displayed before subscription exports and remains visible on mobile', () => {
     const probe = topBar.indexOf('探针监控');
-    const github = topBar.indexOf('>GitHub<');
-    assert.ok(probe >= 0 && probe < github);
+    const exports = topBar.indexOf('订阅与导出');
+    assert.ok(probe >= 0 && probe < exports);
+    assert.doesNotMatch(topBar.match(/<button @click="openProbe"[^>]+>/)?.[0] || '', /kui-desktop-only/);
     assert.match(topBar, /openProbe[\s\S]*activeTab\.value = 'probe'/);
+});
+
+test('mobile admin navigation places residential proxy before users and removes duplicate probe entry', () => {
+    const nodes = mobileNavigation.indexOf("id: 'nodes'");
+    const proxy = mobileNavigation.indexOf("id: 'proxy'");
+    const users = mobileNavigation.indexOf("id: 'users'");
+    const moreItems = mobileNavigation.slice(mobileNavigation.indexOf('const moreItems'), mobileNavigation.indexOf('const userItems'));
+    assert.ok(nodes >= 0 && nodes < proxy && proxy < users);
+    assert.doesNotMatch(moreItems, /id:\s*['"]probe['"]/);
 });

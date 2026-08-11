@@ -138,6 +138,8 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .probe-body .card-meta { overflow-wrap: anywhere; }
   .probe-body .text-center.mt-10 { overflow-wrap: anywhere; }
   .kui-topbar { min-height: 60px; }
+  .kui-topbar-actions { gap: 5px; }
+  .kui-topbar-actions .kui-button { padding-right: 10px; padding-left: 10px; }
   .kui-page-subtitle { display: none; }
   .kui-admin-content { padding: 10px 10px calc(82px + env(safe-area-inset-bottom)); }
   .kui-admin-content .p-10, .kui-admin-content .p-8, .kui-admin-content .p-6, .kui-admin-content .p-5, .kui-admin-content .p-4 { padding: 13px; }
@@ -171,4 +173,8 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .kui-admin-content .pc-body #pc-native-score-container { padding: 12px; gap: 10px; }
   .kui-admin-content .pc-body #pc-terminal-output { height: 220px; font-size: 12px; }
   body > #app > .fixed > div { width: 100%; max-height: 88vh; margin-top: auto; border-radius: 22px 22px 0 0; padding: 20px; }
+}
+
+@media (max-width: 360px) {
+  .kui-probe-button-label { display: none; }
 }

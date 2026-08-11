@@ -28,12 +28,11 @@ import { KUI_KEY } from './context.js';
 
 const primaryAdminItems = [
   { id: 'nodes', icon: '▣', label: '服务器' },
-  { id: 'users', icon: '◎', label: '用户' },
   { id: 'proxy', icon: '⌁', label: '住宅' },
+  { id: 'users', icon: '◎', label: '用户' },
 ];
 const moreItems = [
   { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'settings', icon: '⚙', label: '设置' },
-  { id: 'probe', icon: '◉', label: '探针监控' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针监控' },
