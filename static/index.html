@@ -470,10 +470,15 @@
                                 <div v-if="['TUIC', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(newNodeParams[vps.ip].protocol)" class="bg-slate-100/50 p-3 rounded-xl mb-3"><input v-model="newNodeParams[vps.ip].sni" placeholder="SNI 域名 / 主机名" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700"></div>
                                 <div v-if="newNodeParams[vps.ip].protocol === 'Shadowsocks2022'" class="bg-slate-100/50 p-3 rounded-xl mb-3">
                                     <label class="block text-[10px] text-slate-400 font-bold mb-1">SS2022 加密方式</label>
-                                    <select v-model="newNodeParams[vps.ip].ss_method" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700">
+                                    <select v-model="newNodeParams[vps.ip].ss_method" @change="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700">
                                         <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
                                         <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
                                     </select>
+                                    <label class="block text-[10px] text-slate-400 font-bold mt-3 mb-1">SS2022 密码（Base64 原始密钥）</label>
+                                    <div class="flex gap-2">
+                                        <input v-model.trim="newNodeParams[vps.ip].ss_password" type="text" spellcheck="false" autocomplete="off" placeholder="16 字节=24 字符，32 字节=44 字符" class="min-w-0 flex-1 bg-white rounded-lg px-2 py-2 text-xs font-mono text-slate-700 outline-none border border-slate-200">
+                                        <button type="button" @click="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)" class="shrink-0 rounded-lg border border-sky-200 bg-white px-2 text-[10px] font-bold text-sky-700 hover:bg-sky-50">随机生成</button>
+                                    </div>
                                 </div>
                                 <div v-if="newNodeParams[vps.ip].protocol === 'dokodemo-door'" class="bg-slate-100/50 p-3 rounded-xl mb-3 space-y-2">
                                     <select v-model="newNodeParams[vps.ip].relay_type" class="w-full bg-white p-2 rounded-lg text-sm"><option value="external">外部目标地址</option><option value="internal">面板内部节点</option></select>
@@ -1067,6 +1072,7 @@
         const signedAuthHeader = async (keyHex, username, method, path) => { const timestamp = Date.now().toString(); const nonce = crypto.randomUUID(); const signature = await generateHMAC(keyHex, `${username}\n${timestamp}\n${nonce}\n${method}\n${new URL(path, location.origin).pathname}`); return `${btoa(username)}.${timestamp}.${nonce}.${signature}`; };
         const toBase64Url = (uint8Array) => { let str = ''; for (let i = 0; i < uint8Array.length; i++) str += String.fromCharCode(uint8Array[i]); return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, ''); };
         const generateRealityKeys = () => { const keypair = nacl.box.keyPair(); return { privateKey: toBase64Url(keypair.secretKey), publicKey: toBase64Url(keypair.publicKey), shortId: crypto.randomUUID().replace(/-/g, '').substring(0, 16) }; };
+        const generateSs2022Password = (method = '2022-blake3-aes-256-gcm') => { const bytes = method.includes('128') ? 16 : 32; const key = new Uint8Array(bytes); crypto.getRandomValues(key); let raw = ''; for (const byte of key) raw += String.fromCharCode(byte); return btoa(raw); };
 
         const iso2To3 = {"US":"USA","CN":"CHN","JP":"JPN","HK":"HKG","SG":"SGP","KR":"KOR","DE":"DEU","GB":"GBR","NL":"NLD","FR":"FRA","CA":"CAN","AU":"AUS","IN":"IND","BR":"BRA","RU":"RUS","ZA":"ZAF","TW":"TWN","IT":"ITA","SE":"SWE","CH":"CHE","ES":"ESP","PL":"POL","FI":"FIN","NO":"NOR","DK":"DNK","IE":"IRL","AT":"AUT","TR":"TUR","AE":"ARE","MY":"MYS","TH":"THA","VN":"VNM","PH":"PHL","ID":"IDN"};
         const countryCoords = {'US': [37.09, -95.71], 'CN': [35.86, 104.19], 'JP': [36.20, 138.25], 'HK': [22.31, 114.16], 'SG': [1.35, 103.81], 'KR': [35.90, 127.76], 'DE': [51.16, 10.45], 'GB': [55.37, -3.43], 'NL': [52.13, 5.29], 'FR': [46.22, 2.21], 'CA': [56.13, -106.34], 'AU': [-25.27, 133.77], 'IN': [20.59, 78.96], 'BR': [-14.23, -51.92], 'RU': [61.52, 105.31], 'ZA': [-30.55, 22.93], 'TW': [23.69, 120.96], 'IT': [41.87, 12.56], 'SE': [60.12, 18.64], 'CH': [46.81, 8.22], 'ES': [40.46, -3.74], 'PL': [51.91, 19.14], 'FI': [61.92, 25.74], 'NO': [60.47, 8.46], 'DK': [56.26, 9.50], 'IE': [53.14, -7.69], 'AT': [47.51, 14.55], 'TR': [38.96, 35.24], 'AE': [23.42, 53.84], 'MY': [4.21, 101.97], 'TH': [15.87, 100.99], 'VN': [14.05, 108.27], 'PH': [12.87, 121.77], 'ID': [-0.78, 113.92]};
@@ -1473,7 +1479,8 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                         securityWarnings.value = data.securityWarnings || [];
                         if (data.realtimeUrl && data.realtimeUrl !== realtimeUrl.value) { realtimeUrl.value = data.realtimeUrl; connectRealtime(); }
                         servers.value.forEach(s => { 
-                            if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', ss_method: '2022-blake3-aes-256-gcm', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
+                            if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: generateSs2022Password(), relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
+                            if (!newNodeParams[s.ip].ss_password) newNodeParams[s.ip].ss_password = generateSs2022Password(newNodeParams[s.ip].ss_method);
                             if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                             if (s.egress_mode === 'socks5' || s.socks5_addr) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = s.socks5_pass || ''; }
                         });
@@ -1578,7 +1585,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     const p = newNodeParams[ip]; if(!p.port) return alert('请填写端口!');
                     let limitBytes = p.traffic_limit_gb ? Math.floor(parseFloat(p.traffic_limit_gb) * 1073741824) : 0; let expireTs = expiryTimestamp(p.expire_date);
                     const payload = { id: Date.now().toString(), uuid: crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: p.sni || '' };
-                    if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) { const keys = generateRealityKeys(); payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } else if (p.protocol === 'TUIC') { if (!p.sni) return alert('TUIC 必填 SNI！'); payload.private_key = crypto.randomUUID().replace(/-/g, ''); } else if (p.protocol === 'Shadowsocks2022') { const method = p.ss_method || '2022-blake3-aes-256-gcm'; const bytes = method.includes('128') ? 16 : 32; const key = new Uint8Array(bytes); crypto.getRandomValues(key); payload.uuid = method; payload.private_key = btoa(String.fromCharCode(...key)); payload.network = 'tcp'; } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') { const array = new Uint8Array(16); crypto.getRandomValues(array); payload.private_key = btoa(String.fromCharCode.apply(null, array)); } else if (p.protocol === 'Naive') { payload.uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 16); payload.private_key = payload.uuid; } else if (p.protocol === 'VLESS-Argo') { payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...'; } else if (p.protocol === 'dokodemo-door') { payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) return alert('请填写外部目标地址和端口'); payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) return alert('请选择内部目标节点'); payload.target_id = p.target_id; } }
+                    if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) { const keys = generateRealityKeys(); payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } else if (p.protocol === 'TUIC') { if (!p.sni) return alert('TUIC 必填 SNI！'); payload.private_key = crypto.randomUUID().replace(/-/g, ''); } else if (p.protocol === 'Shadowsocks2022') { const method = p.ss_method || '2022-blake3-aes-256-gcm'; const password = String(p.ss_password || '').trim(); const expectedBytes = method.includes('128') ? 16 : 32; let decoded; try { decoded = atob(password); } catch (_) { return alert('SS2022 密码必须是有效的 Base64 原始密钥'); } if (decoded.length !== expectedBytes || btoa(decoded) !== password) return alert(`SS2022 密码必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`); payload.uuid = method; payload.private_key = password; payload.network = 'tcp'; } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') { const array = new Uint8Array(16); crypto.getRandomValues(array); payload.private_key = btoa(String.fromCharCode.apply(null, array)); } else if (p.protocol === 'Naive') { payload.uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 16); payload.private_key = payload.uuid; } else if (p.protocol === 'VLESS-Argo') { payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...'; } else if (p.protocol === 'dokodemo-door') { payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) return alert('请填写外部目标地址和端口'); payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) return alert('请选择内部目标节点'); payload.target_id = p.target_id; } }
                     await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
                 };
                 
@@ -1621,14 +1628,25 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     return link;
                 };
                 
-                const copyCommand = (txt, msg) => navigator.clipboard.writeText(txt).then(() => alert(msg));
+                const writeClipboard = async text => {
+                    if (navigator.clipboard?.writeText) {
+                        try { await navigator.clipboard.writeText(text); return; } catch (_) {}
+                    }
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text; textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+                    document.body.appendChild(textarea); textarea.select();
+                    const copied = document.execCommand('copy'); textarea.remove();
+                    if (!copied) throw new Error('浏览器拒绝访问剪贴板，请使用 HTTPS 或手动复制');
+                };
+                const copyCommand = async (txt, msg) => { try { await writeClipboard(txt); alert(msg); } catch (error) { alert(error.message || '复制失败'); } };
                 const copySurgeConfig = async (ip='') => {
                     try {
                         const response = await fetch(generateSubLink(ip, 'surge'), { cache: 'no-store' });
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
                         const config = await response.text();
                         if (!config.trimStart().startsWith('[Proxy]')) throw new Error('返回内容不是 Surge 配置段');
-                        await navigator.clipboard.writeText(config);
+                        await writeClipboard(config);
                         alert(ip ? '✅ 该 VPS 的 Surge 配置段已复制！' : '✅ 全量 Surge 配置段已复制！');
                     } catch (error) {
                         alert(`复制 Surge 配置段失败：${error.message}`);
@@ -1860,7 +1878,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                     isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, 
                     servers, nodes, users, groups, securityWarnings, newVps, newNodeParams, newUser, newGroupName,
                     login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
-                    getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSubLink, copyCommand, copySurgeConfig,
+                    getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                     globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                     probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                     saveProbeSettings, saveSubscriptionProtection, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
