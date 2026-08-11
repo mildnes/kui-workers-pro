@@ -629,7 +629,9 @@ async function initializeDbSchema(db) {
     const checkNodes = await db.prepare("SELECT value FROM probe_settings WHERE key = 'cached_nodes_data'").first();
     if (!checkNodes) {
         try {
-            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json');
+            // This is optional seed data. A GitHub outage must never block
+            // schema initialization (and therefore every API endpoint).
+            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json', { signal: AbortSignal.timeout(8000) });
             if (res.ok) {
                 const dataText = await res.text();
                 await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('cached_nodes_data', ?)").bind(dataText).run();
@@ -815,7 +817,7 @@ async function handleProbeAPI(request, env, context, pathArray) {
     // 🌟 GitHub 云端拉取三网节点库
     if (method === 'POST' && subPath === 'admin/pull_github') {
         try {
-            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json');
+            const res = await fetch('https://raw.githubusercontent.com/a63414262/CF-Server-Monitor-Pro/refs/heads/main/nodes.json', { signal: AbortSignal.timeout(8000) });
             if (res.ok) {
                 const dataText = await res.text();
                 await db.prepare("INSERT INTO probe_settings (key, value) VALUES ('cached_nodes_data', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(dataText).run();
@@ -899,6 +901,9 @@ async function proxyBridge(method, subPath, request, env, body = null) {
     if (method === 'POST') init.body = JSON.stringify(body || {});
     console.log('[proxy-bridge] ->', method, target);
     try {
+      // External controller outages must not hold the Worker request open
+      // until the platform timeout. Return a normal 502 after a bounded wait.
+      init.signal = AbortSignal.timeout(15000);
       const res = await fetch(target, init);
       const text = await res.text();
       console.log('[proxy-bridge] <-', method, target, 'status', res.status);
