@@ -4,7 +4,9 @@ import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
 
 const manager = fs.readFileSync(new URL('../static/vps/lite_manager.py', import.meta.url), 'utf8');
+const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
+const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const { sanitizeProxyListenHost, validateProxyReport } = __test;
 
 test('proxy-lite reports the active tunnel exit IP', () => {
@@ -42,4 +44,14 @@ test('proxy-lite keeps realtime heartbeats responsive during HTTP mirror stalls'
 test('proxy-lite rate limits repeated control-plane and reservoir log noise', () => {
     assert.match(manager, /record_control_failure\("report", error, realtime_ok=realtime_ok\)/);
     assert.match(manager, /if reservoir_count != last_reservoir_log_count:/);
+});
+
+test('realtime proxy status refreshes the residential availability record', () => {
+    assert.match(realtime, /persistProxyStatus\(attachment\.ip, nextRoleState, attachment\.lastSeen, criticalChange\)/);
+    assert.match(realtime, /INSERT INTO proxy_ctrl_servers/);
+    assert.match(realtime, /INSERT INTO server_logs/);
+});
+
+test('residential apply failures include the controller readiness reason', () => {
+    assert.match(agent, /residential\.get\("reason"\)/);
 });

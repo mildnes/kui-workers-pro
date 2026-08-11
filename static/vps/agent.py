@@ -1339,7 +1339,9 @@ def fetch_and_apply_configs():
             runtime_warp = runtime_egress[5:] if runtime_egress.startswith("warp_") else "off"
             config_hash = hashlib.sha256(json.dumps({"nodes": nodes, "egress": runtime_egress}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             try:
-                if runtime_egress == "residential" and not residential.get("available"): raise RuntimeError("residential proxy is unavailable")
+                if runtime_egress == "residential" and not residential.get("available"):
+                    reason = residential.get("reason") or "controller did not report a ready residential tunnel"
+                    raise RuntimeError(f"residential proxy is unavailable: {reason}")
                 build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
                 if apply_egress_change:
                     egress_ip = _warp_exit_ip if runtime_egress.startswith("warp_") else (_residential_exit_ip if runtime_egress == "residential" else "")

@@ -9,6 +9,7 @@ const STATUS_STALE_AFTER = 20_000;
 const VIEWER_LEASE_MS = 90_000;
 const RESYNC_COOLDOWN_MS = 30_000;
 const SNAPSHOT_CACHE_MS = 10_000;
+const PROXY_DB_PERSIST_INTERVAL = 60_000;
 const MAX_PUBLIC_SOCKETS = 5;
 const MAX_PUBLIC_SOCKETS_PER_IP = 1;
 const MAX_DASHBOARD_SOCKETS = 5;
@@ -80,13 +81,18 @@ function sanitizeSnapshot(snapshot) {
   };
 }
 
+function safeProxyAddress(value) {
+  const address = String(value || "").trim();
+  return /^[0-9A-Fa-f:.]{2,64}$/.test(address) ? address : "";
+}
+
 function compactRoleState(role, data) {
   if (role === "core") {
     const keys = ["cpu", "mem", "disk", "load", "uptime", "net_in_speed", "net_out_speed", "tcp_conn", "udp_conn", "os", "arch"];
     return Object.fromEntries(keys.filter(key => data?.[key] !== undefined).map(key => [key, data[key]]));
   }
   return {
-    details: Array.isArray(data?.details) ? data.details.slice(0, 4).map(item => ({ tunnel: String(item?.tunnel || "").slice(0, 32), active: item?.active === true, node_ip: String(item?.node_ip || "").slice(0, 64), exit_ip: String(item?.exit_ip || "").slice(0, 64), country: String(item?.country || "").slice(0, 2), port: Number(item?.port) || 0, ready: item?.ready === true, connected_time: Math.max(0, Math.min(Number(item?.connected_time) || 0, 31536000)) })) : [],
+    details: Array.isArray(data?.details) ? data.details.slice(0, 4).map(item => ({ tunnel: String(item?.tunnel || "").slice(0, 32), active: item?.active === true, node_ip: safeProxyAddress(item?.node_ip), exit_ip: safeProxyAddress(item?.exit_ip), country: String(item?.country || "").toUpperCase().slice(0, 2), port: Number(item?.port) || 0, ready: item?.ready === true, connected_time: Math.max(0, Math.min(Number(item?.connected_time) || 0, 31536000)) })) : [],
     logs: String(data?.logs || "").slice(0, 16 * 1024),
   };
 }
@@ -232,6 +238,7 @@ export class VpsPresence extends DurableObject {
     this.dashboardInterval = IDLE_STATUS_INTERVAL;
     this.dashboardActiveUntil = 0;
     this.lastPersisted = 0;
+    this.lastProxyDbPersisted = 0;
     this.lastStatusBroadcast = 0;
     try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong")); } catch {}
     this.lastSeq = { core: -1, proxy: -1 };
@@ -331,6 +338,7 @@ export class VpsPresence extends DurableObject {
     this.snapshot[`${role}_connected`] = true;
     this.snapshot[`${role}_last_seen`] = attachment.lastSeen;
     this.snapshot.updated_at = attachment.lastSeen;
+    if (role === "proxy") await this.persistProxyStatus(attachment.ip, nextRoleState, attachment.lastSeen, criticalChange);
     if (role === "core" && Date.now() - this.lastPersisted >= 60000) {
       this.lastPersisted = Date.now();
       await this.ctx.storage.put("state", { snapshot: this.snapshot, lastSeq: this.lastSeq, bootId: this.bootId, persistedAt: this.lastPersisted });
@@ -339,6 +347,21 @@ export class VpsPresence extends DurableObject {
     const statusBroadcastDue = this.dashboardActive && Date.now() - this.lastStatusBroadcast >= this.dashboardInterval;
     if (statusBroadcastDue) this.lastStatusBroadcast = Date.now();
     if (statusBroadcastDue || criticalChange) await this.broadcast();
+  }
+
+  async persistProxyStatus(ip, state, lastSeen, force = false) {
+    if (!force && lastSeen - this.lastProxyDbPersisted < PROXY_DB_PERSIST_INTERVAL) return;
+    this.lastProxyDbPersisted = lastSeen;
+    try {
+      const statements = [
+        this.env.DB.prepare(`INSERT INTO proxy_ctrl_servers (ip, details, last_seen) VALUES (?1, ?2, ?3) ON CONFLICT(ip) DO UPDATE SET details = excluded.details, last_seen = excluded.last_seen`).bind(ip, JSON.stringify(state.details || []), lastSeen),
+      ];
+      if (state.logs) statements.push(this.env.DB.prepare(`INSERT INTO server_logs (ip, logs, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(ip) DO UPDATE SET logs = excluded.logs, updated_at = excluded.updated_at`).bind(ip, state.logs, lastSeen));
+      await this.env.DB.batch(statements);
+    } catch (error) {
+      this.lastProxyDbPersisted = 0;
+      console.error("[realtime] proxy status persistence failed", ip, error);
+    }
   }
 
   async webSocketClose(ws) {
