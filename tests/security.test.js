@@ -63,6 +63,14 @@ test('residential proxy target options show VPS aliases with IPs', () => {
     assert.match(html, /pcEscapeHtml\(server\.name \|\| server\.ip\)[\s\S]{0,80}\s:\s[\s\S]{0,80}pcEscapeHtml\(server\.ip\)/);
 });
 
+test('egress synchronization uses user-facing status copy', () => {
+    assert.match(html, /配置已同步/);
+    assert.match(html, /正在应用新配置/);
+    assert.match(html, /新配置应用失败，当前配置保持不变/);
+    assert.match(html, /等待 VPS 上线后同步/);
+    assert.doesNotMatch(html, /revision 期望/);
+});
+
 test('manual refresh propagates data loading failures', () => {
     assert.match(html, /await refreshData\(true\)/);
     assert.match(html, /await fetchProbeData\(false, true\)/);
