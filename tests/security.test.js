@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const html = fs.readFileSync(new URL('../static/index.html', import.meta.url), 'utf8');
+const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const wrangler = fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const worker = fs.readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
@@ -12,6 +13,12 @@ test('deployment config does not contain default credentials', () => {
     assert.doesNotMatch(wrangler, /"ADMIN_PASSWORD"\s*:\s*"admin"/);
     assert.doesNotMatch(wrangler, /"PROXY_USER"\s*:\s*"kui"/);
     assert.doesNotMatch(wrangler, /"PROXY_PASS"\s*:\s*"kui"/);
+});
+
+test('deployments preserve dashboard variables and document secret types', () => {
+    assert.match(wrangler, /"keep_vars"\s*:\s*true/);
+    assert.match(readme, /`ADMIN_PASSWORD`\s*\|\s*Secret/);
+    assert.match(readme, /`PROXY_USER`\s*\/\s*`PROXY_PASS`\s*\|\s*Secret/);
 });
 
 test('proxy list opens as text instead of document-written markup', () => {

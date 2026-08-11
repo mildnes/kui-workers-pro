@@ -25,14 +25,17 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 
 住宅代理还需要设置 `PROXY_USER` 和 `PROXY_PASS`。项目不内置任何默认密码。
 
-| 配置 | 必需 | 用途 |
-| --- | --- | --- |
-| `DB` | 是 | D1 数据库 binding |
-| `VPS_PRESENCE` | 是 | VPS 实时状态 Durable Object |
-| `DASHBOARD_HUB` | 是 | 面板实时推送 Durable Object |
-| `ADMIN_PASSWORD` | 是 | 管理员登录密码 |
-| `PROXY_USER` / `PROXY_PASS` | 住宅代理需要 | SOCKS5 认证凭据 |
-| `PROXY_PUBLIC_LISTENER` | 否 | 允许公网监听住宅 SOCKS，默认 `false` |
+| 配置 | 类型 | 必需 | 用途 |
+| --- | --- | --- | --- |
+| `DB` | D1 Binding | 是 | 业务数据库 |
+| `VPS_PRESENCE` | Durable Object Binding | 是 | VPS 实时状态 |
+| `DASHBOARD_HUB` | Durable Object Binding | 是 | 面板实时推送 |
+| `ADMIN_PASSWORD` | Secret | 是 | 管理员登录密码 |
+| `PROXY_USER` / `PROXY_PASS` | Secret | 住宅代理需要 | SOCKS5 认证凭据 |
+| `ADMIN_USERNAME` | 普通变量 | 否 | 管理员用户名，默认 `admin` |
+| `PROXY_PUBLIC_LISTENER` | 普通变量 | 否 | 允许公网监听住宅 SOCKS，默认 `false` |
+
+密码和代理凭据必须在 Cloudflare 中选择 **Secret** 类型，不能写入仓库。非敏感配置使用普通变量，D1 与 Durable Objects 则在 **Bindings** 中配置。仓库已启用 `keep_vars: true`，部署到同一个 Worker 时会保留 Dashboard 中未写入 `wrangler.jsonc` 的普通变量；Secrets 本身也不会被常规部署删除。Deploy 按钮仅用于首次安装，后续应通过 Git 自动部署或 `wrangler deploy` 更新同一个 Worker。
 
 实时服务已集成到主 Worker，不需要配置 `REALTIME_URL`、`PAGES_ORIGIN` 或单独的 Realtime Worker。
 
