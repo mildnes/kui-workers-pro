@@ -99,6 +99,19 @@ PROXY_PUBLIC_LISTENER=true
 
 开放公网监听前请先轮换代理凭据并限制防火墙来源；面板会持续显示安全告警。
 
+如果 VPS 上的 Docker 容器需要使用住宅出口，不必开放公网监听。在“住宅 IP 代理”页面的 **Docker 网桥** 输入该 VPS 网桥地址（通常是 `172.17.0.1`）并下发策略。该地址会同时用于 `proxy-lite` 的 `7920` 和 Agent sing-box 的 `39482`，只绑定指定网桥地址。
+
+Compose 服务还需要加入宿主机别名，并使用宿主机网关地址访问代理：
+
+```yaml
+services:
+  your-service:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+容器内代理地址使用 `socks5h://kui:代理密码@host.docker.internal:7920`；`39482` 为本机无认证检查入口。留空 Docker 网桥字段即可恢复仅 `127.0.0.1` 监听。
+
 ## 自定义域名
 
 在 Worker 的 **Settings → Domains & Routes → Add** 中绑定域名或子域名。绑定后直接使用该域名访问面板。

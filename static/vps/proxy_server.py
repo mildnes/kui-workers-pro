@@ -242,7 +242,9 @@ def proxy_client(client: socket.socket, address: tuple[str, int]) -> None:
 def start_proxy_server(host: str, port: int) -> None:
     servers = []
     public_listener = host in {"0.0.0.0", "::", "*"}
-    ipv4_host = "0.0.0.0" if public_listener else "127.0.0.1"
+    # Private Docker bridge addresses are intentionally supported here. The
+    # controller validates the value before it reaches this process.
+    ipv4_host = "0.0.0.0" if public_listener else (host or "127.0.0.1")
     retry_delay = 1
     attempts = 0
     while attempts < 5:

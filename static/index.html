@@ -730,6 +730,11 @@
                                     <input type="number" id="slot-port" value="7920" min="1024" max="65535" class="bg-slate-900 border border-slate-700 rounded-lg py-2 w-24 text-white font-bold text-lg text-center focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner" placeholder="7920" />
                                 </div>
 
+                                <div class="flex items-center gap-3 mr-4">
+                                    <span class="text-slate-400 text-sm font-medium whitespace-nowrap">Docker 网桥:</span>
+                                    <input type="text" id="slot-listen-host" value="" maxlength="15" class="bg-slate-900 border border-slate-700 rounded-lg py-2 w-36 text-white font-mono text-sm text-center focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner" placeholder="172.17.0.1" />
+                                </div>
+
                                 <button onclick="pcSaveConfig()" class="group relative px-6 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-blue-900/20 hover:shadow-indigo-900/40 hover:-translate-y-0.5 transition-all duration-200 overflow-hidden ml-auto">
                                     <div class="absolute inset-0 bg-white/20 group-hover:translate-x-full -translate-x-full transform transition-transform duration-300 ease-in-out skew-x-12"></div>
                                     <span class="flex items-center gap-2">
@@ -1927,22 +1932,26 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 const map = await res.json();
                 const cfg0 = document.getElementById('slot-cfg-0');
                 const port = document.getElementById('slot-port');
+                const listenHost = document.getElementById('slot-listen-host');
                 const country = map["0"] || map.proxy?.country || 'JP';
                 if (cfg0) cfg0.value = String(country).toUpperCase();
                 if (port) port.value = map["port"] || map.proxy?.port || 7920;
+                if (listenHost) listenHost.value = map.proxy?.listen_host || map.listen_host || '';
             } catch(e) { console.warn('[pc] loadConfig failed:', e); }
         }
 
         async function pcSaveConfig() {
             const val = document.getElementById(`slot-cfg-0`).value.toUpperCase().trim() || 'JP';
             const port = parseInt(document.getElementById(`slot-port`).value) || 7920;
+            const listenHost = document.getElementById('slot-listen-host')?.value.trim() || '';
+            if (listenHost && !/^(?:\d{1,3}\.){3}\d{1,3}$/.test(listenHost)) { alert('❌ Docker 网桥地址必须是 IPv4 地址，例如 172.17.0.1'); return; }
             try {
                 const targets = window.kuiManagedServerIps?.() || [];
                 if (!targets.length) throw new Error('暂无已接入 VPS');
                 let text = '';
                 for (const ip of targets) {
                     const auth = await getPcAuthHeader('POST', '/api/proxy/config');
-                    const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port }) });
+                    const res = await fetch('/api/proxy/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': auth }, body: JSON.stringify({ ip, "0": val, "country": val, "port": port, "listen_host": listenHost }) });
                     text = await res.text();
                     if (!res.ok) throw new Error(text || res.status);
                     window.kuiNotifyRealtime?.(ip);

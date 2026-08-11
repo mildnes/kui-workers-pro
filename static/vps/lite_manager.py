@@ -45,6 +45,7 @@ VPS_IP = os.environ.get("VPS_IP", "")
 
 PROXY_PORT = 7920
 PROXY_PUBLIC_LISTENER = False
+PROXY_LISTEN_HOST = "127.0.0.1"
 target_country = "JP"
 last_switch_trigger = 0
 config_generation = 0
@@ -62,6 +63,19 @@ REALTIME_HTTP_INTERVAL = 60
 REALTIME_STATUS_ACTIVE_INTERVAL = 5
 REALTIME_STATUS_IDLE_INTERVAL = 30
 realtime_status_interval = REALTIME_STATUS_ACTIVE_INTERVAL
+
+def normalize_listener_host(value):
+    """Accept only a concrete IPv4 address for private bridge binding."""
+    host = str(value or "").strip()
+    if not host:
+        return "127.0.0.1"
+    try:
+        parsed = ipaddress.ip_address(host)
+        if parsed.version != 4 or parsed.is_unspecified:
+            return "127.0.0.1"
+        return str(parsed)
+    except ValueError:
+        return "127.0.0.1"
 
 state_lock = threading.Lock()
 dead_ips = set()
@@ -225,7 +239,7 @@ def fetch_controller_config():
     return None
 
 def update_config_loop():
-    global target_country, last_switch_trigger, PROXY_PORT, PROXY_PUBLIC_LISTENER, tun_main, tun_backup, last_config_log, REALTIME_URL, realtime_channel, config_generation
+    global target_country, last_switch_trigger, PROXY_PORT, PROXY_PUBLIC_LISTENER, PROXY_LISTEN_HOST, tun_main, tun_backup, last_config_log, REALTIME_URL, realtime_channel, config_generation
     while True:
         config_wakeup.clear()
         while realtime_channel and realtime_channel.enabled and not realtime_channel.connected:
@@ -261,6 +275,7 @@ def update_config_loop():
                 if isinstance(pc, dict):
                     enabled = pc.get("enabled") is not False
                     new_public_listener = pc.get("public_listener") is True
+                    new_listen_host = "::" if new_public_listener else normalize_listener_host(pc.get("listen_host"))
                     pu = str(pc.get("user", "")) or env_secret("PROXY_USER")
                     pp = str(pc.get("pass", "")) or env_secret("PROXY_PASS")
                     os.environ["PROXY_USER"] = pu
@@ -272,8 +287,9 @@ def update_config_loop():
                         proxy_server.PROXY_PASS = pp.encode()
                     if not pu or not pp:
                         print("[cfg] 代理凭证未配置，监听器保持拒绝连接状态", flush=True)
-                    if new_public_listener != PROXY_PUBLIC_LISTENER:
+                    if new_public_listener != PROXY_PUBLIC_LISTENER or new_listen_host != PROXY_LISTEN_HOST:
                         PROXY_PUBLIC_LISTENER = new_public_listener
+                        PROXY_LISTEN_HOST = new_listen_host
                         print("[cfg] 监听范围变化，重启代理服务以应用", flush=True)
                         os._exit(0)
             except Exception as e:
@@ -739,7 +755,7 @@ def maintain_pool():
         time.sleep(2)
 
 def main():
-    global PROXY_PORT, PROXY_PUBLIC_LISTENER, tun_main, target_country, last_switch_trigger, REALTIME_URL, realtime_channel
+    global PROXY_PORT, PROXY_PUBLIC_LISTENER, PROXY_LISTEN_HOST, tun_main, target_country, last_switch_trigger, REALTIME_URL, realtime_channel
     if os.geteuid() != 0: return
     check_for_updates()
     get_public_ip()
@@ -755,6 +771,7 @@ def main():
             if pc:
                 enabled = pc.get("enabled") is not False
                 PROXY_PUBLIC_LISTENER = pc.get("public_listener") is True
+                PROXY_LISTEN_HOST = "::" if PROXY_PUBLIC_LISTENER else normalize_listener_host(pc.get("listen_host"))
                 proxy_server.set_credentials((str(pc.get("user", "")) or env_secret("PROXY_USER")) if enabled else "", (str(pc.get("pass", "")) or env_secret("PROXY_PASS")) if enabled else "")
     except Exception as error:
         print(f"[cfg] initial controller sync failed, using fallback values: {error}", flush=True)
@@ -767,15 +784,16 @@ def main():
 
     realtime_channel = create_realtime_channel()
     realtime_channel.start()
-    print(f"  Proxy Controller (主备双活引擎) 启动！端口: {PROXY_PORT}，监听: {'公网' if PROXY_PUBLIC_LISTENER else '仅本机'}", flush=True)
+    listener_label = "公网" if PROXY_PUBLIC_LISTENER else PROXY_LISTEN_HOST
+    print(f"  Proxy Controller (主备双活引擎) 启动！端口: {PROXY_PORT}，监听: {listener_label}", flush=True)
     print("========================================", flush=True)
 
     threading.Thread(target=vpngate_fetch_loop, daemon=True).start()
     threading.Thread(target=update_config_loop, daemon=True).start()
-    # 默认仅监听本机；显式开启公网监听时同时绑定 IPv4/IPv6 ANY。
+    # 默认仅监听本机；也可绑定到 Docker 网桥 IPv4 地址。
     def run_proxy_server():
         try:
-            proxy_server.start_proxy_server("::" if PROXY_PUBLIC_LISTENER else "127.0.0.1", PROXY_PORT)
+            proxy_server.start_proxy_server(PROXY_LISTEN_HOST, PROXY_PORT)
         except Exception as error:
             print(f"[proxy] listener stopped: {error}; tunnel manager remains online", flush=True)
     threading.Thread(target=run_proxy_server, daemon=True).start()

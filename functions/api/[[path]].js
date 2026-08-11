@@ -58,6 +58,16 @@ async function readJsonBody(request, maxBytes) {
 
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
 
+// Proxy listeners may be exposed to a private Docker bridge, but never accept
+// arbitrary hostnames here (a hostname could resolve outside the VPS later).
+function sanitizeProxyListenHost(value) {
+    const host = String(value ?? '').trim();
+    if (!host) return '';
+    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return null;
+    const octets = host.split('.').map(Number);
+    return octets.every(octet => octet >= 0 && octet <= 255) ? host : null;
+}
+
 async function deleteVpsRecords(db, ip) {
     await db.batch([
         db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'vps' AND resource_id = ?").bind(ip),
@@ -922,7 +932,8 @@ async function proxyLocal(method, subPath, req, env, body = null) {
                     try { slotMap = JSON.parse(globalRow.value); } catch(e) {}
                 }
                 const rawCountry = (slotMap["0"] || slotMap.country || "JP").toString().toUpperCase();
-                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry, public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
+                const listenHost = sanitizeProxyListenHost(slotMap.listen_host);
+                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: listenHost || '', public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
                 const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
                 return new Response(JSON.stringify({ ...slotMap, "0": rawCountry, "port": slotMap.port || 7920, "country": rawCountry, switch_trigger: slotMap.switch_trigger || 0, proxy: proxyCfg, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' } });
             } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
@@ -936,11 +947,16 @@ async function proxyLocal(method, subPath, req, env, body = null) {
                 try { existing = JSON.parse(existingRow && existingRow.value || '{}'); } catch (error) {}
                 const rawCountry = (data["0"] || data.country || "JP").toString().toUpperCase().trim();
                 const sanitized = { ...existing, "0": rawCountry, "country": rawCountry, "port": parseInt(data.port) || 7920 };
+                if (data.listen_host !== undefined) {
+                    const listenHost = sanitizeProxyListenHost(data.listen_host);
+                    if (listenHost === null) return Response.json({ success: false, error: 'listen_host must be an IPv4 address or empty' }, { status: 400 });
+                    sanitized.listen_host = listenHost;
+                }
                 if (data.enabled !== undefined) sanitized.enabled = !!data.enabled;
                 if (data.mesh && typeof data.mesh === 'object') sanitized.mesh = data.mesh;
                 if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
                 await db.prepare("INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(configKey, JSON.stringify(sanitized)).run();
-                const proxyCfg = { enabled: true, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry, public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
+                const proxyCfg = { enabled: true, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: sanitized.listen_host || '', public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
                 return new Response(JSON.stringify({ success: true, slot_map: sanitized, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
             } catch (e) { console.error('[proxy-config-save] FAILED:', e.message); return new Response(JSON.stringify({ success: false, error: "CONFIG_WRITE_ERR: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
@@ -1290,6 +1306,8 @@ export async function onRequest(context) {
             const globalSlot = slot || await db.prepare("SELECT value FROM probe_settings WHERE key = 'proxy_slot_map'").first();
             let port = 7920; try { port = parseInt(JSON.parse(slot?.value || '{}').port) || 7920; } catch (_) {}
             try { port = parseInt(JSON.parse(globalSlot?.value || '{}').port) || 7920; } catch (_) {}
+            let listenHost = '';
+            try { listenHost = sanitizeProxyListenHost(JSON.parse(globalSlot?.value || '{}').listen_host) || ''; } catch (_) {}
             const localResidential = !env.PROXY_CTRL_URL;
             const proxyState = await db.prepare('SELECT details, last_seen FROM proxy_ctrl_servers WHERE ip = ?').bind(ip).first();
             let details = [];
@@ -1310,6 +1328,7 @@ export async function onRequest(context) {
                 reason,
                 addr: '127.0.0.1',
                 port: Number(active?.port || port),
+                check_addr: listenHost || '127.0.0.1',
                 active_exit_ip: active?.node_ip || '',
                 last_seen: Number(proxyState?.last_seen || 0),
                 user: agentAuthenticated && localResidential ? env.PROXY_USER || '' : '',
@@ -1913,4 +1932,5 @@ export async function onRequestScheduled(context) {
 export const __test = {
     buildSurgeProxyLine,
     validateSs2022Credentials,
+    sanitizeProxyListenHost,
 };

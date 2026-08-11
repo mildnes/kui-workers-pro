@@ -269,9 +269,20 @@ def _singbox_service_healthy():
 
 _warp_exit_ip = ""
 
-def _verify_warp_exit(mode):
+def normalize_check_host(value):
+    """Keep the local egress-check listener on loopback unless given IPv4."""
+    try:
+        parsed = ipaddress.ip_address(str(value or "").strip())
+        if parsed.version == 4 and not parsed.is_unspecified:
+            return str(parsed)
+    except ValueError:
+        pass
+    return "127.0.0.1"
+
+def _verify_warp_exit(mode, check_host="127.0.0.1"):
     global _warp_exit_ip
     if mode == "off": return True
+    check_host = normalize_check_host(check_host)
     checks = []
     if mode in {"ipv4", "dual"}:
         checks.append(("IPv4", "https://1.1.1.1/cdn-cgi/trace", ["-4", "-k"]))
@@ -283,7 +294,7 @@ def _verify_warp_exit(mode):
     for family, url, extra_args in checks:
         verified = False
         for _ in range(4):
-            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", "socks5://127.0.0.1:39482", *extra_args, url], capture_output=True, text=True)
+            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5://{check_host}:39482", *extra_args, url], capture_output=True, text=True)
             if result.returncode == 0 and "warp=on" in result.stdout.lower():
                 trace = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
                 ip = trace.get("ip", "")
@@ -324,9 +335,10 @@ def _verify_residential_exit(proxy):
         time.sleep(2)
     raise RuntimeError("residential proxy data-plane verification failed")
 
-def _verify_socks5_exit():
+def _verify_socks5_exit(check_host="127.0.0.1"):
+    check_host = normalize_check_host(check_host)
     for _ in range(4):
-        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", "socks5://127.0.0.1:39482", "https://api.ipify.org"], capture_output=True, text=True)
+        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
         ip = _verified_public_ip(result.stdout)
         if result.returncode == 0 and ip: return ip
         time.sleep(2)
@@ -784,7 +796,7 @@ def build_chain_outbound(target, tag):
         return None
     return outbound
 
-def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_outbound=None, warp_mode="off"):
+def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_outbound=None, warp_mode="off", egress_check_host="127.0.0.1"):
     global proxy_port_conflict
     singbox_config = {
         "log": {"level": "warn"},
@@ -792,6 +804,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         "outbounds": [{"type": "direct", "tag": "direct-out"}],
         "route": {"rules": []}
     }
+    egress_check_host = normalize_check_host(egress_check_host)
     active_certs = []
     valid_nodes = []
     listener_keys = set()
@@ -954,7 +967,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         if s5_pass:
             s5_outbound["password"] = str(s5_pass)
         singbox_config["outbounds"].append(s5_outbound)
-        singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": "127.0.0.1", "listen_port": 39482})
+        singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": egress_check_host, "listen_port": 39482})
         singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "outbound": s5_tag})
         s5_mode = socks5_outbound.get("mode", "global")
         if s5_mode == "selective":
@@ -1026,7 +1039,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             if warp_mode == "ipv4": singbox_config["route"]["rules"].append({"inbound": warp_inbounds, "ip_version": 6, "action": "reject"})
             elif warp_mode == "ipv6": singbox_config["route"]["rules"].append({"inbound": warp_inbounds, "ip_version": 4, "action": "reject"})
             singbox_config["route"]["rules"].append({"inbound": warp_inbounds, "action": "route", "outbound": "warp-out"})
-        singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": "127.0.0.1", "listen_port": 39482})
+        singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": egress_check_host, "listen_port": 39482})
         check_rule = {"inbound": ["egress-check-in"], "action": "route", "outbound": "warp-out"}
         singbox_config["route"]["rules"].append(check_rule)
 
@@ -1080,8 +1093,8 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         subprocess.run(["systemctl", "start", "sing-box"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         if not _singbox_service_healthy(): raise RuntimeError("sing-box is not healthy after start")
     if socks5_outbound and socks5_outbound.get("source") == "residential": _verify_residential_exit(socks5_outbound)
-    elif socks5_outbound and socks5_outbound.get("source") == "manual": _verify_socks5_exit()
-    elif warp_mode != "off": _verify_warp_exit(warp_mode)
+    elif socks5_outbound and socks5_outbound.get("source") == "manual": _verify_socks5_exit(egress_check_host)
+    elif warp_mode != "off": _verify_warp_exit(warp_mode, egress_check_host)
     else: _verify_native_exit()
     for filename in os.listdir("/opt/kui/"):
         if (filename.startswith("cert_") or filename.startswith("key_")) and filename.endswith(".pem") and filename not in active_certs:
@@ -1312,6 +1325,7 @@ def fetch_and_apply_configs():
                 if time.time() < retry_after: apply_egress_change = False
             runtime_egress = desired_egress if apply_egress_change else applied_egress
             residential = data.get("residential_outbound", {})
+            egress_check_host = normalize_check_host(residential.get("check_addr", "127.0.0.1")) if isinstance(residential, dict) else "127.0.0.1"
             proxy_mode = egress.get("proxy_mode", "global")
             proxy_categories = egress.get("proxy_categories", "")
             proxy_categories_list = [c.strip() for c in proxy_categories.split(",") if c.strip()] if proxy_categories else []
@@ -1326,7 +1340,7 @@ def fetch_and_apply_configs():
             config_hash = hashlib.sha256(json.dumps({"nodes": nodes, "egress": runtime_egress}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             try:
                 if runtime_egress == "residential" and not residential.get("available"): raise RuntimeError("residential proxy is unavailable")
-                build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp)
+                build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
                 if apply_egress_change:
                     egress_ip = _warp_exit_ip if runtime_egress.startswith("warp_") else (_residential_exit_ip if runtime_egress == "residential" else "")
                     result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": egress_ip}
@@ -1360,7 +1374,7 @@ def fetch_and_apply_configs():
                         else:
                             rollback_socks = {}
                         rollback_warp = applied_egress[5:] if applied_egress.startswith("warp_") else "off"
-                        build_singbox_config(nodes, current_proxy_config, peers, mesh, rollback_socks, rollback_warp)
+                        build_singbox_config(nodes, current_proxy_config, peers, mesh, rollback_socks, rollback_warp, egress_check_host)
                         rollback_healthy = _singbox_service_healthy()
                     except Exception:
                         rollback_healthy = False
