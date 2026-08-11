@@ -181,7 +181,7 @@
                     <h2 class="text-3xl font-black mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-600">系统准入</h2>
                     <input v-model="loginUser" placeholder="用户名 (默认 admin)" class="w-full bg-white/50 border border-white p-4 rounded-2xl mb-4 focus:bg-white transition-all text-slate-700">
                     <input v-model="password" type="password" placeholder="请输入密码" @keyup.enter="login" class="w-full bg-white/50 border border-white p-4 rounded-2xl mb-8 focus:bg-white transition-all text-slate-700">
-                    <button @click="login" class="w-full bg-gradient-to-r from-slate-800 to-black text-white p-4 rounded-2xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 transition-all">登 入 系统</button>
+                    <button @click="login" :disabled="loginPending" class="w-full bg-gradient-to-r from-slate-800 to-black text-white p-4 rounded-2xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:cursor-wait disabled:opacity-60">{{ loginPending ? '登 录 中...' : '登 入 系统' }}</button>
                 </div>
             </div>
 
@@ -1089,7 +1089,7 @@
         createApp({
             setup() {
                 const isLoggedIn = ref(false); const showLoginModal = ref(false); 
-                const loginUser = ref(''); const password = ref('');
+                const loginUser = ref(''); const password = ref(''); const loginPending = ref(false);
                 localStorage.removeItem('kui_auth_key'); localStorage.removeItem('kui_user'); localStorage.removeItem('kui_role');
                 const currentUser = ref(sessionStorage.getItem('kui_user') || ''); const authKey = ref(sessionStorage.getItem('kui_auth_key') || ''); const role = ref(sessionStorage.getItem('kui_role') || '');
                 const activeTab = ref(localStorage.getItem('monitor_preferred_tab') || 'probe'); 
@@ -1334,9 +1334,11 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 window.kuiManagedServerIps = () => servers.value.map(server => server.ip).filter(Boolean);
 
                 const login = async () => {
+                    if (loginPending.value) return;
                     if (!loginUser.value) loginUser.value = 'admin';
+                    loginPending.value = true;
                     try {
-                        const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser.value, password: password.value }) });
+                        const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser.value, password: password.value }), signal: AbortSignal.timeout(15000) });
                         if (res.ok) {
                             authGeneration++;
                             const data = await res.json(); authKey.value = data.token; currentUser.value = loginUser.value; role.value = data.role;
@@ -1348,7 +1350,11 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                             const data = await res.json().catch(() => ({}));
                             alert(res.status === 503 ? '⚠️ Worker 尚未配置 ADMIN_PASSWORD Secret' : `⚠️ ${data.error || '账户名或密码错误'}`);
                         }
-                    } catch (e) { alert('登录异常'); }
+                    } catch (e) {
+                        alert(e?.name === 'TimeoutError' ? '登录请求超时，请稍后重试' : '登录异常');
+                    } finally {
+                        loginPending.value = false;
+                    }
                 };
                 
                 const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
@@ -1941,7 +1947,7 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 });
 
                 return { 
-                    isLoggedIn, showLoginModal, loginUser, password, currentUser, role, activeTab, refreshing, refreshPanel,
+                    isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, refreshing, refreshPanel,
                     servers, nodes, users, groups, securityWarnings, newVps, newNodeParams, newUser, newGroupName,
                     login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
                     getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,

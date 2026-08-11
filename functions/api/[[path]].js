@@ -530,6 +530,7 @@ async function parseThirdPartySubscription(content) {
 }
 
 let schemaReadyPromise = null;
+let authSchemaReadyPromise = null;
 let lastReceiptCleanup = 0;
 
 function loginThrottleKey(request) { return request.headers.get('CF-Connecting-IP') || 'unknown'; }
@@ -546,6 +547,20 @@ async function recordLoginFailure(db, request) {
     const failures = freshWindow ? 1 : Number(row.failures || 0) + 1;
     const blockedUntil = failures >= 8 ? now + 15 * 60 * 1000 : 0;
     await db.prepare('INSERT INTO login_throttles (key, failures, window_started_at, blocked_until) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET failures = excluded.failures, window_started_at = excluded.window_started_at, blocked_until = excluded.blocked_until').bind(key, failures, freshWindow ? now : row.window_started_at, blockedUntil).run();
+}
+
+async function ensureAuthSchema(db) {
+    if (!authSchemaReadyPromise) {
+        authSchemaReadyPromise = db.batch([
+            db.prepare('CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT NOT NULL, traffic_limit INTEGER DEFAULT 0, traffic_used INTEGER DEFAULT 0, expire_time INTEGER DEFAULT 0, enable INTEGER DEFAULT 1, sub_token TEXT)'),
+            db.prepare('CREATE TABLE IF NOT EXISTS login_throttles (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0)'),
+            db.prepare('CREATE TABLE IF NOT EXISTS auth_sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at INTEGER NOT NULL)'),
+        ]).catch(error => {
+            authSchemaReadyPromise = null;
+            throw error;
+        });
+    }
+    return authSchemaReadyPromise;
 }
 
 async function initializeDbSchema(db) {
@@ -569,14 +584,28 @@ async function initializeDbSchema(db) {
         `CREATE INDEX IF NOT EXISTS idx_group_members_user ON user_group_members(username)`,
         `CREATE INDEX IF NOT EXISTS idx_group_resources_resource ON user_group_resources(resource_type, resource_id)`
     ];
-    for (const query of initQueries) await db.prepare(query).run();
+    await chunkBatch(db, initQueries.map(query => db.prepare(query)));
+    const schemaColumns = new Map();
+    const pendingColumnMigrations = [];
     const ensureColumn = async (table, name, definition) => {
-        const { results = [] } = await db.prepare(`PRAGMA table_info(${table})`).all();
-        if (!results.some(column => column.name === name)) await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`).run();
+        if (!schemaColumns.has(table)) {
+            const { results = [] } = await db.prepare(`PRAGMA table_info(${table})`).all();
+            schemaColumns.set(table, new Set(results.map(column => column.name)));
+        }
+        const knownColumns = schemaColumns.get(table);
+        if (!knownColumns.has(name)) {
+            pendingColumnMigrations.push(db.prepare(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`));
+            knownColumns.add(name);
+        }
+    };
+    const applyPendingColumnMigrations = async () => {
+        if (!pendingColumnMigrations.length) return;
+        await chunkBatch(db, pendingColumnMigrations.splice(0));
     };
     const deployment = await db.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
     if (!deployment?.val) await db.prepare("INSERT OR IGNORE INTO sys_config (key, val, ts) VALUES ('deployment_id', ?, ?)").bind(crypto.randomUUID(), Date.now()).run();
     await ensureColumn('nodes', 'network', "TEXT DEFAULT 'tcp'");
+    await applyPendingColumnMigrations();
     await db.prepare("UPDATE nodes SET network = 'http' WHERE protocol = 'H2-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run();
     await db.prepare("UPDATE nodes SET network = 'grpc' WHERE protocol = 'gRPC-Reality' AND (network IS NULL OR network = '' OR network = 'tcp')").run();
 
@@ -595,7 +624,7 @@ async function initializeDbSchema(db) {
         )`,
         `CREATE TABLE IF NOT EXISTS proxy_servers (ip TEXT PRIMARY KEY, socks_ip TEXT, port INTEGER, user TEXT, pass TEXT, country TEXT DEFAULT '', enabled INTEGER DEFAULT 1, last_seen INTEGER)`
     ];
-    for (const query of probeQueries) await db.prepare(query).run();
+    await chunkBatch(db, probeQueries.map(query => db.prepare(query)));
 
     const columns = [
         ['nodes', 'username', "TEXT DEFAULT 'admin'"],
@@ -610,6 +639,7 @@ async function initializeDbSchema(db) {
         ['probe_servers', 'last_report_id', "TEXT DEFAULT ''"], ['report_receipts', 'applied', 'INTEGER DEFAULT 1'],
     ];
     for (const [table, name, definition] of columns) await ensureColumn(table, name, definition);
+    await applyPendingColumnMigrations();
     const { results: usersWithoutToken = [] } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = ''").all();
     await chunkBatch(db, usersWithoutToken.map(user => db.prepare("UPDATE users SET sub_token = ? WHERE username = ? AND (sub_token IS NULL OR sub_token = '')").bind(crypto.randomUUID(), user.username)));
 
@@ -631,7 +661,7 @@ async function initializeDbSchema(db) {
         `CREATE TABLE IF NOT EXISTS third_party_subscriptions (id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, is_enable INTEGER DEFAULT 1, added_at INTEGER, last_fetched_at INTEGER)`,
         `CREATE TABLE IF NOT EXISTS third_party_nodes (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL, name TEXT, protocol TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, uuid TEXT, password TEXT, sni TEXT, public_key TEXT, short_id TEXT, flow TEXT, network TEXT, host TEXT, path TEXT, extra TEXT, enable INTEGER DEFAULT 1, created_at INTEGER, FOREIGN KEY(subscription_id) REFERENCES third_party_subscriptions(id) ON DELETE CASCADE)`
     ];
-    for (const query of tpsQueries) await db.prepare(query).run();
+    await chunkBatch(db, tpsQueries.map(query => db.prepare(query)));
 }
 
 async function ensureDbSchema(db) {
@@ -1706,7 +1736,7 @@ rules:
     }
 
     if (action === "login" && method === "POST") {
-        await ensureDbSchema(db);
+        await ensureAuthSchema(db);
         if (!env.ADMIN_PASSWORD) return Response.json({ error: "ADMIN_PASSWORD is not configured" }, { status: 503 });
         if (!(await loginAllowed(db, request))) return Response.json({ error: "Too many attempts" }, { status: 429, headers: { 'Retry-After': '900' } });
         let credentials;

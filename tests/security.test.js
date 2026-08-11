@@ -25,6 +25,18 @@ test('login throttling does not use the Authorization request header', () => {
     assert.match(throttle, /CF-Connecting-IP/);
 });
 
+test('login uses a minimal batched auth schema and exposes request progress', () => {
+    const loginStart = api.indexOf('if (action === "login"');
+    const loginEnd = api.indexOf('if (action === "logout"', loginStart);
+    const loginRoute = api.slice(loginStart, loginEnd);
+    assert.match(api, /async function ensureAuthSchema\(db\)[\s\S]*db\.batch\(\[/);
+    assert.match(loginRoute, /await ensureAuthSchema\(db\)/);
+    assert.doesNotMatch(loginRoute, /ensureDbSchema/);
+    assert.match(html, /:disabled="loginPending"/);
+    assert.match(html, /AbortSignal\.timeout\(15000\)/);
+    assert.match(html, /finally[\s\S]{0,100}loginPending\.value = false/);
+});
+
 test('private probe authorization is checked before the public cache', () => {
     const routeStart = api.indexOf("if (method === 'GET' && subPath === 'public')");
     const routeEnd = api.indexOf("if (method === 'GET' && subPath === 'detail')", routeStart);
@@ -47,6 +59,8 @@ test('manual refresh propagates data loading failures', () => {
 test('schema initialization does not silently accept failed migrations', () => {
     assert.doesNotMatch(api, /for \(let query of (?:initQueries|probeQueries|tpsQueries)\) \{ try/);
     assert.match(api, /PRAGMA table_info/);
+    assert.match(api, /schemaColumns = new Map\(\)/);
+    assert.match(api, /chunkBatch\(db, initQueries\.map/);
 });
 
 test('API data never returns password hashes and logout revokes sessions', () => {

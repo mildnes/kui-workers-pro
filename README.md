@@ -73,6 +73,13 @@ KUI 是一个部署在 **单一 Cloudflare Worker** 的代理节点管理与服�
 - 确认编辑器中的代码与实际仓库代码一致
 - 如不一致，手动将 `src/worker.js` 内容复制进去，保存并重新部署
 
+**⑤ 输入账号密码后点击登录无响应**
+- 先确认 Worker 已部署仓库 `main` 分支的最新版本；新版按钮会立即显示“登录中”，请求超过 15 秒会提示超时。
+- 在 **Settings → Variables and Secrets** 确认 `ADMIN_PASSWORD` 已配置，在 **Settings → Bindings** 确认 D1 binding 名称为 `DB`。
+- 重新部署后使用浏览器强制刷新，避免继续使用旧的 Worker Assets。
+- 在浏览器开发者工具的 Network 中检查 `/api/login`：`200` 表示成功，`401` 表示凭据错误，`429` 表示失败次数过多（等待 15 分钟），`503` 表示未配置 `ADMIN_PASSWORD`。
+- 如果请求仍然超时或始终没有响应，通常是旧版本仍在运行或 `DB` 绑定异常；重新核对部署版本和 D1 binding 后再次部署。
+
 部署后先在 Worker 的 **Settings → Variables and Secrets** 配置管理员密码：
 
 ```text
@@ -148,7 +155,7 @@ npx wrangler d1 create kui-worker-db
 ]
 ```
 
-项目会在首次请求时自动创建表结构，不需要额外执行 SQL migration。`DB` 是固定 binding 名称，不能改成其他名称。
+项目会在首次相关 API 请求时自动创建表结构，不需要额外执行 SQL migration。登录只初始化认证所需表，其余表结构按需批量初始化，避免 D1 冷启动阻塞认证。`DB` 是固定 binding 名称，不能改成其他名称。
 
 ### 3. 设置 Worker 名称和密钥
 
