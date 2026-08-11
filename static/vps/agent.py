@@ -109,6 +109,23 @@ def _proxy_ctrl_headers():
         return { 'User-Agent': 'Mozilla/5.0', 'Authorization': 'Basic ' + base64.b64encode(f"{PROXY_CTRL_USER}:{PROXY_CTRL_PASS}".encode()).decode() }
     return HEADERS
 
+CONTROL_REQUEST_TIMEOUT = 12
+CONTROL_REQUEST_ATTEMPTS = 3
+
+def _controller_json_request(url, *, data=None, headers=None, method=None):
+    last_error = None
+    for attempt in range(CONTROL_REQUEST_ATTEMPTS):
+        try:
+            request = urllib.request.Request(url, data=data, headers=headers or HEADERS, method=method)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=CONTROL_REQUEST_TIMEOUT) as response:
+                raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+        except Exception as error:
+            last_error = error
+            if attempt < CONTROL_REQUEST_ATTEMPTS - 1: time.sleep(2 ** attempt)
+    raise last_error
+
 last_reported_bytes = {}
 argo_tunnels = {}
 prev_cpu_total = prev_cpu_idle = 0
@@ -352,9 +369,12 @@ def _verify_native_exit():
 def _post_warp_result(payload):
     parsed = urllib.parse.urlsplit(API_URL)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    request = urllib.request.Request(f"{origin}/api/egress_result", data=json.dumps({"ip": VPS_IP, **payload}).encode(), headers={**HEADERS, "Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode())
+    return _controller_json_request(f"{origin}/api/egress_result", data=json.dumps({"ip": VPS_IP, **payload}).encode(), headers={**HEADERS, "Content-Type": "application/json"}, method="POST")
+
+def _deliver_egress_result(payload):
+    if realtime_channel and realtime_channel.connected and realtime_channel.send(payload, "config.result"):
+        return {"accepted": False, "transport": "realtime"}
+    return _post_warp_result(payload)
 
 def check_for_update():
     global last_update_check
@@ -1262,8 +1282,7 @@ def report_proxy_status():
 def fetch_and_apply_configs():
     global REALTIME_URL, realtime_channel
     try:
-        with urllib.request.urlopen(urllib.request.Request(f"{API_URL}?ip={VPS_IP}", headers=HEADERS), timeout=10) as response:
-            data = json.loads(response.read().decode('utf-8'))
+        data = _controller_json_request(f"{API_URL}?ip={VPS_IP}")
         if data.get("success"):
             persist_agent_token(data.get("agent_token"))
             new_realtime_url = data.get("realtime_url") or ""
@@ -1307,7 +1326,7 @@ def fetch_and_apply_configs():
                 local_warp = {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": ""}
             if local_warp.get("pending_result"):
                 try:
-                    ack = _post_warp_result(local_warp["pending_result"])
+                    ack = _deliver_egress_result(local_warp["pending_result"])
                     if (local_warp["pending_result"].get("success") is True and ack.get("accepted")) or revision != int(local_warp["pending_result"].get("revision", -1)):
                         _save_warp_state(local_warp["applied_mode"], local_warp["applied_revision"], deployment_id=deployment_id)
                 except Exception:
@@ -1348,10 +1367,9 @@ def fetch_and_apply_configs():
                     result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": egress_ip}
                     _save_warp_state(desired_egress, revision, result, deployment_id)
                     try:
-                        ack = _post_warp_result(result)
+                        ack = _deliver_egress_result(result)
                         if ack.get("accepted"): _save_warp_state(desired_egress, revision, deployment_id=deployment_id)
                     except Exception: pass
-                    if realtime_channel and realtime_channel.connected: realtime_channel.send(result, "config.result")
                 elif realtime_channel and realtime_channel.connected:
                     realtime_channel.send({"success": True, "component": "config", "config_hash": config_hash, "old_config_active": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000)}, "config.result")
             except Exception as error:
@@ -1386,10 +1404,9 @@ def fetch_and_apply_configs():
                     _save_warp_state(applied_egress, applied_revision, result, deployment_id)
                     _schedule_egress_retry(retry_delay)
                     try:
-                        ack = _post_warp_result(result)
+                        ack = _deliver_egress_result(result)
                         if not ack.get("accepted"): pass
                     except Exception: pass
-                    if realtime_channel and realtime_channel.connected: realtime_channel.send(result, "config.result")
                 elif realtime_channel and realtime_channel.connected:
                     realtime_channel.send({"success": False, "component": "config", "config_hash": config_hash, "error": str(error)[:500], "old_config_active": _singbox_service_healthy(), "rollback_healthy": _singbox_service_healthy(), "applied_at": int(time.time() * 1000)}, "config.result")
                 raise
@@ -1409,6 +1426,11 @@ if __name__ == "__main__":
             heartbeat_wakeup.set()
         if message.get("type") in {"config.refresh", "transport.connected", "transport.disconnected"}: config_wakeup.set()
         if message.get("type") in {"transport.connected", "transport.disconnected"}: heartbeat_wakeup.set()
+        if message.get("type") == "config.result.ack" and message.get("accepted") is True and message.get("success") is True:
+            state = _load_warp_state()
+            pending = state.get("pending_result") or {}
+            if int(pending.get("revision", -1)) == int(message.get("revision", -2)):
+                _save_warp_state(state["applied_mode"], state["applied_revision"], deployment_id=state.get("deployment_id", ""))
 
     def create_realtime_channel():
         return RealtimeChannel(REALTIME_URL, VPS_IP, TOKEN, "core", on_realtime_message)

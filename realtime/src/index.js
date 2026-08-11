@@ -318,9 +318,13 @@ export class VpsPresence extends DurableObject {
       return;
     }
     if (messageType === "config.result") {
-      const result = { success: envelope.data?.success === true, component: String(envelope.data?.component || "").slice(0, 32), revision: Number(envelope.data?.revision) || 0, desired_mode: String(envelope.data?.desired_mode || "").slice(0, 32), applied_mode: String(envelope.data?.applied_mode || "").slice(0, 32), egress_ip: String(envelope.data?.egress_ip || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), applied_at: Number(envelope.data?.applied_at) || Date.now() };
+      const result = { success: envelope.data?.success === true, component: String(envelope.data?.component || "").slice(0, 32), revision: Number(envelope.data?.revision) || 0, deployment_id: String(envelope.data?.deployment_id || "").slice(0, 64), desired_mode: String(envelope.data?.desired_mode || "").slice(0, 32), applied_mode: String(envelope.data?.applied_mode || "").slice(0, 32), egress_ip: safeProxyAddress(envelope.data?.egress_ip), error: String(envelope.data?.error || "").slice(0, 500), applied_at: Number(envelope.data?.applied_at) || Date.now() };
       this.snapshot[`${role}_config_result`] = result;
-      if (result.component === "egress") this.snapshot[`${role}_egress_result`] = result;
+      if (result.component === "egress") {
+        this.snapshot[`${role}_egress_result`] = result;
+        const accepted = await this.persistEgressResult(attachment.ip, result);
+        try { ws.send(JSON.stringify({ type: "config.result.ack", component: "egress", revision: result.revision, success: result.success, accepted, ts: Date.now() })); } catch {}
+      }
       this.snapshot[`${role}_config_result_at`] = Date.now();
       ws.serializeAttachment(attachment);
       await this.persistAndBroadcast();
@@ -361,6 +365,32 @@ export class VpsPresence extends DurableObject {
     } catch (error) {
       this.lastProxyDbPersisted = 0;
       console.error("[realtime] proxy status persistence failed", ip, error);
+    }
+  }
+
+  async persistEgressResult(ip, result) {
+    const modes = ["native", "residential", "warp_ipv4", "warp_ipv6", "warp_dual", "socks5"];
+    if (!Number.isSafeInteger(result.revision) || result.revision < 0 || !modes.includes(result.applied_mode)) return false;
+    try {
+      if (result.deployment_id) {
+        const deployment = await this.env.DB.prepare("SELECT val FROM sys_config WHERE key = 'deployment_id'").first();
+        if (deployment?.val && deployment.val !== result.deployment_id) return false;
+      }
+      let update;
+      if (result.success) {
+        const socks5Enabled = ["residential", "socks5"].includes(result.applied_mode) ? 1 : 0;
+        update = await this.env.DB.prepare("UPDATE servers SET egress_applied_mode = ?, egress_applied_revision = ?, egress_status = 'applied', egress_error = '', egress_applied_at = ?, socks5_enable = ?, warp_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, warp_applied_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, proxy_mode = CASE WHEN ? IN ('residential','socks5') THEN proxy_mode ELSE 'global' END, proxy_categories = CASE WHEN ? IN ('residential','socks5') THEN proxy_categories ELSE '' END, egress_ip = ? WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(result.applied_mode, result.revision, result.applied_at, socks5Enabled, result.applied_mode, result.applied_mode, result.applied_mode, result.applied_mode, result.applied_mode, result.applied_mode, result.egress_ip || "", ip, result.revision, result.applied_mode).run();
+      } else {
+        update = await this.env.DB.prepare("UPDATE servers SET egress_status = 'failed', egress_error = ?, egress_applied_at = ? WHERE ip = ? AND egress_revision = ? AND egress_applied_mode = ?").bind(result.error || "Egress apply failed", result.applied_at, ip, result.revision, result.applied_mode).run();
+      }
+      if (Number(update.meta?.changes || 0) > 0) return true;
+      const current = await this.env.DB.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status FROM servers WHERE ip = ?").bind(ip).first();
+      return result.success
+        ? current?.egress_status === "applied" && Number(current.egress_applied_revision) === result.revision && current.egress_applied_mode === result.applied_mode
+        : current?.egress_status === "failed" && Number(current.egress_revision) === result.revision && current.egress_applied_mode === result.applied_mode;
+    } catch (error) {
+      console.error("[realtime] egress result persistence failed", ip, error);
+      return false;
     }
   }
 

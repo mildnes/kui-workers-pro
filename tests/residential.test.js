@@ -55,3 +55,18 @@ test('realtime proxy status refreshes the residential availability record', () =
 test('residential apply failures include the controller readiness reason', () => {
     assert.match(agent, /residential\.get\("reason"\)/);
 });
+
+test('realtime egress results are persisted and acknowledged without HTTP', () => {
+    assert.match(realtime, /persistEgressResult\(attachment\.ip, result\)/);
+    assert.match(realtime, /UPDATE servers SET egress_applied_mode/);
+    assert.match(realtime, /type: "config\.result\.ack"/);
+    assert.match(agent, /message\.get\("type"\) == "config\.result\.ack"/);
+    assert.match(agent, /def _deliver_egress_result\(payload\):[\s\S]*realtime_channel\.send\(payload, "config\.result"\)[\s\S]*return _post_warp_result\(payload\)/);
+});
+
+test('agent control requests bypass environment proxies and retry transient stalls', () => {
+    assert.match(agent, /ProxyHandler\(\{\}\)/);
+    assert.match(agent, /for attempt in range\(CONTROL_REQUEST_ATTEMPTS\)/);
+    assert.match(agent, /_controller_json_request\(f"\{API_URL\}\?ip=\{VPS_IP\}"/);
+    assert.match(manager, /ProxyHandler\(\{\}\)/);
+});
