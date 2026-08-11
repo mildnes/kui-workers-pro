@@ -1951,7 +1951,8 @@ body.theme11 #app, body.theme13 #app, body.theme14 #app, body.theme15 #app, body
                 container.innerHTML = entries.map(item => {
                     const code = pcEscapeHtml(item.code.toUpperCase());
                     const count = item.nodes === null ? '—' : item.nodes;
-                    return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-pointer">${code}<span class="ml-1 text-slate-500">${count}</span></button>`;
+                    const countClass = item.nodes === null ? 'text-slate-500' : (item.nodes > 0 ? 'text-emerald-400' : 'text-rose-400');
+                    return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-pointer">${code}<span class="ml-1 ${countClass}">${count}</span></button>`;
                 }).join('');
                 container.onclick = event => {
                     const button = event.target.closest('[data-country-code]');
