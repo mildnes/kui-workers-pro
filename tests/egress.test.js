@@ -100,7 +100,10 @@ test('admins can refresh the actual VPS egress IP without reapplying configurati
     assert.match(serversPage, /aria-label="刷新 VPS 实际出口 IP"/);
     assert.match(frontend, /fetchApi\('\/api\/vps\/egress-refresh'/);
     assert.match(api, /params\.path\[1\] === "egress-refresh"/);
-    assert.match(api, /requestRealtimeEgressRefresh\(env, db, ip, requestId, new URL\(request\.url\)\.origin\)/);
+    assert.match(api, /env\.VPS_PRESENCE && typeof env\.VPS_PRESENCE\.idFromName === 'function'/);
+    assert.match(api, /VPS_PRESENCE\.get\(env\.VPS_PRESENCE\.idFromName\(`v2:\$\{ip\}:\$\{tokenHash\}`\)\)/);
+    assert.match(api, /presence\.internal\/egress-refresh/);
+    assert.match(api, /实时服务返回非 JSON 响应/);
     assert.match(realtime, /type: "egress\.refresh"/);
     assert.match(realtime, /messageType === "egress\.probe\.result"/);
     assert.match(worker, /pathname === '\/egress-refresh'/);
@@ -119,4 +122,20 @@ test('an egress apply result received before the save response still refreshes t
     assert.equal(server.egress_ip, '104.28.222.43');
     assert.match(frontend, /const alreadyApplied = vps\.egress_status === 'applied'/);
     assert.match(frontend, /if \(!alreadyApplied\) vps\.egress_status/);
+});
+
+test('the integrated Worker sends manual egress refresh directly to the presence object', async () => {
+    const requests = [];
+    const db = { prepare: () => ({ bind: () => ({ first: async () => ({ agent_token: 'agent-secret' }) }) }) };
+    const env = { VPS_PRESENCE: {
+        idFromName: name => name,
+        get: name => ({ fetch: async request => { requests.push({ name, request }); return Response.json({ success: true, request_id: request.headers.get('X-KUI-Request-ID') }); } }),
+    } };
+    const requestId = '11111111-1111-4111-8111-111111111111';
+    const result = await __test.requestRealtimeEgressRefresh(env, db, '203.0.113.8', requestId, 'https://panel.example');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.result, { success: true, request_id: requestId });
+    assert.equal(requests.length, 1);
+    assert.equal(new URL(requests[0].request.url).hostname, 'presence.internal');
+    assert.match(requests[0].name, /^v2:203\.0\.113\.8:[0-9a-f]{64}$/);
 });

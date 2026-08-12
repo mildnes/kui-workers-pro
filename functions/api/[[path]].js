@@ -266,6 +266,15 @@ async function notifyRealtimeVps(env, db, ip, pagesOrigin = '') {
 }
 
 async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin = '') {
+    if (env.VPS_PRESENCE && typeof env.VPS_PRESENCE.idFromName === 'function') {
+        const server = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(ip).first();
+        if (!server?.agent_token) return { status: 404, result: { error: 'VPS Agent Token 不存在' } };
+        const tokenHash = await sha256(server.agent_token);
+        const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(`v2:${ip}:${tokenHash}`));
+        const response = await stub.fetch(new Request('https://presence.internal/egress-refresh', { method: 'POST', headers: { 'X-KUI-Request-ID': requestId } }));
+        const result = await response.json().catch(() => ({ error: `出口检测指令失败（HTTP ${response.status}）` }));
+        return { status: response.status, result };
+    }
     const authorization = await realtimeAdminHeader(env);
     const configured = env.REALTIME_URL || (await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first())?.val;
     if (!authorization || !configured || !/^https:\/\//i.test(configured)) throw new Error('实时服务未配置');
@@ -275,9 +284,8 @@ async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin 
         body: JSON.stringify({ ip, request_id: requestId }),
         signal: AbortSignal.timeout(10000),
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) return { response, result };
-    return { response, result };
+    const result = await response.json().catch(() => ({ error: `实时服务返回非 JSON 响应（HTTP ${response.status}）` }));
+    return { status: response.status, result };
 }
 
 async function chunkBatch(db, statements, size = 100) {
@@ -2106,8 +2114,8 @@ rules:
                 const requestId = /^[0-9a-f-]{36}$/i.test(String(data.request_id || '')) ? String(data.request_id) : crypto.randomUUID();
                 if (!ip || !(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
                 try {
-                    const { response, result } = await requestRealtimeEgressRefresh(env, db, ip, requestId, new URL(request.url).origin);
-                    return Response.json(result, { status: response.status });
+                    const { status, result } = await requestRealtimeEgressRefresh(env, db, ip, requestId, new URL(request.url).origin);
+                    return Response.json(result, { status });
                 } catch (error) {
                     return Response.json({ error: error.message || '出口检测指令发送失败' }, { status: 503 });
                 }
@@ -2214,4 +2222,5 @@ export const __test = {
     validateTrafficReport,
     proxyPublicListenerEnabled,
     normalizeEgressRequest,
+    requestRealtimeEgressRefresh,
 };
