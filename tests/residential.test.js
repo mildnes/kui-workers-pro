@@ -7,6 +7,7 @@ const manager = fs.readFileSync(new URL('../static/vps/lite_manager.py', import.
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
+const frontendState = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
 const { sanitizeProxyListenHost, validateProxyReport } = __test;
 
 test('proxy-lite reports the active tunnel exit IP', () => {
@@ -16,6 +17,18 @@ test('proxy-lite reports the active tunnel exit IP', () => {
 test('Worker accepts legacy residential reports using node_ip as exit fallback', () => {
     assert.match(api, /item\.exit_ip \|\| item\.node_ip/);
     assert.match(api, /const activeExitIp = active\?\.exit_ip \|\| active\?\.node_ip \|\| ''/);
+});
+
+test('server cards expose distinct realtime active and standby residential exits', () => {
+    const frontend = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
+    assert.match(api, /const standby = Array\.isArray\(details\) \? details\.find\(item => !item\?\.active/);
+    assert.match(api, /server\.residential_standby_exit_ip = standbyExitIp/);
+    assert.match(frontend, /当前实时住宅出口/);
+    assert.match(frontend, /主 \{\{ vps\.residential_active_exit_ip/);
+    assert.match(frontend, /备 \{\{ vps\.residential_standby_exit_ip/);
+    assert.match(frontend, /配置应用时验证出口/);
+    assert.match(frontendState, /residential_active_exit_ip: active\?\.exit_ip \|\| active\?\.node_ip/);
+    assert.match(frontendState, /residential_standby_exit_ip: standby\?\.exit_ip \|\| standby\?\.node_ip/);
 });
 
 test('validates private Docker bridge listener addresses', async () => {

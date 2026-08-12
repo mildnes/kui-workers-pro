@@ -778,6 +778,19 @@ export function useKuiState() {
                           if (probe && timestamp >= Number(probe._realtime_ts || probe.last_updated || 0)) Object.assign(probe, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp });
                           if (normalizeRealtimeKey(probeDetail.value?.id) === key && timestamp >= Number(probeDetail.value?._realtime_ts || probeDetail.value?.last_updated || 0)) { Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp }); updateProbeDetailCharts(probeDetail.value); }
                       }
+                      if (resultServer && Array.isArray(snapshot.proxy?.details)) {
+                          const details = snapshot.proxy.details;
+                          const active = details.find(item => item?.active && (item.exit_ip || item.node_ip));
+                          const standby = details.find(item => !item?.active && (item.exit_ip || item.node_ip));
+                          const blockingReason = ['Worker 未配置住宅代理凭据', '外部住宅控制器模式不支持本机住宅出口'].includes(resultServer.residential_reason);
+                          Object.assign(resultServer, {
+                              residential_active_exit_ip: active?.exit_ip || active?.node_ip || '',
+                              residential_standby_exit_ip: standby?.exit_ip || standby?.node_ip || '',
+                              residential_ready: !!active && !blockingReason,
+                              residential_reason: active && !blockingReason ? '' : (resultServer.residential_reason || '住宅 OpenVPN 主通道尚未就绪'),
+                              residential_last_seen: Number(snapshot.proxy_last_seen || snapshot.updated_at || Date.now()),
+                          });
+                      }
                       window.kuiRealtimeProxySnapshots = window.kuiRealtimeProxySnapshots || {};
                       if (snapshot.proxy || snapshot.proxy_state || snapshot.proxy_config_result) { const previous = window.kuiRealtimeProxySnapshots[snapshot.ip] || {}; window.kuiRealtimeProxySnapshots[snapshot.ip] = { ...previous, ...snapshot, proxy: snapshot.proxy || previous.proxy }; if (activeTab.value === 'proxy') setTimeout(pcFetchNodes, 0); }
                   };

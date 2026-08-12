@@ -65,7 +65,14 @@
                                       <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="vps.egress_status === 'pending'" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
                                       <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ “全局代理”仅覆盖 KUI Agent 管理的节点入站流量，不会接管 VPS 系统默认路由；局部代理仅覆盖所选服务分类。</div>
                                       <div class="mt-2 rounded-xl px-3 py-2 text-[10px] font-black" :class="vps.residential_ready ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-rose-200 bg-rose-50 text-rose-700'">
-                                          <span v-if="vps.residential_ready">住宅通道已就绪<span v-if="vps.residential_active_exit_ip" class="ml-1 font-mono">出口 {{ vps.residential_active_exit_ip }}</span></span>
+                                          <template v-if="vps.residential_ready">
+                                              <div>住宅通道已就绪</div>
+                                              <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono">
+                                                  <span class="font-sans">当前实时住宅出口：</span>
+                                                  <span>主 {{ vps.residential_active_exit_ip || '等待就绪' }}</span>
+                                                  <span>备 {{ vps.residential_standby_exit_ip || '等待就绪' }}</span>
+                                              </div>
+                                          </template>
                                           <span v-else>住宅通道未就绪：{{ vps.residential_reason || '等待状态上报' }}</span>
                                       </div>
                                   </div>
@@ -92,11 +99,12 @@
                                   <div v-if="egressModeOf(vps).startsWith('warp_')" class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ WARP 出口基于 WireGuard 隧道，不会与住宅/SOCKS5 出口冲突。</div>
                                   <div class="mt-3 text-[10px] font-bold" :class="vps.egress_status === 'pending' ? 'text-amber-500' : (vps.egress_status === 'failed' ? 'text-rose-500' : (vps.egress_status === 'applied' ? 'text-emerald-500' : 'text-slate-500'))">
                                       <span v-if="vps.egress_status === 'pending'">● 正在应用新配置</span>
-                                      <span v-else-if="vps.egress_status === 'applied'">● 配置已同步<span class="ml-1 text-slate-500">· {{ egressModeLabel(vps.egress_applied_mode) }}</span><span v-if="vps.egress_ip" class="ml-1 font-mono text-indigo-500">({{ vps.egress_ip }})</span></span>
+                                      <span v-else-if="vps.egress_status === 'applied'">● 配置已同步<span class="ml-1 text-slate-500">· {{ egressModeLabel(vps.egress_applied_mode) }}</span></span>
                                       <span v-else-if="vps.egress_status === 'failed'">● 新配置应用失败，当前配置保持不变</span>
                                       <span v-else>● 等待 VPS 上线后同步</span>
                                       <div v-if="vps.egress_status === 'pending'" class="mt-1 text-slate-500">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；目标：{{ egressModeLabel(vps.egress_mode) }}</div>
                                       <div v-else-if="vps.egress_status === 'failed'" class="mt-1">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；原因：{{ vps.egress_error || '未知错误' }}</div>
+                                      <div v-if="vps.egress_status === 'applied' && vps.egress_ip" class="mt-1 text-slate-500">配置应用时验证出口：<span class="font-mono text-indigo-500">{{ vps.egress_ip }}</span></div>
                                       <div v-if="vps.egress_status === 'applied'" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }}</div>
                                       <div v-else-if="vps.egress_status === 'pending'" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }} → {{ vps.egress_revision || 0 }}</div>
                                       <div v-else class="mt-1 font-mono text-slate-400">当前版本 {{ vps.egress_applied_revision || 0 }}，目标版本 {{ vps.egress_revision || 0 }}</div>
