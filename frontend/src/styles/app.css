@@ -64,17 +64,25 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-admin-content input:not([type="checkbox"]):not([type="radio"]), .kui-admin-content select { min-height: 42px; }
 .kui-admin-content textarea { min-height: 84px; }
 .kui-admin-content button { touch-action: manipulation; }
-.kui-add-server { overflow: hidden; border: 1px solid var(--kui-color-border); border-radius: var(--kui-radius-lg); background: var(--kui-color-surface); box-shadow: var(--kui-shadow-sm); }
-.kui-add-server > summary, .kui-server-tools > summary { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; cursor: pointer; list-style: none; }
-.kui-add-server > summary { justify-content: flex-start; }
-.kui-add-server > summary::-webkit-details-marker, .kui-server-tools > summary::-webkit-details-marker { display: none; }
-.kui-add-server > summary span, .kui-server-tools > summary span { color: #334155; font-size: 13px; font-weight: 800; }
-.kui-add-server > summary small, .kui-server-tools > summary small { color: #94a3b8; font-size: 11px; }
-.kui-add-server[open] > summary, .kui-server-tools[open] > summary { border-bottom: 1px solid var(--kui-color-border); }
-.kui-add-server-form { display: flex; align-items: flex-end; gap: 12px; padding: 14px 16px 16px; }
-.kui-add-server-form input, .kui-add-server-form select { border: 1px solid #cbd5e1; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-.kui-add-server-form input:hover, .kui-add-server-form select:hover { border-color: #94a3b8; }
-.kui-add-server-form input:focus, .kui-add-server-form select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+.kui-server-tools > summary { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; cursor: pointer; list-style: none; }
+.kui-server-tools > summary::-webkit-details-marker { display: none; }
+.kui-server-tools > summary span { color: #334155; font-size: 13px; font-weight: 800; }
+.kui-server-tools > summary small { color: #94a3b8; font-size: 11px; }
+.kui-server-tools[open] > summary { border-bottom: 1px solid var(--kui-color-border); }
+.kui-add-vps-backdrop { position: fixed; inset: 0; z-index: 220; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15,23,42,.42); backdrop-filter: blur(5px); }
+.kui-add-vps-dialog { width: min(620px, 100%); overflow: hidden; border: 1px solid rgba(255,255,255,.9); border-radius: 20px; background: #fff; box-shadow: 0 24px 70px rgba(15,23,42,.24); animation: kui-dialog-in .18s ease-out; }
+@keyframes kui-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.kui-add-vps-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e2e8f0; padding: 18px 20px; }
+.kui-add-vps-header h2 { margin: 0; color: #172033; font-size: 18px; font-weight: 850; }
+.kui-add-vps-header p { margin: 3px 0 0; color: #94a3b8; font-size: 11px; font-weight: 600; }
+.kui-add-vps-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 20px; }
+.kui-add-vps-form label { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
+.kui-add-vps-form label > span { color: #64748b; font-size: 11px; font-weight: 750; }
+.kui-add-vps-form input, .kui-add-vps-form select { width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 11px; padding: 0 12px; color: #334155; background: #fff; outline: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.kui-add-vps-form input:hover, .kui-add-vps-form select:hover { border-color: #94a3b8; }
+.kui-add-vps-form input:focus, .kui-add-vps-form select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+.kui-add-vps-os { grid-column: 1 / -1; }
+.kui-add-vps-actions { display: flex; justify-content: flex-end; gap: 9px; border-top: 1px solid #e2e8f0; padding: 14px 20px; background: #f8fafc; }
 .kui-servers-page > :not([hidden]) ~ :not([hidden]) { margin-top: 10px !important; }
 .kui-server-stats, .kui-server-grid { gap: 10px !important; }
 .kui-servers-page .gap-4 { gap: .75rem; }
@@ -187,8 +195,13 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .kui-admin-content .text-3xl { font-size: 22px; }
   .kui-admin-content .text-2xl { font-size: 18px; }
   .kui-admin-content button, .kui-admin-content input:not([type="checkbox"]):not([type="radio"]), .kui-admin-content select { min-height: 44px; }
-  .kui-add-server-form { flex-direction: column; align-items: stretch; padding: 12px; }
-  .kui-add-server > summary small { display: none; }
+  .kui-add-vps-backdrop { align-items: flex-end; padding: 0; }
+  .kui-add-vps-dialog { width: 100%; max-height: 92vh; border-radius: 22px 22px 0 0; animation-name: kui-sheet-up; }
+  .kui-add-vps-header { padding: 16px; }
+  .kui-add-vps-form { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
+  .kui-add-vps-os { grid-column: auto; }
+  .kui-add-vps-actions { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .kui-add-vps-actions .kui-button { flex: 1; }
   .kui-settings-save { bottom: 72px; }
   .kui-settings-save span { display: none; }
   .kui-settings-save button { width: 100%; }

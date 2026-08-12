@@ -10,6 +10,8 @@ const serversPage = read('../frontend/src/pages/ServersPage.vue');
 const appStyles = read('../frontend/src/styles/app.css');
 const topBar = read('../frontend/src/app/TopBar.vue');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
+const addVpsModal = read('../frontend/src/components/modals/AddVpsModal.vue');
+const app = read('../frontend/src/App.vue');
 
 test('removed and hidden pages are absent from the active UI', () => {
     assert.doesNotMatch(appShell, /ServicesPage|RealmPage/);
@@ -39,6 +41,24 @@ test('public listener control is placed before settings on desktop and mobile', 
     assert.match(publicListenerPage, /防火墙或云安全组/);
 });
 
+test('VPS onboarding opens a shared modal before public listener navigation', () => {
+    const desktopAdd = desktopNavigation.indexOf('openAddVps');
+    const desktopPublic = desktopNavigation.indexOf("go('public-listener')");
+    assert.ok(desktopAdd >= 0 && desktopAdd < desktopPublic);
+    const mobileAdd = mobileNavigation.indexOf("id: 'add-vps'");
+    const mobilePublic = mobileNavigation.indexOf("id: 'public-listener'");
+    assert.ok(mobileAdd >= 0 && mobileAdd < mobilePublic);
+    assert.match(mobileNavigation, /id === 'add-vps'[\s\S]*addVpsModalOpen\.value = true/);
+    assert.doesNotMatch(serversPage, /kui-add-server|添加服务器别名、公网 IP 与系统架构/);
+    assert.match(app, /<AddVpsModal \/>/);
+    assert.match(addVpsModal, /v-if="isLoggedIn && role === 'admin' && addVpsModalOpen"/);
+    assert.match(addVpsModal, /role="dialog"/);
+    assert.match(addVpsModal, /@submit\.prevent="submit"/);
+    assert.match(addVpsModal, /v-model\.trim="newVps\.name"/);
+    assert.match(appStyles, /\.kui-add-vps-backdrop/);
+    assert.match(appStyles, /\.kui-add-vps-dialog/);
+});
+
 test('probe monitor is displayed before subscription exports and remains visible on mobile', () => {
     const probe = topBar.indexOf('探针监控');
     const exports = topBar.indexOf('订阅与导出');
@@ -56,13 +76,10 @@ test('mobile admin navigation places residential proxy before users and removes 
     assert.doesNotMatch(moreItems, /id:\s*['"]probe['"]/);
 });
 
-test('servers page uses compact Chinese overview and a clearly bordered VPS form', () => {
+test('servers page uses compact Chinese overview', () => {
     assert.doesNotMatch(topBar, /kui-page-subtitle|siteTitle \|\| 'Cluster Gateway'/);
     for (const label of ['在线服务器', '累计流量', '实时下载', '实时上传']) assert.match(serversPage, new RegExp(label));
     assert.doesNotMatch(serversPage, /ONLINE SERVERS|AGGREGATE TRAFFIC|>DOWNLOAD<|>UPLOAD</);
-    assert.match(serversPage, /接入 VPS<\/span><small>添加服务器别名、公网 IP 与系统架构/);
-    assert.match(appStyles, /\.kui-add-server > summary \{ justify-content: flex-start; \}/);
-    assert.match(appStyles, /\.kui-add-server-form input, \.kui-add-server-form select \{ border: 1px solid #cbd5e1/);
     assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
 });
 

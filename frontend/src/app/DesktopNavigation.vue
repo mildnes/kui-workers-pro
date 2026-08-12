@@ -22,6 +22,9 @@
     </nav>
 
     <div v-if="role === 'admin'" class="kui-sidebar-secondary">
+      <button @click="openAddVps">
+        <span class="kui-nav-icon">＋</span><span>接入 VPS</span>
+      </button>
       <button @click="go('public-listener')" :class="{ active: activeTab === 'public-listener' }">
         <span class="kui-nav-icon">◉</span><span>公网监听</span>
       </button>
@@ -57,7 +60,8 @@ export default {
   setup() {
     const state = inject(KUI_KEY);
     const go = id => { state.activeTab.value = id; if (id === 'probe') state.probeDetailId.value = null; };
-    return { ...state, adminItems, userItems, go };
+    const openAddVps = () => { state.addVpsModalOpen.value = true; };
+    return { ...state, adminItems, userItems, go, openAddVps };
   },
 };
 </script>

@@ -32,7 +32,7 @@ const primaryAdminItems = [
   { id: 'users', icon: '◎', label: '用户' },
 ];
 const moreItems = [
-  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'public-listener', icon: '◉', label: '公网监听' }, { id: 'settings', icon: '⚙', label: '设置' },
+  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'add-vps', icon: '＋', label: '接入 VPS' }, { id: 'public-listener', icon: '◉', label: '公网监听' }, { id: 'settings', icon: '⚙', label: '设置' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针监控' },
@@ -43,7 +43,12 @@ export default {
   setup() {
     const state = inject(KUI_KEY);
     const moreOpen = ref(false);
-    const go = id => { state.activeTab.value = id; moreOpen.value = false; if (id === 'probe') state.probeDetailId.value = null; };
+    const go = id => {
+      moreOpen.value = false;
+      if (id === 'add-vps') { state.addVpsModalOpen.value = true; return; }
+      state.activeTab.value = id;
+      if (id === 'probe') state.probeDetailId.value = null;
+    };
     return { ...state, go, moreIds, moreItems, moreOpen, primaryAdminItems, userItems };
   },
 };
