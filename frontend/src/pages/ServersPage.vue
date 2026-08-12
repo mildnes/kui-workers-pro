@@ -51,8 +51,8 @@
                               </div>
                               <div class="kui-server-chart bg-white/40 p-4 rounded-2xl border border-white"><div class="text-[10px] text-slate-400 font-bold tracking-wider mb-2">7-DAY TRAFFIC TREND</div><div :id="'chart-' + vps.ip" class="w-full h-32"></div></div>
                               <div class="kui-egress-panel bg-sky-50/70 p-4 rounded-[1.5rem] border border-sky-100 mt-3">
-                                  <div class="mb-3"><div class="text-xs font-black text-sky-700 tracking-wider">节点出口</div><div class="text-[10px] text-sky-500/80 mt-0.5">手动下拉选择；系统保证 SOCKS5 与 WARP 不会同时启用</div></div>
-                                  <select :value="egressModeOf(vps)" @change="onEgressModeChange(vps, $event.target.value)" :disabled="vps.egress_status === 'pending'" class="w-full bg-white border border-sky-200 p-3 rounded-xl text-sm font-black text-slate-700 outline-none disabled:opacity-50">
+                                  <div class="mb-3"><div class="text-xs font-black text-sky-700 tracking-wider">节点出口</div><div class="text-[10px] text-sky-500/80 mt-0.5">手动下拉选择；住宅、SOCKS5 与 WARP 三种代理出口互斥</div></div>
+                                  <select :value="egressModeOf(vps)" @change="onEgressModeChange(vps, $event.target.value)" :disabled="['pending', 'preparing'].includes(vps.egress_status)" class="w-full bg-white border border-sky-200 p-3 rounded-xl text-sm font-black text-slate-700 outline-none disabled:opacity-50">
                                       <option value="native">原生出口</option>
                                       <option value="warp_ipv4">WARP IPv4</option>
                                       <option value="warp_ipv6">WARP IPv6</option>
@@ -68,7 +68,7 @@
                                       <div v-if="proxyModeOf(vps) === 'selective'" class="flex flex-wrap gap-1.5 mb-2">
                                           <button v-for="cat in proxyCategoryOptions" :key="cat.key" @click="toggleProxyCategory(vps, cat.key)" :class="proxyCategoryActive(vps, cat.key) ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200'" class="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all">{{ cat.label }}</button>
                                       </div>
-                                      <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="vps.egress_status === 'pending'" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
+                                      <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="['pending', 'preparing'].includes(vps.egress_status)" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
                                       <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ “全局代理”仅覆盖 KUI Agent 管理的节点入站流量，不会接管 VPS 系统默认路由；局部代理仅覆盖所选服务分类。</div>
                                       <div class="mt-2 rounded-xl px-3 py-2 text-[10px] font-black" :class="vps.residential_ready ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-rose-200 bg-rose-50 text-rose-700'">
                                           <template v-if="vps.residential_ready">
@@ -89,8 +89,9 @@
                                       </div>
                                       <div class="grid grid-cols-2 gap-2">
                                           <input v-model="vps._socks5_user" placeholder="用户名（可选）" class="bg-white border border-sky-200 p-2 rounded-xl text-sm font-medium text-slate-700 outline-none">
-                                          <input v-model="vps._socks5_pass" placeholder="密码（可选）" type="password" class="bg-white border border-sky-200 p-2 rounded-xl text-sm font-medium text-slate-700 outline-none">
+                                          <input v-model="vps._socks5_pass" :placeholder="vps.socks5_password_set ? '密码（留空保留现有密码）' : '密码（可选）'" type="password" autocomplete="new-password" class="bg-white border border-sky-200 p-2 rounded-xl text-sm font-medium text-slate-700 outline-none">
                                       </div>
+                                      <label v-if="vps.socks5_password_set" class="flex items-center gap-2 px-1 text-[10px] font-bold text-slate-500"><input v-model="vps._socks5_clear_password" type="checkbox" class="rounded border-slate-300">清除已保存用户名和密码，改为无认证</label>
                                       <div class="flex gap-2 mb-1">
                                           <button @click="setProxyMode(vps, 'socks5', 'global')" :class="proxyModeOf(vps) === 'global' ? 'bg-sky-600 text-white shadow-md' : 'bg-white text-slate-600 border border-sky-200'" class="flex-1 py-2 rounded-xl text-xs font-black transition-all">全局代理</button>
                                           <button @click="setProxyMode(vps, 'socks5', 'selective')" :class="proxyModeOf(vps) === 'selective' ? 'bg-sky-600 text-white shadow-md' : 'bg-white text-slate-600 border border-sky-200'" class="flex-1 py-2 rounded-xl text-xs font-black transition-all">局部代理</button>
@@ -98,26 +99,28 @@
                                       <div v-if="proxyModeOf(vps) === 'selective'" class="flex flex-wrap gap-1.5 mb-1">
                                           <button v-for="cat in proxyCategoryOptions" :key="cat.key" @click="toggleProxyCategory(vps, cat.key)" :class="proxyCategoryActive(vps, cat.key) ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200'" class="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all">{{ cat.label }}</button>
                                       </div>
-                                      <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="vps.egress_status === 'pending'" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
-                                      <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ 填写 SOCKS5 代理地址后点击全局/局部代理按钮应用。</div>
+                                      <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="['pending', 'preparing'].includes(vps.egress_status)" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
+                                      <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ 填写 SOCKS5 代理地址后点击全局/局部代理按钮应用。局部分流按域名识别，直接 IP 访问无法归类。</div>
                                   </div>
                                   <div v-if="egressModeOf(vps) === 'native'" class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">VPS 本机原生网络出口，不经过任何代理或隧道。</div>
-                                  <div v-if="egressModeOf(vps).startsWith('warp_')" class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ WARP 出口基于 WireGuard 隧道，不会与住宅/SOCKS5 出口冲突。</div>
-                                  <div class="mt-3 text-[10px] font-bold" :class="vps.egress_status === 'pending' ? 'text-amber-500' : (vps.egress_status === 'failed' ? 'text-rose-500' : (vps.egress_status === 'applied' ? 'text-emerald-500' : 'text-slate-500'))">
+                                  <div v-if="egressModeOf(vps).startsWith('warp_')" class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ WARP、住宅代理和手动 SOCKS5 是互斥的节点出口模式。切换到 WARP 不会停止住宅通道服务，但当前节点流量只使用 WARP。</div>
+                                  <div class="mt-3 text-[10px] font-bold" :class="['pending', 'preparing'].includes(vps.egress_status) ? 'text-amber-500' : (vps.egress_status === 'failed' ? 'text-rose-500' : (vps.egress_status === 'applied' ? 'text-emerald-500' : 'text-slate-500'))">
                                       <span v-if="vps.egress_status === 'pending'">● 正在应用新配置</span>
+                                      <span v-else-if="vps.egress_status === 'preparing'">● WARP 环境准备中</span>
                                       <span v-else-if="vps.egress_status === 'applied'">● 配置已同步<span class="ml-1 text-slate-500">· {{ egressModeLabel(vps.egress_applied_mode) }}</span></span>
                                       <span v-else-if="vps.egress_status === 'failed'">● 新配置应用失败，当前配置保持不变</span>
                                       <span v-else>● 等待 VPS 上线后同步</span>
                                       <div v-if="vps.egress_status === 'pending'" class="mt-1 text-slate-500">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；目标：{{ egressModeLabel(vps.egress_mode) }}</div>
+                                      <div v-else-if="vps.egress_status === 'preparing'" class="mt-1 text-slate-500">首次启用正在后台注册 WARP，住宅通道与当前出口保持运行。</div>
                                       <div v-else-if="vps.egress_status === 'failed'" class="mt-1">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；原因：{{ vps.egress_error || '未知错误' }}</div>
                                       <div v-if="vps.egress_status === 'applied'" class="mt-1 flex items-end justify-between gap-3 text-slate-500">
                                           <span class="min-w-0 flex-1">配置应用时验证出口：<span class="break-all font-mono text-indigo-500">{{ vps.egress_ip || '--' }}</span></span>
                                           <span class="ml-auto whitespace-nowrap font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }}</span>
                                       </div>
-                                      <div v-else-if="vps.egress_status === 'pending'" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }} → {{ vps.egress_revision || 0 }}</div>
+                                      <div v-else-if="['pending', 'preparing'].includes(vps.egress_status)" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }} → {{ vps.egress_revision || 0 }}</div>
                                       <div v-else class="mt-1 font-mono text-slate-400">当前版本 {{ vps.egress_applied_revision || 0 }}，目标版本 {{ vps.egress_revision || 0 }}</div>
                                   </div>
-                                  <button v-if="vps.egress_status !== 'pending' && (vps.egress_status === 'failed' || Number(vps.egress_revision || 0) !== Number(vps.egress_applied_revision || 0))" @click="forceReapplyEgress(vps)" class="mt-2 w-full rounded-xl border border-sky-200 bg-white py-2 text-[11px] font-black text-sky-700 hover:bg-sky-50">重新下发当前出口配置</button>
+                                  <button v-if="!['pending', 'preparing'].includes(vps.egress_status) && (vps.egress_status === 'failed' || Number(vps.egress_revision || 0) !== Number(vps.egress_applied_revision || 0))" @click="forceReapplyEgress(vps)" class="mt-2 w-full rounded-xl border border-sky-200 bg-white py-2 text-[11px] font-black text-sky-700 hover:bg-sky-50">重新下发当前出口配置</button>
                               </div>
                           </div>
 

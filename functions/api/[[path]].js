@@ -59,6 +59,76 @@ async function readJsonBody(request, maxBytes) {
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
 function safeProxyAddress(value) { const address = String(value || '').trim(); return validIp(address) ? address : ''; }
 
+const EGRESS_MODES = new Set(['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5']);
+const PROXY_CATEGORIES = new Set(['youtube', 'ai', 'google', 'streaming']);
+
+function normalizeProxyCategories(value, required = false) {
+    const raw = String(value || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+    const invalid = raw.filter(item => !PROXY_CATEGORIES.has(item));
+    if (invalid.length) throw new Error(`Invalid proxy category: ${invalid[0]}`);
+    const categories = [...new Set(raw)].sort((left, right) => [...PROXY_CATEGORIES].indexOf(left) - [...PROXY_CATEGORIES].indexOf(right));
+    if (required && !categories.length) throw new Error('Selective proxy mode requires at least one category');
+    return categories.join(',');
+}
+
+function normalizeSocks5Address(value) {
+    const address = String(value || '').trim();
+    if (!address || address.length > 253 || /[\x00-\x20\x7f/?#@]/.test(address) || address.includes('://')) throw new Error('Invalid SOCKS5 address');
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)) {
+        if (!address.split('.').map(Number).every(part => part >= 0 && part <= 255)) throw new Error('Invalid SOCKS5 address');
+        return address;
+    }
+    if (address.includes(':')) {
+        const unwrapped = address.startsWith('[') && address.endsWith(']') ? address.slice(1, -1) : address;
+        try {
+            const parsed = new URL(`http://[${unwrapped}]/`);
+            if (!parsed.hostname.startsWith('[') || !parsed.hostname.endsWith(']')) throw new Error();
+        } catch { throw new Error('Invalid SOCKS5 address'); }
+        return unwrapped.toLowerCase();
+    }
+    if (!/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(address)) throw new Error('Invalid SOCKS5 address');
+    return address.toLowerCase();
+}
+
+function normalizeCredential(value, label, maxLength) {
+    const text = String(value || '');
+    if (text.length > maxLength || /[\x00-\x1f\x7f]/.test(text)) throw new Error(`Invalid SOCKS5 ${label}`);
+    return text;
+}
+
+function normalizeEgressRequest(data, current = {}) {
+    const mode = String(data?.egress_mode || '');
+    if (!EGRESS_MODES.has(mode)) throw new Error('Invalid egress mode');
+    const supportsProxyRules = mode === 'residential' || mode === 'socks5';
+    const proxyMode = supportsProxyRules && data.proxy_mode === 'selective' ? 'selective' : 'global';
+    const proxyCategories = supportsProxyRules ? normalizeProxyCategories(data.proxy_categories, proxyMode === 'selective') : '';
+    const desiredConfig = { mode, proxy_mode: proxyMode, proxy_categories: proxyCategories };
+    let socks5 = null;
+    if (mode === 'socks5') {
+        const port = Number(data.socks5_port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid SOCKS5 port');
+        const currentPassword = String(current.socks5_pass || '');
+        const suppliedPassword = normalizeCredential(data.socks5_pass, 'password', 128);
+        const password = data.socks5_clear_password === true ? '' : (suppliedPassword || currentPassword);
+        socks5 = {
+            addr: normalizeSocks5Address(data.socks5_addr),
+            port,
+            user: data.socks5_clear_password === true ? '' : normalizeCredential(data.socks5_user, 'username', 64),
+            pass: password,
+        };
+        desiredConfig.socks5 = socks5;
+    }
+    return { mode, proxyMode, proxyCategories, socks5, desiredConfig };
+}
+
+function parseEgressConfig(value, fallback) {
+    try {
+        const parsed = JSON.parse(value || '');
+        if (parsed && EGRESS_MODES.has(parsed.mode)) return parsed;
+    } catch {}
+    return fallback;
+}
+
 // Proxy listeners may be exposed to a private Docker bridge, but never accept
 // arbitrary hostnames here (a hostname could resolve outside the VPS later).
 function sanitizeProxyListenHost(value) {
@@ -648,15 +718,26 @@ async function initializeDbSchema(db) {
         ['servers', 'disk', 'INTEGER DEFAULT 0'], ['servers', 'load', 'TEXT DEFAULT ""'], ['servers', 'uptime', 'TEXT DEFAULT ""'],
         ['servers', 'net_in_speed', 'INTEGER DEFAULT 0'], ['servers', 'net_out_speed', 'INTEGER DEFAULT 0'], ['servers', 'tcp_conn', 'INTEGER DEFAULT 0'], ['servers', 'udp_conn', 'INTEGER DEFAULT 0'],
         ['users', 'sub_token', 'TEXT'], ['probe_servers', 'reset_day', "TEXT DEFAULT '1'"],
-        ['servers', 'socks5_enable', 'INTEGER DEFAULT 0'], ['servers', 'socks5_addr', 'TEXT DEFAULT ""'], ['servers', 'socks5_port', 'INTEGER DEFAULT 0'], ['servers', 'socks5_user', 'TEXT DEFAULT ""'], ['servers', 'socks5_pass', 'TEXT DEFAULT ""'],
-        ['servers', 'socks5_mode', "TEXT DEFAULT 'global'"], ['servers', 'socks5_domains', "TEXT DEFAULT ''"], ['servers', 'agent_token', 'TEXT'],
-        ['servers', 'warp_mode', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_applied_mode', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'warp_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'warp_status', "TEXT NOT NULL DEFAULT 'off'"], ['servers', 'warp_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'warp_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
-        ['servers', 'egress_pending', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_applied_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_status', "TEXT NOT NULL DEFAULT 'applied'"], ['servers', 'egress_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
+        ['servers', 'socks5_addr', 'TEXT DEFAULT ""'], ['servers', 'socks5_port', 'INTEGER DEFAULT 0'], ['servers', 'socks5_user', 'TEXT DEFAULT ""'], ['servers', 'socks5_pass', 'TEXT DEFAULT ""'], ['servers', 'agent_token', 'TEXT'],
+        ['servers', 'egress_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_applied_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_status', "TEXT NOT NULL DEFAULT 'applied'"], ['servers', 'egress_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
+        ['servers', 'egress_desired_config', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_config', "TEXT NOT NULL DEFAULT ''"],
         ['servers', 'proxy_mode', "TEXT DEFAULT 'global'"], ['servers', 'proxy_categories', "TEXT DEFAULT ''"], ['servers', 'egress_ip', "TEXT DEFAULT ''"],
         ['probe_servers', 'last_report_id', "TEXT DEFAULT ''"], ['report_receipts', 'applied', 'INTEGER DEFAULT 1'],
     ];
     for (const [table, name, definition] of columns) await ensureColumn(table, name, definition);
     await applyPendingColumnMigrations();
+    await db.prepare(`UPDATE servers SET egress_desired_config = json_object(
+        'mode', COALESCE(NULLIF(egress_mode, ''), 'native'),
+        'proxy_mode', COALESCE(NULLIF(proxy_mode, ''), 'global'),
+        'proxy_categories', COALESCE(proxy_categories, ''),
+        'socks5', CASE WHEN egress_mode = 'socks5' THEN json_object('addr', COALESCE(socks5_addr, ''), 'port', COALESCE(socks5_port, 0), 'user', COALESCE(socks5_user, ''), 'pass', COALESCE(socks5_pass, '')) ELSE NULL END
+    ) WHERE egress_desired_config IS NULL OR egress_desired_config = ''`).run();
+    await db.prepare(`UPDATE servers SET egress_applied_config = json_object(
+        'mode', COALESCE(NULLIF(egress_applied_mode, ''), 'native'),
+        'proxy_mode', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(NULLIF(proxy_mode, ''), 'global') ELSE 'global' END,
+        'proxy_categories', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(proxy_categories, '') ELSE '' END,
+        'socks5', CASE WHEN egress_applied_mode = 'socks5' THEN json_object('addr', COALESCE(socks5_addr, ''), 'port', COALESCE(socks5_port, 0), 'user', COALESCE(socks5_user, ''), 'pass', COALESCE(socks5_pass, '')) ELSE NULL END
+    ) WHERE egress_applied_config IS NULL OR egress_applied_config = ''`).run();
     const { results: usersWithoutToken = [] } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = ''").all();
     await chunkBatch(db, usersWithoutToken.map(user => db.prepare("UPDATE users SET sub_token = ? WHERE username = ? AND (sub_token IS NULL OR sub_token = '')").bind(crypto.randomUUID(), user.username)));
 
@@ -1369,12 +1450,36 @@ export async function onRequest(context) {
             const t = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_toggle_' || ?").bind(ip).first();
             if (t && t.value) { try { proxyCfg.toggle = JSON.parse(t.value); } catch (ex) {} }
         } catch (ex) {}
-        let socks5_outbound = { enabled: false };
         let egress = { desired_mode: 'native', applied_mode: 'native', revision: 0, applied_revision: 0, status: 'applied', error: '', applied_at: 0 };
         let residential_outbound = { available: false, ready: false, reason: '住宅代理尚未上报可用状态' };
         try {
-            const s = await db.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, egress_ip, socks5_addr, socks5_port, socks5_user, socks5_pass FROM servers WHERE ip = ?").bind(ip).first();
-            if (s) egress = { desired_mode: s.egress_mode || 'native', applied_mode: s.egress_applied_mode || 'native', revision: Number(s.egress_revision || 0), applied_revision: Number(s.egress_applied_revision || 0), status: s.egress_status || 'applied', error: s.egress_error || '', applied_at: Number(s.egress_applied_at || 0), proxy_mode: s.proxy_mode || 'global', proxy_categories: s.proxy_categories || '', egress_ip: s.egress_ip || '', socks5_addr: s.socks5_addr || '', socks5_port: Number(s.socks5_port || 0), socks5_user: s.socks5_user || '', socks5_pass: s.socks5_pass || '' };
+            const s = await db.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status, egress_error, egress_applied_at, egress_desired_config, egress_applied_config, proxy_mode, proxy_categories, egress_ip, socks5_addr, socks5_port, socks5_user, socks5_pass FROM servers WHERE ip = ?").bind(ip).first();
+            if (s) {
+                const legacyDesired = { mode: s.egress_mode || 'native', proxy_mode: s.proxy_mode || 'global', proxy_categories: s.proxy_categories || '' };
+                if (legacyDesired.mode === 'socks5') legacyDesired.socks5 = { addr: s.socks5_addr || '', port: Number(s.socks5_port || 0), user: s.socks5_user || '', pass: s.socks5_pass || '' };
+                const legacyApplied = { ...legacyDesired, mode: s.egress_applied_mode || 'native' };
+                const desiredConfig = parseEgressConfig(s.egress_desired_config, legacyDesired);
+                const appliedConfig = parseEgressConfig(s.egress_applied_config, legacyApplied);
+                const desiredSocks5 = desiredConfig.mode === 'socks5' && desiredConfig.socks5 ? desiredConfig.socks5 : {};
+                egress = {
+                    desired_mode: desiredConfig.mode,
+                    applied_mode: appliedConfig.mode,
+                    revision: Number(s.egress_revision || 0),
+                    applied_revision: Number(s.egress_applied_revision || 0),
+                    status: s.egress_status || 'applied',
+                    error: s.egress_error || '',
+                    applied_at: Number(s.egress_applied_at || 0),
+                    proxy_mode: desiredConfig.proxy_mode || 'global',
+                    proxy_categories: desiredConfig.proxy_categories || '',
+                    egress_ip: s.egress_ip || '',
+                    socks5_addr: desiredSocks5.addr || '',
+                    socks5_port: Number(desiredSocks5.port || 0),
+                    socks5_user: desiredSocks5.user || '',
+                    socks5_pass: agentAuthenticated ? desiredSocks5.pass || '' : '',
+                    desired_config: agentAuthenticated ? desiredConfig : undefined,
+                    applied_config: agentAuthenticated ? appliedConfig : undefined,
+                };
+            }
             const slot = await db.prepare("SELECT value FROM probe_settings WHERE key = ?").bind(`proxy_slot_map_${ip}`).first();
             const globalSlot = slot || await db.prepare("SELECT value FROM probe_settings WHERE key = 'proxy_slot_map'").first();
             let port = 7920; try { port = parseInt(JSON.parse(slot?.value || '{}').port) || 7920; } catch (_) {}
@@ -1419,27 +1524,20 @@ export async function onRequest(context) {
             const body = await request.json();
             const ip = body.ip || request.headers.get('X-KUI-IP');
             if (!ip || !(await verifyAgent(request.headers.get('Authorization'), ip, db, env))) return new Response('Unauthorized', { status: 401 });
-            const modes = ['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5'];
+        const modes = [...EGRESS_MODES];
         const revision = Number(body.revision);
         if (!Number.isSafeInteger(revision) || revision < 0 || !modes.includes(body.applied_mode)) return Response.json({ error: 'Invalid egress result' }, { status: 400 });
         const deploymentId = await getDeploymentId(db);
         if (body.deployment_id && body.deployment_id !== deploymentId) return Response.json({ error: 'Stale deployment state', deployment_id: deploymentId }, { status: 409 });
         const success = body.success === true;
-        const status = success ? 'applied' : 'failed';
         const error = success ? '' : String(body.error || 'Egress apply failed').slice(0, 500);
         const egress_ip = body.egress_ip ? String(body.egress_ip).slice(0, 64) : '';
         let result;
-        if (success) {
-            const s5_enable = body.applied_mode === 'residential' || body.applied_mode === 'socks5' ? 1 : 0;
-            try {
-                result = await db.prepare("UPDATE servers SET egress_applied_mode = ?, egress_applied_revision = ?, egress_status = 'applied', egress_error = '', egress_applied_at = ?, socks5_enable = ?, warp_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, warp_applied_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, proxy_mode = CASE WHEN ? IN ('residential','socks5') THEN proxy_mode ELSE 'global' END, proxy_categories = CASE WHEN ? IN ('residential','socks5') THEN proxy_categories ELSE '' END, egress_ip = ? WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(body.applied_mode, revision, Date.now(), s5_enable, body.applied_mode, body.applied_mode, body.applied_mode, body.applied_mode, body.applied_mode, body.applied_mode, egress_ip, ip, revision, body.applied_mode).run();
-            } catch (sqlErr) {
-                try {
-                    result = await db.prepare("UPDATE servers SET egress_applied_mode = ?, egress_applied_revision = ?, egress_status = 'applied', egress_error = '', egress_applied_at = ?, socks5_enable = ?, warp_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, warp_applied_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, egress_ip = ? WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(body.applied_mode, revision, Date.now(), s5_enable, body.applied_mode, body.applied_mode, body.applied_mode, body.applied_mode, egress_ip, ip, revision, body.applied_mode).run();
-                } catch (sqlErr2) {
-                    result = await db.prepare("UPDATE servers SET egress_applied_mode = ?, egress_applied_revision = ?, egress_status = 'applied', egress_error = '', egress_applied_at = ?, socks5_enable = ?, warp_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END, warp_applied_mode = CASE WHEN ? LIKE 'warp_%' THEN substr(?, 6) ELSE 'off' END WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(body.applied_mode, revision, Date.now(), s5_enable, body.applied_mode, body.applied_mode, body.applied_mode, body.applied_mode, ip, revision, body.applied_mode).run();
-                }
-            }
+        if (body.status === 'preparing') {
+            const message = String(body.message || 'WARP environment is preparing').slice(0, 500);
+            result = await db.prepare("UPDATE servers SET egress_status = 'preparing', egress_error = ? WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(message, ip, revision, body.desired_mode).run();
+        } else if (success) {
+            result = await db.prepare("UPDATE servers SET egress_applied_mode = ?, egress_applied_revision = ?, egress_applied_config = egress_desired_config, egress_status = 'applied', egress_error = '', egress_applied_at = ?, egress_ip = ? WHERE ip = ? AND egress_revision = ? AND egress_mode = ?").bind(body.applied_mode, revision, Date.now(), egress_ip, ip, revision, body.applied_mode).run();
         } else {
             result = await db.prepare("UPDATE servers SET egress_status = 'failed', egress_error = ?, egress_applied_at = ? WHERE ip = ? AND egress_revision = ? AND egress_applied_mode = ?").bind(error, Date.now(), ip, revision, body.applied_mode).run();
         }
@@ -1829,7 +1927,13 @@ rules:
     try {
         if (action === "data") {
             const servers = isAdmin
-                ? (await db.prepare("SELECT * FROM servers").all()).results
+                ? (await db.prepare(`SELECT ip, name, cpu, mem, last_report, alert_sent, disk, load, uptime,
+                    net_in_speed, net_out_speed, tcp_conn, udp_conn, agent_token,
+                    egress_mode, egress_applied_mode, egress_revision, egress_applied_revision,
+                    egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, egress_ip,
+                    socks5_addr, socks5_port, socks5_user,
+                    CASE WHEN COALESCE(socks5_pass, '') <> '' THEN 1 ELSE 0 END AS socks5_password_set
+                    FROM servers`).all()).results
                 : (await db.prepare("SELECT ip, name, cpu, mem, last_report, disk, load, uptime, net_in_speed, net_out_speed, tcp_conn, udp_conn FROM servers").all()).results;
             if (isAdmin) {
                 const cutoff = Date.now() - 300000;
@@ -1982,7 +2086,28 @@ rules:
         if (action === "vps" && isAdmin) {
             await ensureDbSchema(db);
             if (method === "POST") { const { ip, name } = await request.json(); if (!/^[0-9A-Fa-f:.]{2,64}$/.test(String(ip || ''))) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 }); const agentToken = crypto.randomUUID(); const inserted = await db.prepare("INSERT INTO servers (ip, name, alert_sent, agent_token) SELECT ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM servers) < 100 ON CONFLICT(ip) DO NOTHING RETURNING ip").bind(ip, String(name || ip).slice(0, 100), agentToken).first(); if (!inserted) { if (await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first()) return Response.json({ error: 'VPS already exists' }, { status: 409 }); return Response.json({ error: "当前版本最多管理 100 台 VPS" }, { status: 409 }); } return Response.json({ success: true }); }
-            if (method === "PUT") { const data = await request.json(); const ip = data.ip; if (!ip) return Response.json({ error: 'IP required' }, { status: 400 }); if (data.egress_mode === undefined) return Response.json({ error: 'Use egress_mode to configure node egress' }, { status: 400 }); const modes = ['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5']; if (!modes.includes(data.egress_mode)) return Response.json({ error: 'Invalid egress mode' }, { status: 400 }); if (data.egress_mode === 'residential' && env.PROXY_CTRL_URL) return Response.json({ error: '外部住宅控制器模式不支持本机住宅节点出口' }, { status: 409 }); if (data.egress_mode === 'residential' && (!env.PROXY_USER || !env.PROXY_PASS)) return Response.json({ error: 'Pages 未配置住宅代理凭据' }, { status: 503 }); const proxyMode = data.proxy_mode === 'selective' ? 'selective' : 'global'; const proxyCategories = data.proxy_categories ? String(data.proxy_categories) : ''; const socks5Addr = String(data.socks5_addr || '').slice(0, 128); const socks5Port = Math.min(65535, Math.max(1, Number(data.socks5_port) || 0)); const socks5User = String(data.socks5_user || '').slice(0, 64); const socks5Pass = String(data.socks5_pass || '').slice(0, 128); let changed; if (data.egress_mode === 'socks5' && socks5Addr && socks5Port) { changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', proxy_mode = ?, proxy_categories = ?, socks5_addr = ?, socks5_port = ?, socks5_user = ?, socks5_pass = ? WHERE ip = ? RETURNING egress_revision").bind(data.egress_mode, proxyMode, proxyCategories, socks5Addr, socks5Port, socks5User, socks5Pass, ip).first(); } else { changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', proxy_mode = ?, proxy_categories = ? WHERE ip = ? RETURNING egress_revision").bind(data.egress_mode, proxyMode, proxyCategories, ip).first(); } if (!changed) return Response.json({ error: 'VPS not found' }, { status: 404 }); context.waitUntil(notifyRealtimeVps(env, db, ip).catch(() => {})); return Response.json({ success: true, ip, egress_mode: data.egress_mode, egress_revision: Number(changed.egress_revision), egress_status: 'pending', proxy_mode: proxyMode, proxy_categories: proxyCategories, socks5_addr: data.egress_mode === 'socks5' ? socks5Addr : '', socks5_port: data.egress_mode === 'socks5' ? socks5Port : 0 }); }
+            if (method === "PUT") {
+                const data = await readJsonBody(request, 16 * 1024);
+                const ip = String(data.ip || '');
+                if (!ip) return Response.json({ error: 'IP required' }, { status: 400 });
+                if (data.egress_mode === undefined) return Response.json({ error: 'Use egress_mode to configure node egress' }, { status: 400 });
+                if (data.egress_mode === 'residential' && env.PROXY_CTRL_URL) return Response.json({ error: '外部住宅控制器模式不支持本机住宅节点出口' }, { status: 409 });
+                if (data.egress_mode === 'residential' && (!env.PROXY_USER || !env.PROXY_PASS)) return Response.json({ error: 'Pages 未配置住宅代理凭据' }, { status: 503 });
+                const current = await db.prepare('SELECT socks5_pass FROM servers WHERE ip = ?').bind(ip).first();
+                if (!current) return Response.json({ error: 'VPS not found' }, { status: 404 });
+                let normalized;
+                try { normalized = normalizeEgressRequest(data, current); }
+                catch (error) { return Response.json({ error: error.message || 'Invalid egress configuration' }, { status: 400 }); }
+                const { mode, proxyMode, proxyCategories, socks5, desiredConfig } = normalized;
+                let changed;
+                if (socks5) {
+                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ?, socks5_addr = ?, socks5_port = ?, socks5_user = ?, socks5_pass = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, socks5.addr, socks5.port, socks5.user, socks5.pass, ip).first();
+                } else {
+                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, ip).first();
+                }
+                context.waitUntil(notifyRealtimeVps(env, db, ip).catch(() => {}));
+                return Response.json({ success: true, ip, egress_mode: mode, egress_revision: Number(changed.egress_revision), egress_status: 'pending', proxy_mode: proxyMode, proxy_categories: proxyCategories, socks5_addr: socks5?.addr || '', socks5_port: socks5?.port || 0, socks5_user: socks5?.user || '', socks5_password_set: !!socks5?.pass });
+            }
             if (method === "DELETE") { 
                 const ip = new URL(request.url).searchParams.get("ip"); 
                 await deleteVpsRecords(db, ip);
@@ -2061,4 +2186,5 @@ export const __test = {
     validateProxyReport,
     validateTrafficReport,
     proxyPublicListenerEnabled,
+    normalizeEgressRequest,
 };

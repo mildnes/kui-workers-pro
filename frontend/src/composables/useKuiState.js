@@ -423,8 +423,14 @@ export function useKuiState() {
                       if (!kuiFetchPromise) kuiFetchPromise = (async () => {
                       try {
                           const res = await fetchApi('/api/data'); const data = await res.json();
-                          const liveByIp = new Map(servers.value.filter(item => item._realtime_ts).map(item => [normalizeRealtimeKey(item.ip), item]));
-                          servers.value = (data.servers || []).map(item => { const live = liveByIp.get(normalizeRealtimeKey(item.ip)); return live && live._realtime_ts > Number(item.last_report || 0) ? { ...item, ...live } : item; }); nodes.value = data.nodes || []; users.value = data.users || []; groups.value = (data.groups || []).map(group => { let members = []; let resources = []; try { members = JSON.parse(group.members || '[]'); } catch (e) {} try { resources = JSON.parse(group.resources || '[]'); } catch (e) {} groupDrafts[group.id] = { members: Array.isArray(members) ? members : [], resources: Array.isArray(resources) ? resources.map(resource => `${resource.type}:${resource.id}`) : [] }; return group; });
+                          const previousByIp = new Map(servers.value.map(item => [normalizeRealtimeKey(item.ip), item]));
+                          const draftFields = ['_egress_mode_draft', '_socks5_addr', '_socks5_port', '_socks5_user', '_socks5_pass', '_socks5_clear_password', '_proxy_categories_dirty'];
+                          servers.value = (data.servers || []).map(item => {
+                              const previous = previousByIp.get(normalizeRealtimeKey(item.ip));
+                              const merged = previous?._realtime_ts > Number(item.last_report || 0) ? { ...item, ...previous } : { ...item };
+                              if (previous) for (const field of draftFields) if (previous[field] !== undefined) merged[field] = previous[field];
+                              return merged;
+                          }); nodes.value = data.nodes || []; users.value = data.users || []; groups.value = (data.groups || []).map(group => { let members = []; let resources = []; try { members = JSON.parse(group.members || '[]'); } catch (e) {} try { resources = JSON.parse(group.resources || '[]'); } catch (e) {} groupDrafts[group.id] = { members: Array.isArray(members) ? members : [], resources: Array.isArray(resources) ? resources.map(resource => `${resource.type}:${resource.id}`) : [] }; return group; });
                           if (data.siteTitle) { siteTitle.value = data.siteTitle; siteTitleInput.value = data.siteTitle; }
                           if (data.mySubToken) mySubToken.value = data.mySubToken;
                           securityWarnings.value = data.securityWarnings || [];
@@ -435,7 +441,7 @@ export function useKuiState() {
                               if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: generateSs2022Password(), relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
                               if (!newNodeParams[s.ip].ss_password) newNodeParams[s.ip].ss_password = generateSs2022Password(newNodeParams[s.ip].ss_method);
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
-                              if (s.egress_mode === 'socks5' || s.socks5_addr) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = s.socks5_pass || ''; }
+                              if ((s.egress_mode === 'socks5' || s.socks5_addr) && s._socks5_addr === undefined) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = ''; s._socks5_clear_password = false; }
                           });
                       if (activeTab.value === 'nodes' && !throwOnError) await loadTrafficStats();
                       
@@ -535,15 +541,18 @@ export function useKuiState() {
                       }
                   };
                   const egressModeLabel = mode => ({ native: '原生出口', residential: '住宅 IP 代理', warp_ipv4: 'WARP IPv4', warp_ipv6: 'WARP IPv6', warp_dual: 'WARP 双栈', socks5: '手动 SOCKS5' }[mode] || mode);
-                  const egressModeOf = vps => vps.egress_mode || 'native';
+                  const egressModeOf = vps => vps._egress_mode_draft || vps.egress_mode || 'native';
                   const proxyModeOf = vps => vps.proxy_mode || 'global';
                   const onEgressModeChange = (vps, mode) => {
                       if (mode === 'socks5') {
                           vps._socks5_addr = vps._socks5_addr || vps.socks5_addr || '';
                           vps._socks5_port = vps._socks5_port || vps.socks5_port || 1080;
                           vps._socks5_user = vps._socks5_user || vps.socks5_user || '';
-                          vps._socks5_pass = vps._socks5_pass || vps.socks5_pass || '';
+                          vps._socks5_pass = '';
+                          vps._egress_mode_draft = 'socks5';
+                          return;
                       }
+                      vps._egress_mode_draft = '';
                       updateVpsEgress(vps, mode, null, null);
                   };
                   const proxyCategoriesOf = vps => vps.proxy_categories || '';
@@ -560,12 +569,12 @@ export function useKuiState() {
                   const setProxyMode = async (vps, mode, proxyMode) => {
                       const categories = proxyMode === 'selective' ? proxyCategoriesOf(vps) : '';
                       if (proxyMode === 'selective') {
-                          vps.egress_mode = mode;
+                          vps._egress_mode_draft = mode;
                           vps.proxy_mode = 'selective';
                           vps._proxy_categories_dirty = true;
                           return;
                       }
-                      if (egressModeOf(vps) === mode && proxyModeOf(vps) === proxyMode && proxyCategoriesOf(vps) === categories) return;
+                      if (mode !== 'socks5' && !vps._egress_mode_draft && vps.egress_mode === mode && proxyModeOf(vps) === proxyMode && proxyCategoriesOf(vps) === categories) return;
                       await updateVpsEgress(vps, mode, proxyMode, categories);
                   };
                   const applyProxyCategories = async vps => {
@@ -574,19 +583,22 @@ export function useKuiState() {
                       await updateVpsEgress(vps, egressModeOf(vps), 'selective', categories);
                   };
                   const updateVpsEgress = async (vps, mode, proxy_mode, proxy_categories) => {
-                      if (vps.egress_status === 'pending') return;
-                      const prevMode = egressModeOf(vps); const prevProxyMode = proxyModeOf(vps); const prevCats = proxyCategoriesOf(vps);
+                      if (['pending', 'preparing'].includes(vps.egress_status)) return;
+                      const targetMode = mode || egressModeOf(vps);
+                      const prevMode = vps.egress_mode || 'native'; const prevDraftMode = vps._egress_mode_draft || ''; const prevStatus = vps.egress_status; const prevProxyMode = proxyModeOf(vps); const prevCats = proxyCategoriesOf(vps);
                       vps.egress_status = 'pending';
-                      if (mode) vps.egress_mode = mode;
+                      vps.egress_mode = targetMode;
+                      vps._egress_mode_draft = '';
                       if (proxy_mode !== null) vps.proxy_mode = proxy_mode;
                       if (proxy_categories !== null) vps.proxy_categories = proxy_categories;
                       try {
-                          const body = { ip: vps.ip, egress_mode: vps.egress_mode };
-                          if (vps.egress_mode === 'residential') { body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || ''; }
-                          if (vps.egress_mode === 'socks5') {
+                          const body = { ip: vps.ip, egress_mode: targetMode };
+                          if (targetMode === 'residential') { body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || ''; }
+                          if (targetMode === 'socks5') {
                               body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || '';
                               body.socks5_addr = vps._socks5_addr || ''; body.socks5_port = vps._socks5_port || 1080;
                               body.socks5_user = vps._socks5_user || ''; body.socks5_pass = vps._socks5_pass || '';
+                              body.socks5_clear_password = vps._socks5_clear_password === true;
                           }
                           const res = await fetchApi('/api/vps', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
                           const saved = await res.json();
@@ -595,11 +607,13 @@ export function useKuiState() {
                           vps.proxy_categories = saved.proxy_categories || '';
                           vps._proxy_categories_dirty = false;
                           vps.socks5_addr = saved.socks5_addr || ''; vps.socks5_port = saved.socks5_port || 0;
-                          vps.socks5_user = saved.socks5_user || ''; vps.socks5_pass = saved.socks5_pass || '';
-                      } catch (error) { vps.egress_mode = prevMode; vps.proxy_mode = prevProxyMode; vps.proxy_categories = prevCats; vps.egress_status = 'failed'; alert(error.message || `出口切换失败，仍保持 ${egressModeLabel(prevMode)}`); }
+                          vps.socks5_user = saved.socks5_user || ''; vps.socks5_password_set = saved.socks5_password_set === true;
+                          vps._socks5_pass = ''; vps._socks5_clear_password = false;
+                      } catch (error) { vps.egress_mode = prevMode; vps._egress_mode_draft = prevDraftMode || (targetMode === 'socks5' ? 'socks5' : ''); vps.proxy_mode = prevProxyMode; vps.proxy_categories = prevCats; vps.egress_status = prevStatus; }
                   };
                   const forceReapplyEgress = async vps => {
-                      await updateVpsEgress(vps, egressModeOf(vps), proxyModeOf(vps), proxyCategoriesOf(vps));
+                      vps._egress_mode_draft = '';
+                      await updateVpsEgress(vps, vps.egress_mode || 'native', proxyModeOf(vps), proxyCategoriesOf(vps));
                   };
 
                   const addNode = async (ip) => {
@@ -832,7 +846,7 @@ export function useKuiState() {
                       const key = normalizeRealtimeKey(snapshot.ip);
                       const resultServer = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
                       const egressResult = snapshot.core_egress_result || snapshot.core_config_result;
-                      if (resultServer && egressResult?.component === 'egress' && Number(egressResult.revision) === Number(resultServer.egress_revision)) { resultServer.egress_status = egressResult.success ? 'applied' : 'failed'; resultServer.egress_applied_mode = egressResult.applied_mode; resultServer.egress_error = egressResult.error || ''; if (resultServer.egress_status === 'applied') resultServer.egress_applied_revision = egressResult.revision; if (egressResult.egress_ip) resultServer.egress_ip = egressResult.egress_ip; }
+                      if (resultServer && egressResult?.component === 'egress' && Number(egressResult.revision) === Number(resultServer.egress_revision)) { resultServer.egress_status = egressResult.status === 'preparing' ? 'preparing' : (egressResult.success ? 'applied' : 'failed'); resultServer.egress_applied_mode = egressResult.applied_mode; resultServer.egress_error = egressResult.status === 'preparing' ? (egressResult.message || '') : (egressResult.error || ''); if (resultServer.egress_status === 'applied') resultServer.egress_applied_revision = egressResult.revision; if (egressResult.egress_ip) resultServer.egress_ip = egressResult.egress_ip; }
                       if (snapshot.core) {
                           const timestamp = Number(snapshot.core_last_seen || snapshot.updated_at || 0);
                           const server = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);

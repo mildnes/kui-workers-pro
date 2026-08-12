@@ -35,7 +35,7 @@ if sys.stdout.encoding != 'UTF-8':
 CONF_FILE = "/opt/kui/config.json"
 SINGBOX_CONF_PATH = "/etc/sing-box/config.json"
 WARP_CONF_PATH = "/opt/kui/warp.json"
-WARP_STATE_PATH = "/opt/kui/egress-state.json"
+EGRESS_STATE_PATH = "/opt/kui/egress-state.json"
 TRAFFIC_STATE_PATH = "/opt/kui/traffic-state.json"
 WGCF_VERSION = "2.2.31"
 WGCF_ASSETS = {
@@ -194,22 +194,36 @@ def _ensure_wgcf():
     os.replace(temp_path, target)
     return target
 
-def _load_or_create_warp_profile():
+def _validate_warp_profile(profile):
+    required = {"private_key", "ipv4_address", "ipv6_address", "peer_address", "peer_port", "peer_public_key"}
+    if not isinstance(profile, dict) or not required.issubset(profile):
+        raise ValueError("incomplete WARP profile")
+    ipv4 = ipaddress.ip_interface(profile["ipv4_address"])
+    ipv6 = ipaddress.ip_interface(profile["ipv6_address"])
+    ipaddress.ip_address(profile["peer_address"])
+    if ipv4.version != 4 or ipv6.version != 6:
+        raise ValueError("invalid WARP address families")
+    peer_port = int(profile["peer_port"])
+    mtu = int(profile.get("mtu", 1280))
+    if not 1 <= peer_port <= 65535 or not 1280 <= mtu <= 1420:
+        raise ValueError("invalid WARP port or MTU")
+    if len(base64.b64decode(profile["private_key"], validate=True)) != 32 or len(base64.b64decode(profile["peer_public_key"], validate=True)) != 32:
+        raise ValueError("invalid WARP key")
+    profile["peer_host"] = str(profile.get("peer_host") or "engage.cloudflareclient.com").strip("[]")
+    return profile
+
+def _load_warp_profile():
     if os.path.exists(WARP_CONF_PATH):
         try:
             with open(WARP_CONF_PATH, "r", encoding="utf-8") as profile_file:
-                profile = json.load(profile_file)
-            required = {"private_key", "ipv4_address", "ipv6_address", "peer_address", "peer_port", "peer_public_key"}
-            if required.issubset(profile):
-                ipv4 = ipaddress.ip_interface(profile["ipv4_address"]); ipv6 = ipaddress.ip_interface(profile["ipv6_address"]); ipaddress.ip_address(profile["peer_address"])
-                if ipv4.version != 4 or ipv6.version != 6: raise ValueError("invalid WARP address families")
-                peer_port = int(profile["peer_port"]); mtu = int(profile.get("mtu", 1280))
-                if not 1 <= peer_port <= 65535 or not 1280 <= mtu <= 1420: raise ValueError("invalid WARP port or MTU")
-                if len(base64.b64decode(profile["private_key"], validate=True)) != 32 or len(base64.b64decode(profile["peer_public_key"], validate=True)) != 32: raise ValueError("invalid WARP key")
-                os.chmod(WARP_CONF_PATH, 0o600)
-                return profile
+                profile = _validate_warp_profile(json.load(profile_file))
+            os.chmod(WARP_CONF_PATH, 0o600)
+            return profile
         except Exception:
-            pass
+            return None
+    return None
+
+def _create_warp_profile():
     wgcf = _ensure_wgcf()
     workdir = tempfile.mkdtemp(prefix="kui-warp-", dir="/opt/kui")
     try:
@@ -245,6 +259,7 @@ def _load_or_create_warp_profile():
             "ipv4_address": ipv4_address,
             "ipv6_address": ipv6_address,
             "peer_address": endpoint_ips[0][4][0],
+            "peer_host": endpoint_host.strip("[]"),
             "peer_port": int(endpoint_port),
             "peer_public_key": parser.get("Peer", "PublicKey"),
             "mtu": int(parser.get("Interface", "MTU", fallback="1280")),
@@ -258,32 +273,130 @@ def _load_or_create_warp_profile():
             os.fsync(profile_file.fileno())
         os.chmod(temp_profile, 0o600)
         os.replace(temp_profile, WARP_CONF_PATH)
-        return profile
+        return _validate_warp_profile(profile)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
-def _load_warp_state():
+_warp_prepare_lock = threading.Lock()
+_warp_prepare_thread = None
+_warp_prepare_error = ""
+_warp_prepare_failed_at = 0
+
+class EgressPreparing(RuntimeError):
+    pass
+
+def _prepare_warp_profile_async():
+    global _warp_prepare_thread, _warp_prepare_error, _warp_prepare_failed_at
+    if _load_warp_profile():
+        return True
+    with _warp_prepare_lock:
+        if _warp_prepare_thread and _warp_prepare_thread.is_alive():
+            return False
+        if _warp_prepare_error and time.time() - _warp_prepare_failed_at < 300:
+            raise RuntimeError(f"WARP profile preparation failed: {_warp_prepare_error}")
+        _warp_prepare_error = ""
+
+        def prepare():
+            global _warp_prepare_error, _warp_prepare_failed_at
+            try:
+                _create_warp_profile()
+                print("[agent] WARP profile is ready", flush=True)
+            except Exception as error:
+                _warp_prepare_error = str(error)[:500]
+                _warp_prepare_failed_at = time.time()
+                print(f"[agent] WARP profile preparation failed: {_warp_prepare_error}", flush=True)
+            finally:
+                config_wakeup.set()
+
+        _warp_prepare_thread = threading.Thread(target=prepare, name="kui-warp-profile", daemon=True)
+        _warp_prepare_thread.start()
+        return False
+
+def _require_warp_profile():
+    profile = _load_warp_profile()
+    if profile:
+        return profile
+    if not _prepare_warp_profile_async():
+        raise EgressPreparing("WARP profile is preparing in the background")
+    profile = _load_warp_profile()
+    if not profile:
+        raise RuntimeError("WARP profile is unavailable")
+    return profile
+
+def _refresh_warp_endpoint():
+    profile = _load_warp_profile()
+    if not profile:
+        return False
+    host = str(profile.get("peer_host") or "engage.cloudflareclient.com").strip("[]")
+    addresses = socket.getaddrinfo(host, int(profile["peer_port"]), socket.AF_UNSPEC, socket.SOCK_DGRAM)
+    candidates = list(dict.fromkeys(item[4][0] for item in addresses if item[4]))
+    if not candidates:
+        return False
+    current = profile.get("peer_address")
     try:
-        with open(WARP_STATE_PATH, "r", encoding="utf-8") as state_file:
+        current_family = ipaddress.ip_address(current).version
+        candidates.sort(key=lambda address: (ipaddress.ip_address(address).version != current_family, ipaddress.ip_address(address).version != 4))
+    except ValueError:
+        candidates.sort(key=lambda address: ipaddress.ip_address(address).version != 4)
+    profile["peer_address"] = next((address for address in candidates if address != current), candidates[0])
+    profile["peer_host"] = host
+    _write_json_state(WARP_CONF_PATH, profile)
+    print(f"[agent] refreshed WARP endpoint: {host} -> {profile['peer_address']}", flush=True)
+    return True
+
+def _load_egress_state():
+    try:
+        with open(EGRESS_STATE_PATH, "r", encoding="utf-8") as state_file:
             state = json.load(state_file)
         mode = state.get("applied_mode", "native")
         if mode in {"off", "ipv4", "ipv6", "dual"}: mode = "native" if mode == "off" else f"warp_{mode}"
-        return {"applied_mode": mode, "applied_revision": int(state.get("applied_revision", 0)), "pending_result": state.get("pending_result"), "deployment_id": str(state.get("deployment_id", ""))}
+        applied_config = state.get("applied_config") if isinstance(state.get("applied_config"), dict) else {"mode": mode, "proxy_mode": "global", "proxy_categories": ""}
+        applied_config["mode"] = mode
+        return {"applied_mode": mode, "applied_revision": int(state.get("applied_revision", 0)), "applied_config": applied_config, "pending_result": state.get("pending_result"), "deployment_id": str(state.get("deployment_id", ""))}
     except Exception:
-        return {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": ""}
+        return {"applied_mode": "native", "applied_revision": 0, "applied_config": {"mode": "native", "proxy_mode": "global", "proxy_categories": ""}, "pending_result": None, "deployment_id": ""}
 
-def _save_warp_state(mode, revision, pending_result=None, deployment_id=""):
-    descriptor, temp_path = tempfile.mkstemp(prefix="warp-state.", suffix=".tmp", dir="/opt/kui")
-    with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
-        json.dump({"applied_mode": mode, "applied_revision": int(revision), "pending_result": pending_result, "deployment_id": str(deployment_id or "")}, state_file)
-        state_file.flush(); os.fsync(state_file.fileno())
-    os.chmod(temp_path, 0o600)
-    os.replace(temp_path, WARP_STATE_PATH)
+def _save_egress_state(mode, revision, pending_result=None, deployment_id="", applied_config=None):
+    config = dict(applied_config) if isinstance(applied_config, dict) else {"mode": mode, "proxy_mode": "global", "proxy_categories": ""}
+    config["mode"] = mode
+    _write_json_state(EGRESS_STATE_PATH, {"applied_mode": mode, "applied_revision": int(revision), "applied_config": config, "pending_result": pending_result, "deployment_id": str(deployment_id or "")})
 
 def _singbox_service_healthy():
     if os.path.exists("/etc/alpine-release"):
         return subprocess.run(["rc-service", "sing-box", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode == 0
     return subprocess.run(["systemctl", "is-active", "--quiet", "sing-box"], timeout=15).returncode == 0
+
+def _restore_singbox_config(config_text):
+    if not config_text:
+        return False
+    try:
+        restore_path = SINGBOX_CONF_PATH + ".restore"
+        with open(restore_path, "w", encoding="utf-8") as restore_file:
+            restore_file.write(config_text)
+            restore_file.flush()
+            os.fsync(restore_file.fileno())
+        os.chmod(restore_path, 0o600)
+        os.replace(restore_path, SINGBOX_CONF_PATH)
+        if os.path.exists("/etc/alpine-release"):
+            restarted = subprocess.run(["rc-service", "sing-box", "restart"], capture_output=True, text=True, timeout=30)
+        else:
+            restarted = subprocess.run(["systemctl", "restart", "sing-box"], capture_output=True, text=True, timeout=30)
+        return restarted.returncode == 0 and _singbox_service_healthy()
+    except Exception as error:
+        print(f"[agent] failed to restore previous sing-box config: {error}", flush=True)
+        return False
+
+def _restore_last_good_singbox():
+    backup_path = SINGBOX_CONF_PATH + ".last-good"
+    if not os.path.exists(backup_path):
+        return False
+    try:
+        with open(backup_path, "r", encoding="utf-8") as backup_file:
+            previous_config = backup_file.read()
+        return _restore_singbox_config(previous_config)
+    except Exception as error:
+        print(f"[agent] failed to restore last-good sing-box config: {error}", flush=True)
+        return False
 
 _warp_exit_ip = ""
 
@@ -299,7 +412,8 @@ def normalize_check_host(value):
 
 def _verify_warp_exit(mode, check_host="127.0.0.1"):
     global _warp_exit_ip
-    if mode == "off": return True
+    _warp_exit_ip = ""
+    if mode == "off": return ""
     check_host = normalize_check_host(check_host)
     checks = []
     if mode in {"ipv4", "dual"}:
@@ -320,7 +434,7 @@ def _verify_warp_exit(mode, check_host="127.0.0.1"):
                 verified = True; break
             time.sleep(2)
         if not verified: raise RuntimeError(f"WARP {family} data-plane verification failed")
-    return True
+    return _warp_exit_ip
 
 _residential_exit_ip = ""
 
@@ -333,6 +447,7 @@ def _verified_public_ip(value):
 
 def _verify_residential_exit(proxy):
     global _residential_exit_ip
+    _residential_exit_ip = ""
     try:
         port = int(proxy.get("port") or PROXY_PORT)
     except (TypeError, ValueError):
@@ -355,7 +470,7 @@ def _verify_residential_exit(proxy):
             ip = _verified_public_ip(result.stdout)
             if result.returncode == 0 and ip and ip != VPS_IP:
                 _residential_exit_ip = ip
-                return True
+                return ip
             error = result.stderr.strip()[-200:] or (f"invalid exit IP: {result.stdout.strip()[:64]}" if result.returncode == 0 else f"curl exit {result.returncode}")
             if attempt == 0:
                 time.sleep(1)
@@ -373,8 +488,10 @@ def _verify_socks5_exit(check_host="127.0.0.1"):
 
 def _verify_native_exit():
     result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "https://api.ipify.org"], capture_output=True, text=True)
-    if result.returncode != 0 or not _verified_public_ip(result.stdout):
+    ip = _verified_public_ip(result.stdout)
+    if result.returncode != 0 or not ip:
         raise RuntimeError("native data-plane verification failed")
+    return ip
 
 def _post_warp_result(payload):
     parsed = urllib.parse.urlsplit(API_URL)
@@ -385,6 +502,46 @@ def _deliver_egress_result(payload):
     if realtime_channel and realtime_channel.connected and realtime_channel.send(payload, "config.result"):
         return {"accepted": False, "transport": "realtime"}
     return _post_warp_result(payload)
+
+EGRESS_MODES = {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}
+PROXY_CATEGORIES = {"youtube", "ai", "google", "streaming"}
+
+def _normalize_egress_config(value, fallback_mode="native", fallback=None):
+    source = value if isinstance(value, dict) else (fallback if isinstance(fallback, dict) else {})
+    mode = str(source.get("mode") or fallback_mode)
+    if mode not in EGRESS_MODES:
+        mode = fallback_mode if fallback_mode in EGRESS_MODES else "native"
+    proxy_mode = "selective" if source.get("proxy_mode") == "selective" and mode in {"residential", "socks5"} else "global"
+    raw_categories = source.get("proxy_categories", "")
+    if isinstance(raw_categories, str):
+        categories = [item.strip().lower() for item in raw_categories.split(",") if item.strip().lower() in PROXY_CATEGORIES]
+    elif isinstance(raw_categories, list):
+        categories = [str(item).strip().lower() for item in raw_categories if str(item).strip().lower() in PROXY_CATEGORIES]
+    else:
+        categories = []
+    config = {"mode": mode, "proxy_mode": proxy_mode, "proxy_categories": ",".join(dict.fromkeys(categories))}
+    if mode == "socks5":
+        socks = source.get("socks5") if isinstance(source.get("socks5"), dict) else {}
+        config["socks5"] = {"addr": str(socks.get("addr") or ""), "port": int(socks.get("port") or 0), "user": str(socks.get("user") or ""), "pass": str(socks.get("pass") or "")}
+    return config
+
+def _runtime_egress_args(config, residential, egress_check_host):
+    mode = config["mode"]
+    proxy_mode = config.get("proxy_mode", "global")
+    categories = [item for item in config.get("proxy_categories", "").split(",") if item]
+    proxy_domains = json.dumps({"categories": categories}) if proxy_mode == "selective" and categories else ""
+    if mode == "residential":
+        residential_addr = normalize_check_host(residential.get("addr", "127.0.0.1"))
+        if residential_addr == "127.0.0.1" and egress_check_host != "127.0.0.1":
+            residential_addr = egress_check_host
+        socks = {"enabled": True, "source": "residential", "addr": residential_addr, "check_addr": egress_check_host, "port": residential.get("port", 7920), "user": residential.get("user", ""), "pass": residential.get("pass", ""), "mode": proxy_mode, "domains": proxy_domains}
+    elif mode == "socks5":
+        manual = config.get("socks5") or {}
+        socks = {"enabled": True, "source": "manual", "addr": manual.get("addr", ""), "port": int(manual.get("port", 0)), "user": manual.get("user", ""), "pass": manual.get("pass", ""), "mode": proxy_mode, "domains": proxy_domains}
+    else:
+        socks = {}
+    warp = mode[5:] if mode.startswith("warp_") else "off"
+    return socks, warp
 
 def check_for_update():
     global last_update_check
@@ -1048,7 +1205,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             raise RuntimeError("WARP cannot be combined with residential mesh routing")
         if socks5_outbound and socks5_outbound.get("enabled"):
             raise RuntimeError("SOCKS5 outbound and WARP outbound cannot be enabled together")
-        profile = _load_or_create_warp_profile()
+        profile = _require_warp_profile()
         addresses = []
         allowed_ips = []
         if warp_mode in {"ipv4", "dual"}:
@@ -1131,14 +1288,19 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
     else:
         subprocess.run(["systemctl", "start", "sing-box"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         if not _singbox_service_healthy(): raise RuntimeError("sing-box is not healthy after start")
-    if socks5_outbound and socks5_outbound.get("source") == "residential": _verify_residential_exit(socks5_outbound)
-    elif socks5_outbound and socks5_outbound.get("source") == "manual": _verify_socks5_exit(egress_check_host)
-    elif warp_mode != "off": _verify_warp_exit(warp_mode, egress_check_host)
-    else: _verify_native_exit()
+    try:
+        if socks5_outbound and socks5_outbound.get("source") == "residential": verified_egress_ip = _verify_residential_exit(socks5_outbound)
+        elif socks5_outbound and socks5_outbound.get("source") == "manual": verified_egress_ip = _verify_socks5_exit(egress_check_host)
+        elif warp_mode != "off": verified_egress_ip = _verify_warp_exit(warp_mode, egress_check_host)
+        else: verified_egress_ip = _verify_native_exit()
+    except Exception as verification_error:
+        rollback_healthy = new_config_str == old_config_str or _restore_singbox_config(old_config_str)
+        raise RuntimeError(f"{verification_error}; previous_config_restored={str(rollback_healthy).lower()}") from verification_error
     for filename in os.listdir("/opt/kui/"):
         if (filename.startswith("cert_") or filename.startswith("key_")) and filename.endswith(".pem") and filename not in active_certs:
             try: os.remove(os.path.join("/opt/kui/", filename))
             except OSError: pass
+    return verified_egress_ip
 
 def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
     global last_reported_bytes, last_reported_system_bytes, global_interval, fast_mode, dynamic_ping, pending_report_id, pending_report_bytes, pending_node_traffic, pending_system_bytes, pending_report_payload, last_http_report
@@ -1348,102 +1510,97 @@ def fetch_and_apply_configs():
                 if exit_ip and exit_ip != "ANY":
                     peers = [p for p in peers if p.get("country") == exit_ip or p.get("socks_ip") == exit_ip or p.get("ip") == exit_ip]
             egress = data.get("egress", {})
-            desired_egress = egress.get("desired_mode", "native")
+            legacy_desired = {"mode": egress.get("desired_mode", "native"), "proxy_mode": egress.get("proxy_mode", "global"), "proxy_categories": egress.get("proxy_categories", "")}
+            if legacy_desired["mode"] == "socks5":
+                legacy_desired["socks5"] = {"addr": egress.get("socks5_addr", ""), "port": int(egress.get("socks5_port", 0)), "user": egress.get("socks5_user", ""), "pass": egress.get("socks5_pass", "")}
+            desired_config = _normalize_egress_config(egress.get("desired_config"), legacy_desired["mode"], legacy_desired)
+            desired_egress = desired_config["mode"]
             revision = int(egress.get("revision", 0))
             deployment_id = str(data.get("deployment_id") or "")
-            local_warp = _load_warp_state()
-            local_deployment_id = str(local_warp.get("deployment_id") or "")
+            local_state = _load_egress_state()
+            local_deployment_id = str(local_state.get("deployment_id") or "")
             deployment_changed = bool(deployment_id and local_deployment_id != deployment_id)
             if deployment_changed:
                 if local_deployment_id:
                     print(f"[agent] deployment changed ({local_deployment_id} -> {deployment_id}); resetting local egress revision", flush=True)
                 else:
                     print("[agent] binding legacy egress state to current deployment; resetting local revision", flush=True)
-                local_warp = {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": deployment_id}
-            elif not deployment_id and local_warp["applied_revision"] > revision and local_warp["applied_mode"] != desired_egress:
+                local_state = {"applied_mode": "native", "applied_revision": 0, "applied_config": {"mode": "native", "proxy_mode": "global", "proxy_categories": ""}, "pending_result": None, "deployment_id": deployment_id}
+            elif not deployment_id and local_state["applied_revision"] > revision and local_state["applied_mode"] != desired_egress:
                 print("[agent] remote desired egress conflicts with a newer legacy local revision; trusting remote state", flush=True)
-                local_warp = {"applied_mode": "native", "applied_revision": 0, "pending_result": None, "deployment_id": ""}
-            if local_warp.get("pending_result"):
+                local_state = {"applied_mode": "native", "applied_revision": 0, "applied_config": {"mode": "native", "proxy_mode": "global", "proxy_categories": ""}, "pending_result": None, "deployment_id": ""}
+            if local_state.get("pending_result"):
                 try:
-                    ack = _deliver_egress_result(local_warp["pending_result"])
-                    if (local_warp["pending_result"].get("success") is True and ack.get("accepted")) or revision != int(local_warp["pending_result"].get("revision", -1)):
-                        _save_warp_state(local_warp["applied_mode"], local_warp["applied_revision"], deployment_id=deployment_id)
+                    ack = _deliver_egress_result(local_state["pending_result"])
+                    if (local_state["pending_result"].get("success") is True and ack.get("accepted")) or revision != int(local_state["pending_result"].get("revision", -1)):
+                        _save_egress_state(local_state["applied_mode"], local_state["applied_revision"], deployment_id=deployment_id, applied_config=local_state["applied_config"])
                 except Exception:
                     pass
-                retry_after = int(local_warp["pending_result"].get("retry_after", 0))
-                if local_warp["pending_result"].get("success") is False and retry_after > time.time():
+                retry_after = int(local_state["pending_result"].get("retry_after", 0))
+                if local_state["pending_result"].get("success") is False and retry_after > time.time():
                     _schedule_egress_retry(retry_after - time.time())
             remote_applied_revision = int(egress.get("applied_revision", 0))
-            applied_revision = max(remote_applied_revision, local_warp["applied_revision"])
-            applied_egress = local_warp["applied_mode"] if local_warp["applied_revision"] > remote_applied_revision else egress.get("applied_mode", local_warp["applied_mode"])
+            remote_applied_mode = egress.get("applied_mode", "native")
+            remote_applied_config = _normalize_egress_config(egress.get("applied_config"), remote_applied_mode, {"mode": remote_applied_mode, "proxy_mode": "global", "proxy_categories": ""})
+            if local_state["applied_revision"] > remote_applied_revision:
+                applied_revision = local_state["applied_revision"]
+                applied_config = _normalize_egress_config(local_state.get("applied_config"), local_state["applied_mode"])
+            else:
+                applied_revision = remote_applied_revision
+                applied_config = remote_applied_config
+            applied_egress = applied_config["mode"]
             apply_egress_change = revision > applied_revision
-            pending_failure = local_warp.get("pending_result") or {}
+            pending_failure = local_state.get("pending_result") or {}
             if apply_egress_change and pending_failure.get("success") is False and int(pending_failure.get("revision", -1)) == revision:
                 retry_after = int(pending_failure.get("retry_after", 0))
                 if time.time() < retry_after: apply_egress_change = False
-            runtime_egress = desired_egress if apply_egress_change else applied_egress
+            runtime_config = desired_config if apply_egress_change else applied_config
+            runtime_egress = runtime_config["mode"]
             residential = data.get("residential_outbound", {})
             egress_check_host = normalize_check_host(residential.get("check_addr", "127.0.0.1")) if isinstance(residential, dict) else "127.0.0.1"
-            proxy_mode = egress.get("proxy_mode", "global")
-            proxy_categories = egress.get("proxy_categories", "")
-            proxy_categories_list = [c.strip() for c in proxy_categories.split(",") if c.strip()] if proxy_categories else []
-            proxy_domains = json.dumps({"categories": proxy_categories_list}) if proxy_mode == "selective" and proxy_categories_list else ""
-            if runtime_egress == "residential":
-                residential_addr = normalize_check_host(residential.get("addr", "127.0.0.1"))
-                if residential_addr == "127.0.0.1" and egress_check_host != "127.0.0.1":
-                    residential_addr = egress_check_host
-                runtime_socks = {"enabled": True, "source": "residential", "addr": residential_addr, "check_addr": egress_check_host, "port": residential.get("port", 7920), "user": residential.get("user", ""), "pass": residential.get("pass", ""), "mode": proxy_mode, "domains": proxy_domains}
-            elif runtime_egress == "socks5":
-                runtime_socks = {"enabled": True, "source": "manual", "addr": egress.get("socks5_addr", ""), "port": int(egress.get("socks5_port", 0)), "user": egress.get("socks5_user", ""), "pass": egress.get("socks5_pass", ""), "mode": proxy_mode, "domains": proxy_domains}
-            else:
-                runtime_socks = {}
-            runtime_warp = runtime_egress[5:] if runtime_egress.startswith("warp_") else "off"
-            config_hash = hashlib.sha256(json.dumps({"nodes": nodes, "egress": runtime_egress}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            runtime_socks, runtime_warp = _runtime_egress_args(runtime_config, residential, egress_check_host)
+            config_hash = hashlib.sha256(json.dumps({"nodes": nodes, "egress": runtime_config}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             try:
                 if runtime_egress == "residential" and not residential.get("available"):
                     reason = residential.get("reason") or "controller did not report a ready residential tunnel"
                     raise RuntimeError(f"residential proxy is unavailable: {reason}")
-                build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
+                try:
+                    verified_egress_ip = build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
+                except RuntimeError as verify_error:
+                    if runtime_warp != "off" and str(verify_error).startswith("WARP ") and _refresh_warp_endpoint():
+                        verified_egress_ip = build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
+                    else:
+                        raise
                 if apply_egress_change:
-                    egress_ip = _warp_exit_ip if runtime_egress.startswith("warp_") else (_residential_exit_ip if runtime_egress == "residential" else "")
-                    result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": egress_ip}
-                    _save_warp_state(desired_egress, revision, result, deployment_id)
+                    result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": verified_egress_ip}
+                    _save_egress_state(desired_egress, revision, result, deployment_id, desired_config)
                     try:
                         ack = _deliver_egress_result(result)
-                        if ack.get("accepted"): _save_warp_state(desired_egress, revision, deployment_id=deployment_id)
+                        if ack.get("accepted"): _save_egress_state(desired_egress, revision, deployment_id=deployment_id, applied_config=desired_config)
                     except Exception: pass
                 elif realtime_channel and realtime_channel.connected:
                     realtime_channel.send({"success": True, "component": "config", "config_hash": config_hash, "old_config_active": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000)}, "config.result")
+            except EgressPreparing as preparing:
+                _schedule_egress_retry(5)
+                progress = {"success": False, "status": "preparing", "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": applied_egress, "message": str(preparing)[:500], "applied_at": int(time.time() * 1000)}
+                try: _deliver_egress_result(progress)
+                except Exception: pass
+                print(f"[agent] {preparing}", flush=True)
+                return nodes
             except Exception as error:
                 if apply_egress_change:
-                    # A WARP registration can become unusable after prolonged
-                    # network loss. Drop the cached profile so the scheduled
-                    # retry registers a fresh identity instead of failing on
-                    # the same WireGuard handshake indefinitely.
-                    if runtime_warp != "off" and "WARP " in str(error):
-                        try: os.remove(WARP_CONF_PATH)
-                        except FileNotFoundError: pass
                     rollback_healthy = False
                     try:
-                        rb_proxy_mode = egress.get("proxy_mode", "global")
-                        rb_proxy_categories = egress.get("proxy_categories", "")
-                        rb_proxy_cats_list = [c.strip() for c in rb_proxy_categories.split(",") if c.strip()] if rb_proxy_categories else []
-                        rb_proxy_domains = json.dumps({"categories": rb_proxy_cats_list}) if rb_proxy_mode == "selective" and rb_proxy_cats_list else ""
-                        if applied_egress == "residential":
-                            rollback_socks = {"enabled": True, "source": "residential", "addr": residential.get("addr", "127.0.0.1"), "port": residential.get("port", 7920), "user": residential.get("user", ""), "pass": residential.get("pass", ""), "mode": rb_proxy_mode, "domains": rb_proxy_domains}
-                        elif applied_egress == "socks5":
-                            rollback_socks = {"enabled": True, "source": "manual", "addr": egress.get("socks5_addr", ""), "port": int(egress.get("socks5_port", 0)), "user": egress.get("socks5_user", ""), "pass": egress.get("socks5_pass", ""), "mode": rb_proxy_mode, "domains": rb_proxy_domains}
-                        else:
-                            rollback_socks = {}
-                        rollback_warp = applied_egress[5:] if applied_egress.startswith("warp_") else "off"
+                        rollback_config = _normalize_egress_config(applied_config, applied_egress)
+                        rollback_socks, rollback_warp = _runtime_egress_args(rollback_config, residential, egress_check_host)
                         build_singbox_config(nodes, current_proxy_config, peers, mesh, rollback_socks, rollback_warp, egress_check_host)
                         rollback_healthy = _singbox_service_healthy()
                     except Exception:
-                        rollback_healthy = False
+                        rollback_healthy = _restore_last_good_singbox()
                     retries = int(pending_failure.get("retries", 0)) + 1
                     retry_delay = min(300, 30 * (2 ** min(retries - 1, 4)))
                     result = {"success": False, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": applied_egress, "rolled_back": rollback_healthy, "rollback_healthy": rollback_healthy, "error": str(error)[:500], "retries": retries, "retry_after": int(time.time() + retry_delay), "applied_at": int(time.time() * 1000)}
-                    _save_warp_state(applied_egress, applied_revision, result, deployment_id)
+                    _save_egress_state(applied_egress, applied_revision, result, deployment_id, applied_config)
                     _schedule_egress_retry(retry_delay)
                     try:
                         ack = _deliver_egress_result(result)
@@ -1469,10 +1626,10 @@ if __name__ == "__main__":
         if message.get("type") in {"config.refresh", "transport.connected", "transport.disconnected"}: config_wakeup.set()
         if message.get("type") in {"transport.connected", "transport.disconnected"}: heartbeat_wakeup.set()
         if message.get("type") == "config.result.ack" and message.get("accepted") is True and message.get("success") is True:
-            state = _load_warp_state()
+            state = _load_egress_state()
             pending = state.get("pending_result") or {}
             if int(pending.get("revision", -1)) == int(message.get("revision", -2)):
-                _save_warp_state(state["applied_mode"], state["applied_revision"], deployment_id=state.get("deployment_id", ""))
+                _save_egress_state(state["applied_mode"], state["applied_revision"], deployment_id=state.get("deployment_id", ""), applied_config=state.get("applied_config"))
 
     def create_realtime_channel():
         return RealtimeChannel(REALTIME_URL, VPS_IP, TOKEN, "core", on_realtime_message)
