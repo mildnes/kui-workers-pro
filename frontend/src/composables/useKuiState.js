@@ -641,11 +641,12 @@ export function useKuiState() {
                   const updateUserPassword = async () => { if(!userNewPassword.value) return alert('请输入新密码'); await fetchApi('/api/user/password', { method: 'PUT', body: JSON.stringify({ password: userNewPassword.value }) }); alert('✅ 密码修改成功！请使用新密码重新登录。'); logout(); };
                   const resetMySubLink = async () => { if(confirm('🚨 危险操作！重置后系统将为您签发全新的 UUID 订阅令牌，原链接将【立即作废】！确定要继续重置吗？')) { await fetchApi('/api/user/sub_token', { method: 'PUT' }); alert('✅ 订阅令牌已刷新！'); refreshData(); } };
                   
-                  const generateSubLink = (ip='', format='') => { 
+                  const generateSubLink = (ip='', format='', nodeId='') => {
                       const tokenToUse = mySubToken.value || authKey.value; 
                       let link = `${currentDomain}/api/sub?user=${encodeURIComponent(currentUser.value)}&token=${encodeURIComponent(tokenToUse)}`;
-                      if (ip) link += `&ip=${ip}`;
-                      if (format) link += `&format=${format}`;
+                      if (ip) link += `&ip=${encodeURIComponent(ip)}`;
+                      if (format) link += `&format=${encodeURIComponent(format)}`;
+                      if (nodeId) link += `&node=${encodeURIComponent(nodeId)}`;
                       return link;
                   };
                   
@@ -661,14 +662,14 @@ export function useKuiState() {
                       if (!copied) throw new Error('浏览器拒绝访问剪贴板，请使用 HTTPS 或手动复制');
                   };
                   const copyCommand = async (txt, msg) => { try { await writeClipboard(txt); alert(msg); } catch (error) { alert(error.message || '复制失败'); } };
-                  const copySurgeConfig = async (ip='') => {
+                  const copySurgeConfig = async (ip='', nodeId='') => {
                       try {
-                          const response = await fetch(generateSubLink(ip, 'surge'), { cache: 'no-store' });
+                          const response = await fetch(generateSubLink(ip, 'surge', nodeId), { cache: 'no-store' });
                           if (!response.ok) throw new Error(`HTTP ${response.status}`);
                           const config = await response.text();
                           if (!config.trimStart().startsWith('[Proxy]')) throw new Error('返回内容不是 Surge 配置段');
                           await writeClipboard(config);
-                          alert(ip ? '✅ 该 VPS 的 Surge 配置段已复制！' : '✅ 全量 Surge 配置段已复制！');
+                          alert(nodeId ? '✅ 该节点的 Surge 配置段已复制！' : (ip ? '✅ 该 VPS 的 Surge 配置段已复制！' : '✅ 全量 Surge 配置段已复制！'));
                       } catch (error) {
                           alert(`复制 Surge 配置段失败：${error.message}`);
                       }

@@ -84,7 +84,7 @@ test('servers page uses compact Chinese overview', () => {
 });
 
 test('server cards expose clear visual boundaries between operational modules', () => {
-    for (const className of ['kui-server-card', 'kui-server-metric', 'kui-server-chart', 'kui-quick-deploy-panel', 'kui-node-deploy-panel', 'kui-egress-panel', 'kui-node-list-section', 'kui-node-card', 'kui-server-delivery-section', 'kui-deploy-panel']) {
+    for (const className of ['kui-server-card', 'kui-server-metric', 'kui-server-chart', 'kui-quick-deploy-panel', 'kui-node-deploy-panel', 'kui-egress-panel', 'kui-node-list-section', 'kui-node-card', 'kui-node-export-actions', 'kui-server-command-panel']) {
         assert.match(serversPage, new RegExp(className));
         assert.match(appStyles, new RegExp(`\\.${className}`));
     }
@@ -102,24 +102,40 @@ test('server card header and deployment actions use the compact explicit layout'
     assert.match(appStyles, /\.kui-server-name \{ font-size: 28px;/);
 });
 
-test('server subscription exports live in the overflow menu', () => {
+test('server overflow menu exports all protocols and opens deployment commands', () => {
     const menu = serversPage.slice(serversPage.indexOf('kui-server-menu'), serversPage.indexOf('kui-server-metric'));
     assert.match(menu, /generateSubLink\(vps\.ip, ''\)/);
     assert.match(menu, /generateSubLink\(vps\.ip, 'clash'\)/);
     assert.match(menu, /copySurgeConfig\(vps\.ip\)/);
+    assert.match(menu, /复制所有协议普通订阅/);
+    assert.match(menu, /复制所有协议 Clash 订阅/);
+    assert.match(menu, /复制所有协议 Surge 配置段/);
+    assert.match(menu, /kui-server-command-menu/);
     assert.match(appStyles, /\.kui-server-menu-panel/);
+    assert.match(appStyles, /\.kui-server-command-panel/);
 });
 
-test('deployment command frame is collapsed by default and contains all three actions', () => {
-    const start = serversPage.indexOf('<details class="kui-deploy-panel');
-    const deployPanel = serversPage.slice(start, serversPage.indexOf('</details>', start));
+test('deployment commands live in the server overflow flyout with all three copy actions', () => {
+    const start = serversPage.indexOf('<details class="kui-server-command-menu');
+    const deployPanel = serversPage.slice(start, serversPage.indexOf('</div>\n                                          </details>', start));
     assert.ok(start >= 0);
     assert.doesNotMatch(deployPanel.match(/<details[^>]*>/)?.[0] || '', /\sopen(?:\s|>)/);
     assert.equal((deployPanel.match(/<button\b/g) || []).length, 3);
     assert.match(deployPanel, /copyCommand\(generateCmd\(vps\.ip\)/);
     assert.match(deployPanel, /copyUninstallCommand\(vps\)/);
     assert.match(deployPanel, /copyPurgeCommand\(vps\)/);
-    assert.match(appStyles, /\.kui-deploy-panel-body \{ padding:/);
+    assert.doesNotMatch(serversPage, /kui-server-delivery-section|kui-deploy-panel/);
+});
+
+test('expanded node details expose three node-scoped subscription exports', () => {
+    const start = serversPage.indexOf('kui-node-export-actions');
+    const actions = serversPage.slice(start, serversPage.indexOf('</div>', start));
+    assert.ok(start >= 0);
+    assert.equal((actions.match(/<button\b/g) || []).length, 3);
+    assert.match(actions, /generateSubLink\(vps\.ip, '', node\.id\)/);
+    assert.match(actions, /generateSubLink\(vps\.ip, 'clash', node\.id\)/);
+    assert.match(actions, /copySurgeConfig\(vps\.ip, node\.id\)/);
+    assert.match(appStyles, /\.kui-node-export-actions/);
 });
 
 test('egress panel sits directly below traffic trend and outside node management', () => {

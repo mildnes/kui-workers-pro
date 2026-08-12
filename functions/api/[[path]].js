@@ -1480,10 +1480,13 @@ export async function onRequest(context) {
         }
         const urlObj = new URL(request.url); 
         const ip = urlObj.searchParams.get("ip"); 
+        const nodeId = urlObj.searchParams.get("node");
         const reqUser = urlObj.searchParams.get("user"); 
         const token = urlObj.searchParams.get("token"); 
         const format = urlObj.searchParams.get("format"); 
         const adminUser = env.ADMIN_USERNAME || "admin";
+
+        if (nodeId && !/^[A-Za-z0-9_-]{1,64}$/.test(nodeId)) return json({ error: "Not found" }, 404);
 
         let isValid = false;
         if (reqUser === adminUser) { 
@@ -1508,10 +1511,12 @@ export async function onRequest(context) {
             query = `SELECT * FROM nodes WHERE enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?) AND (username = ? OR username = 'admin')`; 
             sqlParams.push(adminUser); 
             if (ip) { query += " AND vps_ip = ?"; sqlParams.push(ip); } 
+            if (nodeId) { query += " AND id = ?"; sqlParams.push(nodeId); }
         } else { 
             query = `SELECT DISTINCT n.* FROM nodes n JOIN users u ON u.username = ? WHERE n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?) AND (n.username = u.username OR EXISTS (SELECT 1 FROM user_group_members gm JOIN user_group_resources gr ON gr.group_id = gm.group_id WHERE gm.username = u.username AND ((gr.resource_type = 'node' AND gr.resource_id = n.id) OR (gr.resource_type = 'vps' AND gr.resource_id = n.vps_ip))))`;
             sqlParams = [reqUser, now, now];
             if (ip) { query += " AND n.vps_ip = ?"; sqlParams.push(ip); } 
+            if (nodeId) { query += " AND n.id = ?"; sqlParams.push(nodeId); }
         }
         
         const { results } = await db.prepare(query).bind(...sqlParams).all(); 
@@ -1590,7 +1595,7 @@ export async function onRequest(context) {
         }
 
         // --- 第三方订阅节点整合进订阅 ---
-        try {
+        if (!ip && !nodeId) try {
             const { results: thNodes } = await db.prepare("SELECT * FROM third_party_nodes WHERE enable = 1").all();
             for (const node of thNodes) {
                 try {
@@ -1689,7 +1694,7 @@ export async function onRequest(context) {
         // regular protocol nodes, so append them explicitly for the admin.
         // They include shared proxy credentials and must never be exposed to
         // ordinary user subscriptions.
-        if (reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS) {
+        if (!nodeId && reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS) {
             try {
                 const cutoff = Date.now() - 1800000;
                 const { results: proxyServers } = await db.prepare('SELECT ip, details FROM proxy_ctrl_servers WHERE last_seen >= ?').bind(cutoff).all();

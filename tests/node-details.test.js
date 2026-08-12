@@ -5,6 +5,8 @@ import { buildNodeDetailRows } from '../frontend/src/utils/nodeDetails.js';
 
 const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
 const appStyles = fs.readFileSync(new URL('../frontend/src/styles/app.css', import.meta.url), 'utf8');
+const kuiState = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
+const apiWorker = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 
 const asObject = rows => Object.fromEntries(rows.map(row => [row.label, row.value]));
 
@@ -58,4 +60,19 @@ test('relay and Argo details expose targets instead of unrelated credentials', (
     assert.equal(argo['本地监听端口'], '10000');
     assert.equal(argo['公网域名'], 'tunnel.example.com');
     assert.equal(argo['公网端口'], '443');
+});
+
+test('node subscription links carry a validated node scope through UI and API', () => {
+    assert.match(kuiState, /generateSubLink = \(ip='', format='', nodeId=''\)/);
+    assert.match(kuiState, /if \(nodeId\) link \+= `&node=\$\{encodeURIComponent\(nodeId\)\}`/);
+    assert.match(kuiState, /generateSubLink\(ip, 'surge', nodeId\)/);
+    assert.match(apiWorker, /const nodeId = urlObj\.searchParams\.get\("node"\)/);
+    assert.match(apiWorker, /if \(nodeId && !\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/\.test\(nodeId\)\) return json\(\{ error: "Not found" \}, 404\)/);
+    assert.match(apiWorker, /query \+= " AND id = \?"; sqlParams\.push\(nodeId\)/);
+    assert.match(apiWorker, /query \+= " AND n\.id = \?"; sqlParams\.push\(nodeId\)/);
+});
+
+test('node-scoped subscriptions do not append unrelated external sources', () => {
+    assert.match(apiWorker, /if \(!ip && !nodeId\) try \{\s*const \{ results: thNodes \}/);
+    assert.match(apiWorker, /if \(!nodeId && reqUser === adminUser && env\.PROXY_USER && env\.PROXY_PASS\)/);
 });

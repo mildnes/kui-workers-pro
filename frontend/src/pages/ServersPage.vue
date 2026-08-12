@@ -19,11 +19,27 @@
                                       </h3>
                                   </div>
                                   <details class="kui-server-menu">
-                                      <summary class="kui-card-menu" title="订阅导出" aria-label="打开订阅导出菜单">•••</summary>
+                                      <summary class="kui-card-menu" title="服务器操作" aria-label="打开服务器操作菜单">•••</summary>
                                       <div class="kui-server-menu-panel">
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, ''), '单机节点普通订阅已复制！')">复制普通订阅</button>
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, 'clash'), '单机节点Clash订阅已复制！')">复制 Clash 订阅</button>
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copySurgeConfig(vps.ip)">复制 Surge 配置段</button>
+                                          <div class="kui-server-menu-label">所有协议</div>
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, ''), '该服务器全部协议的普通订阅已复制！')">复制所有协议普通订阅</button>
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, 'clash'), '该服务器全部协议的 Clash 订阅已复制！')">复制所有协议 Clash 订阅</button>
+                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copySurgeConfig(vps.ip)">复制所有协议 Surge 配置段</button>
+                                          <details class="kui-server-command-menu">
+                                              <summary>部署与卸载命令 <span aria-hidden="true">›</span></summary>
+                                              <div class="kui-server-command-panel">
+                                                  <div class="kui-server-command-heading">
+                                                      <strong>部署与卸载命令</strong>
+                                                      <div>
+                                                          <label><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="debian"> Ubuntu/Debian</label>
+                                                          <label><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="alpine"> Alpine</label>
+                                                      </div>
+                                                  </div>
+                                                  <button @click="copyCommand(generateCmd(vps.ip), '部署指令已复制！')" class="kui-copy-deploy-button">复制完整部署命令</button>
+                                                  <button @click="copyUninstallCommand(vps)" class="kui-copy-agent-uninstall-button">复制 Agent 卸载命令（保留住宅代理）</button>
+                                                  <button @click="copyPurgeCommand(vps)" class="kui-copy-purge-button" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
+                                              </div>
+                                          </details>
                                       </div>
                                   </details>
                               </div>
@@ -187,27 +203,14 @@
                                           <div class="kui-node-usage-bar"><i :class="(node.traffic_limit > 0 && node.traffic_used >= node.traffic_limit) ? 'is-exhausted' : ''" :style="{ width: getTrafficPercent(node.traffic_used, node.traffic_limit) + '%' }"></i></div>
                                           <button v-if="node.traffic_used > 0" @click="resetTraffic(node.id)">清零已用流量</button>
                                       </div>
+                                      <div class="kui-node-export-actions">
+                                          <button @click="copyCommand(generateSubLink(vps.ip, '', node.id), '该节点普通订阅已复制！')">复制普通订阅</button>
+                                          <button @click="copyCommand(generateSubLink(vps.ip, 'clash', node.id), '该节点 Clash 订阅已复制！')">复制 Clash 订阅</button>
+                                          <button @click="copySurgeConfig(vps.ip, node.id)">复制 Surge 配置段</button>
+                                      </div>
                                   </div>
                               </details>
                               <div v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-slate-400 text-xs py-6 border-2 border-dashed border-slate-200 rounded-2xl font-medium">节点矩阵为空，请在上方一键下发建立</div>
-                          </div>
-
-                          <div class="kui-server-delivery-section p-4 md:p-6 bg-slate-100/50 border-t border-white flex flex-col gap-3">
-                              <details class="kui-deploy-panel bg-slate-800 rounded-[1.25rem] group shadow-inner transition-colors">
-                                  <summary><span>部署与卸载命令</span><small>3 项操作 · 点击展开</small></summary>
-                                  <div class="kui-deploy-panel-body">
-                                  <div class="text-[10px] text-slate-400 font-bold uppercase mb-2 flex justify-between items-center">
-                                      <span>Full Deploy Command · KUI + 住宅双隧道</span>
-                                      <div class="flex gap-2 text-[9px]">
-                                          <label class="cursor-pointer hover:text-white flex items-center gap-1"><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="debian" class="accent-indigo-500"> Ubuntu/Debian</label>
-                                          <label class="cursor-pointer hover:text-white flex items-center gap-1"><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="alpine" class="accent-indigo-500"> Alpine</label>
-                                      </div>
-                                  </div>
-                                  <button @click="copyCommand(generateCmd(vps.ip), '部署指令已复制！')" class="kui-copy-deploy-button">复制完整部署命令</button>
-                                  <button @click="copyUninstallCommand(vps)" class="mt-3 w-full rounded-xl border border-rose-400/60 bg-rose-950/70 py-2 text-[11px] font-black text-rose-200 transition hover:bg-rose-900">⚠ 仅卸载 Agent（保留住宅代理）</button>
-                                  <button @click="copyPurgeCommand(vps)" class="kui-copy-purge-button mt-3" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
-                                  </div>
-                              </details>
                           </div>
                       </div>
                   </div>
