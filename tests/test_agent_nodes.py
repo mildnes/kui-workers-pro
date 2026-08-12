@@ -1,0 +1,24 @@
+import ast
+import pathlib
+import unittest
+
+
+SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
+SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
+TREE = ast.parse(SOURCE)
+
+
+class AgentNodeTests(unittest.TestCase):
+    def test_invalid_node_does_not_reserve_its_listener(self):
+        function = next(node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name == "build_singbox_config")
+        source = ast.get_source_segment(SOURCE, function)
+        validation = source.index('except (KeyError, TypeError, ValueError)')
+        reservation = source.index('listener_keys.add(listener_key)')
+        self.assertGreater(reservation, validation)
+
+    def test_missing_internal_relay_target_is_rejected_during_validation(self):
+        self.assertIn('raise ValueError("dokodemo internal target is unavailable")', SOURCE)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -96,8 +96,32 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-server-status-dot { flex: 0 0 auto; }
 .kui-server-ip { flex: 0 0 auto; white-space: nowrap; }
 .kui-server-metric, .kui-server-chart { border-color: #d7dfeb !important; background: rgba(248,250,252,.92) !important; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
-.kui-quick-deploy-panel { border-color: #a5b4fc !important; box-shadow: inset 0 0 0 1px rgba(199,210,254,.4); }
-.kui-node-deploy-panel { border-color: #cbd5e1 !important; background: #fff !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+.kui-quick-deploy-panel, .kui-node-deploy-panel { border: 1px solid #cbd5e1; border-radius: 14px; padding: 13px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+.kui-quick-deploy-panel { border-color: #c7d2fe; background: #f5f7ff; }
+.kui-node-deploy-panel { margin-top: 10px; }
+.kui-node-panel-heading { display: flex; min-height: 24px; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.kui-node-panel-heading > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+.kui-node-panel-heading strong { color: #334155; font-size: 12px; font-weight: 850; }
+.kui-node-panel-heading span, .kui-node-panel-heading small { color: #94a3b8; font-size: 9px; font-style: normal; font-weight: 700; }
+.kui-required { color: #ef4444; font-style: normal; font-weight: 900; }
+.kui-quick-deploy-grid { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; align-items: end; gap: 8px; }
+.kui-node-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.kui-node-form-primary { grid-template-columns: minmax(140px, .9fr) minmax(180px, 1.2fr) 94px; }
+.kui-node-form-optional, .kui-node-protocol-fields { margin-top: 8px; }
+.kui-node-protocol-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border-top: 1px dashed #e2e8f0; padding-top: 8px; }
+.kui-node-protocol-fields > label:only-child { grid-column: 1 / -1; }
+.kui-quick-deploy-grid label, .kui-node-deploy-panel label { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.kui-quick-deploy-grid label > span, .kui-node-deploy-panel label > span { color: #64748b; font-size: 9px; font-weight: 800; }
+.kui-quick-deploy-grid label em, .kui-node-deploy-panel label em { color: #a1aab8; font-style: normal; font-weight: 650; }
+.kui-quick-deploy-grid input, .kui-quick-deploy-grid select, .kui-node-deploy-panel input, .kui-node-deploy-panel select { box-sizing: border-box; width: 100%; min-height: 36px !important; border: 1px solid #d7dfeb; border-radius: 9px; padding: 0 10px; outline: none; color: #334155; background: #fff; font-size: 12px; font-weight: 650; }
+.kui-quick-deploy-grid input:focus, .kui-quick-deploy-grid select:focus, .kui-node-deploy-panel input:focus, .kui-node-deploy-panel select:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
+.kui-quick-deploy-grid > button, .kui-node-submit { min-height: 36px; border: 0; border-radius: 9px; padding: 0 15px; color: #fff; background: #4f46e5; font-size: 11px; font-weight: 850; white-space: nowrap; }
+.kui-quick-deploy-grid > button:hover { background: #4338ca; }
+.kui-node-input-action { display: flex; min-width: 0; gap: 6px; }
+.kui-node-input-action input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.kui-node-input-action button { flex: 0 0 auto; min-height: 36px; border: 1px solid #c7d2fe; border-radius: 9px; padding: 0 10px; color: #4f46e5; background: #eef2ff; font-size: 10px; font-weight: 800; }
+.kui-node-submit { width: 100%; margin-top: 9px; background: #1e293b; }
+.kui-node-submit:hover { background: #0f172a; }
 .kui-egress-panel { border-color: #bae6fd !important; box-shadow: 0 1px 3px rgba(14,116,144,.07); }
 .kui-node-list-section { border-color: #d7dfeb !important; background: #f8fafc !important; }
 .kui-node-card { overflow: hidden; border: 1px solid #d7dfeb !important; border-radius: 14px; background: #fff !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); transition: border-color .15s ease, box-shadow .15s ease; }
@@ -139,7 +163,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-copy-deploy-button:hover { border-color: #6ee7b7; color: #fff; background: rgba(5,150,105,.32); }
 .kui-server-tools { border-top: 1px solid #e2e8f0; background: rgba(248,250,252,.75); }
 .kui-server-tools > summary { min-height: 44px; }
-.kui-server-tools > div { padding-top: 14px; }
+.kui-server-tools > div { padding: 10px 14px 14px; }
 .kui-server-menu { position: relative; flex: 0 0 auto; }
 .kui-server-menu > summary { list-style: none; cursor: pointer; }
 .kui-server-menu > summary::-webkit-details-marker { display: none; }
@@ -238,6 +262,16 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .kui-admin-content .text-3xl { font-size: 22px; }
   .kui-admin-content .text-2xl { font-size: 18px; }
   .kui-admin-content button, .kui-admin-content input:not([type="checkbox"]):not([type="radio"]), .kui-admin-content select { min-height: 44px; }
+  .kui-server-tools > div { padding: 10px; }
+  .kui-quick-deploy-grid input, .kui-quick-deploy-grid select, .kui-node-deploy-panel input, .kui-node-deploy-panel select { min-height: 44px !important; }
+  .kui-node-panel-heading > div { align-items: flex-start; flex-direction: column; gap: 1px; }
+  .kui-quick-deploy-grid { grid-template-columns: minmax(0, 1fr) 104px; }
+  .kui-quick-deploy-grid > label:first-child { grid-column: 1 / -1; }
+  .kui-quick-deploy-grid > button { padding: 0 11px; }
+  .kui-node-form-primary { grid-template-columns: minmax(0, 1fr) 96px; }
+  .kui-node-form-primary > label:first-child { grid-column: 1 / -1; }
+  .kui-node-form-optional, .kui-node-protocol-fields { grid-template-columns: 1fr; }
+  .kui-node-protocol-fields > label:only-child { grid-column: auto; }
   .kui-add-vps-backdrop { align-items: flex-end; padding: 0; }
   .kui-add-vps-dialog { width: 100%; max-height: 92vh; border-radius: 22px 22px 0 0; animation-name: kui-sheet-up; }
   .kui-add-vps-header { padding: 16px; }

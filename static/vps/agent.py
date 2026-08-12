@@ -1034,7 +1034,6 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             transport = "udp" if proto in {"Hysteria2", "TUIC"} else "tcp"
             listener_key = (transport, port)
             if listener_key in listener_keys: raise ValueError(f"duplicate {transport} listener port {port}")
-            listener_keys.add(listener_key)
             supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Shadowsocks2022", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door"}
             if proto not in supported:
                 raise ValueError(f"unsupported protocol {proto}")
@@ -1046,8 +1045,11 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 raise ValueError(f"{proto} password is required")
             if proto == "Shadowsocks2022":
                 validate_ss2022_credentials(node.get("uuid", ""), node.get("private_key", ""))
-            if proto == "dokodemo-door" and node.get("relay_type") != "internal" and (not node.get("target_ip") or not node.get("target_port")):
-                raise ValueError("dokodemo target_ip and target_port are required")
+            if proto == "dokodemo-door":
+                if node.get("relay_type") == "internal" and not node.get("chain_target"):
+                    raise ValueError("dokodemo internal target is unavailable")
+                if node.get("relay_type") != "internal" and (not node.get("target_ip") or not node.get("target_port")):
+                    raise ValueError("dokodemo target_ip and target_port are required")
         except (KeyError, TypeError, ValueError) as error:
             print(f"[agent] skipping invalid node {node.get('id', '<unknown>')}: {error}", flush=True)
             continue
@@ -1093,6 +1095,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             else:
                 singbox_config["outbounds"].append({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) })
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
+        listener_keys.add(listener_key)
         valid_nodes.append(node)
 
     # --- 住宅IP代理出口 / SOCKS5 服务注入（如端口已被 proxy_server.py 占用则跳过，避免双进程抢端口炸 sing-box）---

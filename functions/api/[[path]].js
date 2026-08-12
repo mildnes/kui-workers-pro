@@ -158,6 +158,93 @@ const SS2022_KEY_BYTES = {
     '2022-blake3-aes-256-gcm': 32,
 };
 
+const NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']);
+const REALITY_PROTOCOLS = new Set(['XTLS-Reality', 'Reality', 'H2-Reality', 'gRPC-Reality']);
+const TLS_NODE_PROTOCOLS = new Set([...REALITY_PROTOCOLS, 'Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive']);
+const PASSWORD_NODE_PROTOCOLS = new Set(['TUIC', 'Shadowsocks2022', 'Trojan', 'AnyTLS', 'Naive', 'Socks5']);
+const INTERNAL_RELAY_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS']);
+const UUID_NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'TUIC', 'H2-Reality', 'gRPC-Reality', 'VLESS-Argo']);
+
+function nodeTransport(protocol) {
+    return protocol === 'Hysteria2' || protocol === 'TUIC' ? 'udp' : 'tcp';
+}
+
+function normalizeNodeText(value, label, maxLength, required = true) {
+    const text = String(value ?? '').trim();
+    if ((required && !text) || text.length > maxLength || /[\x00-\x1f\x7f]/.test(text)) throw new Error(`Invalid node ${label}`);
+    return text;
+}
+
+function normalizeNodeHost(value, label) {
+    const host = normalizeNodeText(value, label, 253);
+    if (/[/?#@]/.test(host) || host.includes('://')) throw new Error(`Invalid node ${label}`);
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+        if (!host.split('.').map(Number).every(part => part >= 0 && part <= 255)) throw new Error(`Invalid node ${label}`);
+        return host;
+    }
+    if (host.includes(':')) {
+        const unwrapped = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+        try {
+            const parsed = new URL(`http://[${unwrapped}]/`);
+            if (!parsed.hostname.startsWith('[') || !parsed.hostname.endsWith(']')) throw new Error();
+        } catch { throw new Error(`Invalid node ${label}`); }
+        return unwrapped.toLowerCase();
+    }
+    if (!/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(host)) throw new Error(`Invalid node ${label}`);
+    return host.toLowerCase();
+}
+
+function normalizeNodePayload(input) {
+    const node = { ...input };
+    node.id = normalizeNodeText(node.id, 'id', 64);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(node.id)) throw new Error('Invalid node id');
+    node.protocol = String(node.protocol || '');
+    if (!NODE_PROTOCOLS.has(node.protocol)) throw new Error('Invalid protocol');
+    node.port = Number(node.port);
+    if (!Number.isInteger(node.port) || node.port < 1 || node.port > 65535) throw new Error('Invalid port');
+    node.vps_ip = normalizeNodeText(node.vps_ip, 'VPS IP', 64);
+    node.network = node.protocol === 'H2-Reality' ? 'http' : (node.protocol === 'gRPC-Reality' ? 'grpc' : 'tcp');
+    node.traffic_limit = Number(node.traffic_limit || 0);
+    node.expire_time = Number(node.expire_time || 0);
+    if (!Number.isSafeInteger(node.traffic_limit) || node.traffic_limit < 0) throw new Error('Invalid node traffic limit');
+    if (!Number.isSafeInteger(node.expire_time) || node.expire_time < 0) throw new Error('Invalid node expiry');
+
+    if (node.protocol !== 'dokodemo-door') node.uuid = normalizeNodeText(node.uuid, 'UUID/username', 128);
+    if (UUID_NODE_PROTOCOLS.has(node.protocol) && !/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(node.uuid)) throw new Error('Invalid node UUID');
+    if (TLS_NODE_PROTOCOLS.has(node.protocol)) node.sni = normalizeNodeHost(node.sni || 'addons.mozilla.org', 'SNI');
+    else node.sni = normalizeNodeText(node.sni, 'SNI', 253, false);
+
+    if (REALITY_PROTOCOLS.has(node.protocol)) {
+        node.private_key = normalizeNodeText(node.private_key, 'Reality private key', 64);
+        node.public_key = normalizeNodeText(node.public_key, 'Reality public key', 64);
+        node.short_id = normalizeNodeText(node.short_id, 'Reality short ID', 32);
+        if (!/^[A-Za-z0-9_-]{43}$/.test(node.private_key) || !/^[A-Za-z0-9_-]{43}$/.test(node.public_key)) throw new Error('Invalid Reality key');
+        if (!/^(?:[0-9A-Fa-f]{2}){1,16}$/.test(node.short_id)) throw new Error('Invalid Reality short ID');
+    }
+    if (PASSWORD_NODE_PROTOCOLS.has(node.protocol)) node.private_key = normalizeNodeText(node.private_key, 'password', 256);
+    if (node.protocol === 'Shadowsocks2022') validateSs2022Credentials(node.uuid, node.private_key);
+
+    if (node.protocol === 'dokodemo-door') {
+        if (!['internal', 'external'].includes(node.relay_type)) throw new Error('Invalid relay type');
+        if (node.relay_type === 'external') {
+            node.target_ip = normalizeNodeHost(node.target_ip, 'relay target');
+            node.target_port = Number(node.target_port);
+            if (!Number.isInteger(node.target_port) || node.target_port < 1 || node.target_port > 65535) throw new Error('Invalid relay target');
+            node.target_id = null;
+        } else {
+            node.target_id = normalizeNodeText(node.target_id, 'relay target ID', 64);
+            if (!/^[A-Za-z0-9_-]{1,64}$/.test(node.target_id)) throw new Error('Invalid relay target ID');
+            node.target_ip = null;
+            node.target_port = null;
+        }
+    }
+    return node;
+}
+
+function nodeListenerConflicts(existing, candidate) {
+    return (existing || []).some(node => String(node.id) !== String(candidate.id) && Number(node.port) === Number(candidate.port) && nodeTransport(node.protocol) === nodeTransport(candidate.protocol));
+}
+
 function validateSs2022Credentials(method, password) {
     const expectedBytes = SS2022_KEY_BYTES[String(method || '')];
     if (!expectedBytes) throw new Error('Invalid Shadowsocks 2022 method');
@@ -259,6 +346,14 @@ async function notifyRealtimeFrequencyPolicy(env, db, settings, pagesOrigin = ''
 }
 
 async function notifyRealtimeVps(env, db, ip, pagesOrigin = '') {
+    if (env.VPS_PRESENCE && typeof env.VPS_PRESENCE.idFromName === 'function') {
+        const server = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(ip).first();
+        if (!server?.agent_token) return;
+        const tokenHash = await sha256(server.agent_token);
+        const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(`v2:${ip}:${tokenHash}`));
+        await stub.fetch(new Request('https://presence.internal/notify', { method: 'POST' }));
+        return;
+    }
     const authorization = await realtimeAdminHeader(env);
     const configured = env.REALTIME_URL || (await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first())?.val;
     if (!authorization || !configured || !/^https:\/\//i.test(configured)) return;
@@ -1464,8 +1559,15 @@ export async function onRequest(context) {
         const agentAuthenticated = await verifyAgent(authHeader, ip, db, env);
         if (currentUser !== adminUser && !agentAuthenticated) return new Response("Unauthorized", { status: 401 });
         const query = `SELECT n.* FROM nodes n LEFT JOIN users u ON n.username = u.username WHERE n.vps_ip = ? AND n.enable = 1 AND (n.traffic_limit = 0 OR n.traffic_used < n.traffic_limit) AND (n.expire_time = 0 OR n.expire_time > ?) AND (n.username = ? OR n.username = 'admin' OR (u.username IS NOT NULL AND u.enable = 1 AND (u.traffic_limit = 0 OR u.traffic_used < u.traffic_limit) AND (u.expire_time = 0 OR u.expire_time > ?)))`;
-        const { results: machineNodes } = await db.prepare(query).bind(ip, now, adminUser, now).all();
-        for (let node of machineNodes) { if (node.protocol === "dokodemo-door" && node.relay_type === "internal") { const targetNode = await db.prepare("SELECT * FROM nodes WHERE id = ?").bind(node.target_id).first(); if (targetNode) node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id, network: targetNode.network }; } }
+        const { results } = await db.prepare(query).bind(ip, now, adminUser, now).all();
+        const activeNodesById = new Map(results.map(node => [node.id, node]));
+        const machineNodes = results.filter(node => {
+            if (node.protocol !== 'dokodemo-door' || node.relay_type !== 'internal') return true;
+            const targetNode = activeNodesById.get(node.target_id);
+            if (!targetNode || !INTERNAL_RELAY_PROTOCOLS.has(targetNode.protocol)) return false;
+            node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id, network: targetNode.network };
+            return true;
+        });
         let proxyCfg = { global: {}, toggle: { enable: false } };
         try {
             const r = await db.prepare("SELECT value FROM probe_settings WHERE key='proxy_config'").first();
@@ -2151,9 +2253,55 @@ rules:
         }
 
         if (action === "nodes" && isAdmin) {
-            if (method === "POST") { const n = await request.json(); const protocols = ['VLESS','XTLS-Reality','Reality','Hysteria2','TUIC','Shadowsocks2022','Trojan','H2-Reality','gRPC-Reality','AnyTLS','Naive','Socks5','VLESS-Argo','dokodemo-door']; if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(n.id || ''))) return Response.json({ error: 'Invalid node id' }, { status: 400 }); if (!protocols.includes(n.protocol)) return Response.json({ error: 'Invalid protocol' }, { status: 400 }); if (!Number.isInteger(Number(n.port)) || Number(n.port) < 1 || Number(n.port) > 65535) return Response.json({ error: 'Invalid port' }, { status: 400 }); if (n.protocol === 'Shadowsocks2022') { try { validateSs2022Credentials(n.uuid, n.private_key); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); } n.network = 'tcp'; } if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 }); if (n.protocol === 'dokodemo-door') { if (!['internal','external'].includes(n.relay_type)) return Response.json({error:'Invalid relay type'},{status:400}); if (n.relay_type === 'external' && (!String(n.target_ip||'').trim() || !Number.isInteger(Number(n.target_port)) || Number(n.target_port)<1 || Number(n.target_port)>65535)) return Response.json({error:'Invalid relay target'},{status:400}); if (n.relay_type === 'internal' && !(await db.prepare('SELECT id FROM nodes WHERE id = ? AND vps_ip = ?').bind(n.target_id,n.vps_ip).first())) return Response.json({error:'Internal relay target not found on VPS'},{status:400}); } if (await db.prepare("SELECT id FROM nodes WHERE id = ?").bind(n.id).first()) return Response.json({ error: "Node already exists" }, { status: 409 }); let nodeUser = n.username || currentUser; if (nodeUser === 'admin') nodeUser = currentUser; await db.prepare(`INSERT INTO nodes (id, uuid, vps_ip, protocol, port, sni, private_key, public_key, short_id, relay_type, target_ip, target_port, target_id, enable, traffic_used, traffic_limit, expire_time, username, network) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(n.id, n.uuid, n.vps_ip, n.protocol, Number(n.port), n.sni||null, n.private_key||null, n.public_key||null, n.short_id||null, n.relay_type||null, n.target_ip||null, n.target_port||null, n.target_id||null, 1, 0, Math.max(0, Number(n.traffic_limit)||0), Math.max(0, Number(n.expire_time)||0), nodeUser, n.network||'tcp').run(); context.waitUntil(notifyRealtimeVps(env, db, n.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
-            if (method === "PUT") { const { id, enable, reset_traffic } = await request.json(); const node = await db.prepare('SELECT vps_ip FROM nodes WHERE id = ?').bind(id).first(); if (!node) return Response.json({ error: 'Node not found' }, { status: 404 }); const statements = []; if (reset_traffic) statements.push(db.prepare("UPDATE nodes SET traffic_used = 0 WHERE id = ?").bind(id)); if (enable !== undefined) statements.push(db.prepare("UPDATE nodes SET enable = ? WHERE id = ?").bind(enable ? 1 : 0, id)); if (statements.length) await db.batch(statements); context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
-            if (method === "DELETE") { const id = new URL(request.url).searchParams.get("id"); const node = await db.prepare('SELECT vps_ip FROM nodes WHERE id = ?').bind(id).first(); await db.batch([db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'node' AND resource_id = ?").bind(id), db.prepare("DELETE FROM nodes WHERE id = ?").bind(id)]); if (node) context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(()=>{})); return Response.json({ success: true }); }
+            if (method === "POST") {
+                let n;
+                try { n = normalizeNodePayload(await readJsonBody(request, 16 * 1024)); }
+                catch (error) { return Response.json({ error: error.message || 'Invalid node configuration' }, { status: 400 }); }
+                if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
+                if (await db.prepare('SELECT id FROM nodes WHERE id = ?').bind(n.id).first()) return Response.json({ error: 'Node already exists' }, { status: 409 });
+                const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(n.vps_ip, n.port).all();
+                if (nodeListenerConflicts(listeners, n)) return Response.json({ error: `${nodeTransport(n.protocol).toUpperCase()} port ${n.port} is already in use on this VPS` }, { status: 409 });
+                let nodeUser = normalizeNodeText(n.username || currentUser, 'username', 64);
+                if (nodeUser === 'admin') nodeUser = currentUser;
+                if (n.expire_time && n.expire_time <= Date.now()) return Response.json({ error: 'Node expiry must be in the future' }, { status: 400 });
+                if (nodeUser !== currentUser && !(await db.prepare('SELECT username FROM users WHERE username = ? AND enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?)').bind(nodeUser, Date.now()).first())) return Response.json({ error: 'Node user is unavailable' }, { status: 400 });
+                if (n.protocol === 'dokodemo-door' && n.relay_type === 'internal') {
+                    const target = await db.prepare('SELECT id, protocol, enable FROM nodes WHERE id = ? AND vps_ip = ?').bind(n.target_id, n.vps_ip).first();
+                    if (!target || target.enable !== 1 || !INTERNAL_RELAY_PROTOCOLS.has(target.protocol)) return Response.json({ error: 'Internal relay target is unavailable or unsupported' }, { status: 400 });
+                }
+                await db.prepare(`INSERT INTO nodes (id, uuid, vps_ip, protocol, port, sni, private_key, public_key, short_id, relay_type, target_ip, target_port, target_id, enable, traffic_used, traffic_limit, expire_time, username, network) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(n.id, n.uuid || '', n.vps_ip, n.protocol, n.port, n.sni || null, n.private_key || null, n.public_key || null, n.short_id || null, n.relay_type || null, n.target_ip || null, n.target_port || null, n.target_id || null, 1, 0, n.traffic_limit, n.expire_time, nodeUser, n.network).run();
+                context.waitUntil(notifyRealtimeVps(env, db, n.vps_ip).catch(() => {}));
+                return Response.json({ success: true });
+            }
+            if (method === "PUT") {
+                const { id, enable, reset_traffic } = await readJsonBody(request, 8 * 1024);
+                const node = await db.prepare('SELECT id, vps_ip, protocol, port, relay_type, target_id FROM nodes WHERE id = ?').bind(id).first();
+                if (!node) return Response.json({ error: 'Node not found' }, { status: 404 });
+                if (enable === false && await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ? AND enable = 1").bind(id).first()) return Response.json({ error: 'Node is used by an enabled internal relay' }, { status: 409 });
+                if (enable === true) {
+                    const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, node.port).all();
+                    if (nodeListenerConflicts(listeners, node)) return Response.json({ error: `${nodeTransport(node.protocol).toUpperCase()} port ${node.port} is already in use on this VPS` }, { status: 409 });
+                    if (node.protocol === 'dokodemo-door' && node.relay_type === 'internal') {
+                        const target = await db.prepare('SELECT protocol, enable FROM nodes WHERE id = ? AND vps_ip = ?').bind(node.target_id, node.vps_ip).first();
+                        if (!target || target.enable !== 1 || !INTERNAL_RELAY_PROTOCOLS.has(target.protocol)) return Response.json({ error: 'Internal relay target is unavailable or unsupported' }, { status: 409 });
+                    }
+                }
+                const statements = [];
+                if (reset_traffic) statements.push(db.prepare('UPDATE nodes SET traffic_used = 0 WHERE id = ?').bind(id));
+                if (enable !== undefined) statements.push(db.prepare('UPDATE nodes SET enable = ? WHERE id = ?').bind(enable ? 1 : 0, id));
+                if (statements.length) await db.batch(statements);
+                context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(() => {}));
+                return Response.json({ success: true });
+            }
+            if (method === "DELETE") {
+                const id = new URL(request.url).searchParams.get('id');
+                const node = await db.prepare('SELECT vps_ip FROM nodes WHERE id = ?').bind(id).first();
+                if (!node) return Response.json({ error: 'Node not found' }, { status: 404 });
+                if (await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ?").bind(id).first()) return Response.json({ error: 'Node is used by an internal relay; delete the relay first' }, { status: 409 });
+                await db.batch([db.prepare("DELETE FROM user_group_resources WHERE resource_type = 'node' AND resource_id = ?").bind(id), db.prepare('DELETE FROM nodes WHERE id = ?').bind(id)]);
+                context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(() => {}));
+                return Response.json({ success: true });
+            }
         }
 
     if (action === "thirdparty" && isAdmin) {
@@ -2223,4 +2371,7 @@ export const __test = {
     proxyPublicListenerEnabled,
     normalizeEgressRequest,
     requestRealtimeEgressRefresh,
+    normalizeNodePayload,
+    nodeListenerConflicts,
+    notifyRealtimeVps,
 };

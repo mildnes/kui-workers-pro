@@ -127,48 +127,46 @@
                           <details class="kui-server-tools">
                               <summary><span>配置与节点管理</span><small>{{ getNodesByIp(vps.ip).length }} 个节点</small></summary>
                               <div class="px-6 md:px-8 pb-4">
-                              <div class="kui-quick-deploy-panel bg-indigo-50/70 border-2 border-dashed border-indigo-200 p-6 rounded-[1.5rem] mb-2 relative overflow-hidden group shadow-sm hover:border-indigo-300 transition-all">
-                                  <div class="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-black px-3 py-1 rounded-bl-xl shadow-sm">QUICK INSTALL</div>
-                                  <h4 class="font-black text-indigo-800 text-lg mb-2 flex items-center gap-2">🚀 极速全量节点下发 (9合1)</h4>
-                                  <p class="text-xs text-indigo-500/80 font-bold mb-5 leading-relaxed">输入起始端口，系统将依次为您生成 8 个稳定防封协议阵列：XTLS+Reality, Hysteria2, TUIC, Trojan, H2+Reality, gRPC+Reality, AnyTLS, Naive。</p>
-                                  <div class="flex flex-col md:flex-row gap-4 mb-2">
-                                      <div class="flex-1"><label class="block text-[10px] text-indigo-400 font-bold mb-1 pl-1">归属用户设置</label><select v-model="batchUser[vps.ip]" class="w-full bg-white border border-indigo-100 text-indigo-700 font-bold text-sm p-3.5 rounded-xl outline-none focus:shadow-md transition"><option value="admin">👤 管理员自身</option><option v-for="u in users" :value="u.username">👤 {{ u.username }}</option></select></div>
-                                      <div class="flex-1"><label class="block text-[10px] text-indigo-400 font-bold mb-1 pl-1">起始端口 (建议 8881)</label><input v-model="batchStartPort[vps.ip]" type="number" placeholder="例如: 8881" class="w-full bg-white border border-indigo-100 p-3.5 rounded-xl outline-none text-sm font-mono text-indigo-900 focus:shadow-md transition"></div>
-                                      <div class="flex items-end"><button @click="deployAllProtocols(vps.ip)" class="h-[50px] bg-gradient-to-r from-indigo-500 to-blue-600 text-white px-8 rounded-xl text-sm font-black shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 transition-all whitespace-nowrap">🚀 爆发下发</button></div>
+                              <div v-if="vps.config_result?.component === 'config'" class="mb-3 rounded-xl border px-4 py-3 text-xs font-bold" :class="vps.config_result.success ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'">
+                                  <span v-if="vps.config_result.success">● 最近节点配置已在 VPS 生效</span>
+                                  <span v-else>● 最近节点配置应用失败：{{ vps.config_result.error || '未知错误，VPS 保留原配置' }}</span>
+                              </div>
+                              <div class="kui-quick-deploy-panel">
+                                  <div class="kui-node-panel-heading"><div><strong>极速 9 合 1</strong><span>按起始端口连续创建 9 个协议节点</span></div><small>QUICK</small></div>
+                                  <div class="kui-quick-deploy-grid">
+                                      <label><span>归属用户 <b class="kui-required">*</b></span><select v-model="batchUser[vps.ip]" required><option value="admin">管理员自身</option><option v-for="u in users" :value="u.username">{{ u.username }}</option></select></label>
+                                      <label><span>起始端口 <b class="kui-required">*</b> <em>建议 8881</em></span><input v-model="batchStartPort[vps.ip]" type="number" min="10" max="65527" placeholder="8881" required></label>
+                                      <button @click="deployAllProtocols(vps.ip)">批量下发</button>
                                   </div>
                               </div>
 
-                              <div class="kui-node-deploy-panel bg-gradient-to-br from-white/80 to-white/40 p-5 rounded-[1.5rem] border border-white shadow-sm mt-4">
-                                  <div class="text-xs font-bold text-slate-400 mb-2 pl-1">手动单节点精细化下发</div>
-                                  <select v-model="newNodeParams[vps.ip].username" class="w-full border-none bg-indigo-50/50 text-indigo-700 font-bold text-sm p-3 rounded-xl outline-none mb-3"><option value="admin">👤 归属权: 管理员自身</option><option v-for="u in users" :value="u.username">👤 归属权: {{ u.username }}</option></select>
-                                  <div class="flex gap-3 mb-3">
-                                      <select v-model="newNodeParams[vps.ip].protocol" class="border-none bg-slate-100/50 text-slate-700 text-sm p-3 rounded-xl flex-1 outline-none font-medium"><option value="XTLS-Reality">XTLS + Reality</option><option value="Hysteria2">Hysteria2 (极速)</option><option value="TUIC">TUIC v5 (高并发)</option><option value="Shadowsocks2022">Shadowsocks 2022</option><option value="Trojan">Trojan</option><option value="H2-Reality">H2 + Reality</option><option value="gRPC-Reality">gRPC + Reality</option><option value="AnyTLS">AnyTLS</option><option value="Naive">Naive</option><option disabled>──────────</option><option value="VLESS-Argo">VLESS Argo (IP被封)</option><option value="dokodemo-door">Dokodemo (内部转发)</option></select>
-                                      <input v-model="newNodeParams[vps.ip].port" type="number" placeholder="端口" class="bg-slate-100/50 text-slate-700 text-sm p-3 rounded-xl w-24 outline-none font-mono">
+                              <div class="kui-node-deploy-panel">
+                                  <div class="kui-node-panel-heading"><div><strong>添加单节点</strong><span>按协议填写必要参数</span></div><small><b class="kui-required">*</b> 必填</small></div>
+                                  <div class="kui-node-form-grid kui-node-form-primary">
+                                      <label><span>归属用户 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].username" required><option value="admin">管理员自身</option><option v-for="u in users" :value="u.username">{{ u.username }}</option></select></label>
+                                      <label><span>协议 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].protocol" required><option value="XTLS-Reality">XTLS + Reality</option><option value="Hysteria2">Hysteria2</option><option value="TUIC">TUIC v5</option><option value="Shadowsocks2022">Shadowsocks 2022</option><option value="Trojan">Trojan</option><option value="H2-Reality">H2 + Reality</option><option value="gRPC-Reality">gRPC + Reality</option><option value="AnyTLS">AnyTLS</option><option value="Naive">Naive</option><option disabled>──────────</option><option value="VLESS-Argo">VLESS Argo</option><option value="dokodemo-door">Dokodemo</option></select></label>
+                                      <label class="is-port"><span>端口 <b class="kui-required">*</b></span><input v-model="newNodeParams[vps.ip].port" type="number" min="1" max="65535" placeholder="443" required></label>
                                   </div>
-                                  <div class="grid grid-cols-2 gap-3 mb-3">
-                                      <div class="bg-slate-100/50 p-3 rounded-xl"><label class="block text-[10px] text-slate-400 font-bold mb-1">配额(GB, 0无限)</label><input v-model="newNodeParams[vps.ip].traffic_limit_gb" type="number" class="w-full text-sm bg-transparent outline-none font-bold text-slate-700"></div>
-                                      <div class="bg-slate-100/50 p-3 rounded-xl"><label class="block text-[10px] text-slate-400 font-bold mb-1">到期日(留空永久)</label><input v-model="newNodeParams[vps.ip].expire_date" type="date" class="w-full text-sm bg-transparent outline-none font-bold text-slate-700"></div>
+                                  <div class="kui-node-form-grid kui-node-form-optional">
+                                      <label><span>流量配额 <em>GB，0 为无限</em></span><input v-model="newNodeParams[vps.ip].traffic_limit_gb" type="number" min="0" placeholder="0"></label>
+                                      <label><span>到期日期 <em>留空为永久</em></span><input v-model="newNodeParams[vps.ip].expire_date" type="date"></label>
                                   </div>
-                                  <div v-if="['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(newNodeParams[vps.ip].protocol)" class="bg-slate-100/50 p-3 rounded-xl mb-3"><input v-model="newNodeParams[vps.ip].sni" :list="'sni-rec-' + vps.ip" placeholder="伪装域名: 支持手填或下拉" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700"><datalist :id="'sni-rec-' + vps.ip"><option value="addons.mozilla.org"></option><option value="www.apple.com"></option><option value="gateway.icloud.com"></option><option value="itunes.apple.com"></option><option value="www.microsoft.com"></option></datalist></div>
-                                  <div v-if="['TUIC', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(newNodeParams[vps.ip].protocol)" class="bg-slate-100/50 p-3 rounded-xl mb-3"><input v-model="newNodeParams[vps.ip].sni" placeholder="SNI 域名 / 主机名" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700"></div>
-                                  <div v-if="newNodeParams[vps.ip].protocol === 'Shadowsocks2022'" class="bg-slate-100/50 p-3 rounded-xl mb-3">
-                                      <label class="block text-[10px] text-slate-400 font-bold mb-1">SS2022 加密方式</label>
-                                      <select v-model="newNodeParams[vps.ip].ss_method" @change="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)" class="w-full bg-transparent outline-none text-sm font-medium text-slate-700">
-                                          <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
-                                          <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
-                                      </select>
-                                      <label class="block text-[10px] text-slate-400 font-bold mt-3 mb-1">SS2022 密码（Base64 原始密钥）</label>
-                                      <div class="flex gap-2">
-                                          <input v-model.trim="newNodeParams[vps.ip].ss_password" type="text" spellcheck="false" autocomplete="off" placeholder="16 字节=24 字符，32 字节=44 字符" class="min-w-0 flex-1 bg-white rounded-lg px-2 py-2 text-xs font-mono text-slate-700 outline-none border border-slate-200">
-                                          <button type="button" @click="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)" class="shrink-0 rounded-lg border border-sky-200 bg-white px-2 text-[10px] font-bold text-sky-700 hover:bg-sky-50">随机生成</button>
-                                      </div>
+                                  <div v-if="['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(newNodeParams[vps.ip].protocol)" class="kui-node-protocol-fields">
+                                      <label><span>Reality 伪装域名 <b class="kui-required">*</b></span><input v-model="newNodeParams[vps.ip].sni" :list="'sni-rec-' + vps.ip" placeholder="addons.mozilla.org" required><datalist :id="'sni-rec-' + vps.ip"><option value="addons.mozilla.org"></option><option value="www.apple.com"></option><option value="gateway.icloud.com"></option><option value="itunes.apple.com"></option><option value="www.microsoft.com"></option></datalist></label>
                                   </div>
-                                  <div v-if="newNodeParams[vps.ip].protocol === 'dokodemo-door'" class="bg-slate-100/50 p-3 rounded-xl mb-3 space-y-2">
-                                      <select v-model="newNodeParams[vps.ip].relay_type" class="w-full bg-white p-2 rounded-lg text-sm"><option value="external">外部目标地址</option><option value="internal">面板内部节点</option></select>
-                                      <div v-if="newNodeParams[vps.ip].relay_type === 'external'" class="grid grid-cols-2 gap-2"><input v-model="newNodeParams[vps.ip].target_ip" placeholder="目标 IP/域名" class="bg-white p-2 rounded-lg text-sm"><input v-model.number="newNodeParams[vps.ip].target_port" type="number" placeholder="目标端口" class="bg-white p-2 rounded-lg text-sm"></div>
-                                      <select v-else v-model="newNodeParams[vps.ip].target_id" class="w-full bg-white p-2 rounded-lg text-sm"><option value="">选择目标节点</option><option v-for="target in nodes.filter(n => n.id && n.protocol !== 'dokodemo-door')" :value="target.id">{{ getVpsName(target.vps_ip) }} · {{ target.protocol }}:{{ target.port }}</option></select>
+                                  <div v-if="['TUIC', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(newNodeParams[vps.ip].protocol)" class="kui-node-protocol-fields">
+                                      <label><span>SNI / 主机名 <b class="kui-required">*</b></span><input v-model="newNodeParams[vps.ip].sni" placeholder="addons.mozilla.org" required></label>
                                   </div>
-                                  <button @click="addNode(vps.ip)" class="w-full bg-gradient-to-r from-slate-800 to-black text-white py-3 rounded-xl font-bold shadow-lg transition-all hover:scale-[1.02]">添加单节点</button>
+                                  <div v-if="newNodeParams[vps.ip].protocol === 'Shadowsocks2022'" class="kui-node-protocol-fields kui-node-form-grid">
+                                      <label><span>加密方式 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].ss_method" @change="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)" required><option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option><option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option></select></label>
+                                      <label><span>Base64 密钥 <b class="kui-required">*</b></span><div class="kui-node-input-action"><input v-model.trim="newNodeParams[vps.ip].ss_password" type="text" spellcheck="false" autocomplete="off" placeholder="标准 Base64 原始密钥" required><button type="button" @click="newNodeParams[vps.ip].ss_password = generateSs2022Password(newNodeParams[vps.ip].ss_method)">随机</button></div></label>
+                                  </div>
+                                  <div v-if="newNodeParams[vps.ip].protocol === 'dokodemo-door'" class="kui-node-protocol-fields">
+                                      <label><span>转发类型 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].relay_type" required><option value="external">外部目标地址</option><option value="internal">面板内部节点</option></select></label>
+                                      <div v-if="newNodeParams[vps.ip].relay_type === 'external'" class="kui-node-form-grid"><label><span>目标 IP / 域名 <b class="kui-required">*</b></span><input v-model="newNodeParams[vps.ip].target_ip" placeholder="example.com" required></label><label><span>目标端口 <b class="kui-required">*</b></span><input v-model.number="newNodeParams[vps.ip].target_port" type="number" min="1" max="65535" placeholder="443" required></label></div>
+                                      <label v-else><span>目标节点 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].target_id" required><option value="">选择本 VPS 的目标节点</option><option v-for="target in nodes.filter(n => n.id && n.vps_ip === vps.ip && n.enable && ['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS'].includes(n.protocol))" :value="target.id">{{ target.protocol }}:{{ target.port }}</option></select></label>
+                                  </div>
+                                  <button @click="addNode(vps.ip)" class="kui-node-submit">添加节点</button>
                               </div>
                               </div>
                           </details>
