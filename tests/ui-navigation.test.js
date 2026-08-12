@@ -227,6 +227,12 @@ test('residential proxy details are compact and readable in both color modes', (
     assert.match(appStyles, /\.pc-section-stack \{ display: grid; gap: 12px/);
 });
 
+test('residential country candidates sort by availability then country code', () => {
+    assert.match(legacyProxy, /\.sort\(\(a, b\) => \{/);
+    assert.match(legacyProxy, /const nodeDelta = \(b\.nodes \?\? -1\) - \(a\.nodes \?\? -1\)/);
+    assert.match(legacyProxy, /return nodeDelta \|\| a\.code\.localeCompare\(b\.code, 'en'/);
+});
+
 test('residential proxy panels share spacing and matrix and score details stay readable', () => {
     const stackStart = residentialProxyPage.indexOf('class="pc-section-stack"');
     const stackEnd = residentialProxyPage.indexOf('</div>\n              </div>\n</template>', stackStart);

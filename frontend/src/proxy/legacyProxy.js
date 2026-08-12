@@ -40,11 +40,14 @@
                 const container = document.getElementById('countries-list');
                 if (!container) return;
                 const entries = Array.isArray(list) ? list.map(item => {
-                    if (typeof item === 'string') return { code: item, nodes: null };
-                    return { code: item?.code || item?.country || '', nodes: Number.isFinite(Number(item?.nodes)) ? Number(item.nodes) : null };
-                }).filter(item => /^[A-Za-z]{2}$/.test(item.code)) : [];
+                    if (typeof item === 'string') return { code: item.toUpperCase(), nodes: null };
+                    return { code: String(item?.code || item?.country || '').toUpperCase(), nodes: Number.isFinite(Number(item?.nodes)) ? Number(item.nodes) : null };
+                }).filter(item => /^[A-Z]{2}$/.test(item.code)).sort((a, b) => {
+                    const nodeDelta = (b.nodes ?? -1) - (a.nodes ?? -1);
+                    return nodeDelta || a.code.localeCompare(b.code, 'en');
+                }) : [];
                 container.innerHTML = entries.map(item => {
-                    const code = pcEscapeHtml(item.code.toUpperCase());
+                    const code = pcEscapeHtml(item.code);
                     const count = item.nodes === null ? '—' : item.nodes;
                     const countClass = item.nodes === null ? 'text-slate-500' : (item.nodes > 0 ? 'text-emerald-400' : 'text-rose-400');
                     return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="pc-country-chip">${code}<span class="ml-1 ${countClass}">${count}</span></button>`;
