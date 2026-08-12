@@ -250,7 +250,7 @@
                 if (!tbody) return;
 
                 if (!servers || servers.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="py-12 text-center text-slate-500 flex-col items-center justify-center"><svg class="w-12 h-12 mx-auto text-slate-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>未检测到在线母机，请在 VPS 运行纳管命令接入</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="py-12 text-center text-slate-500 flex-col items-center justify-center"><svg class="w-12 h-12 mx-auto text-slate-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>未检测到在线母机，请在 VPS 运行纳管命令接入</td></tr>';
                     return;
                 }
 
@@ -261,68 +261,68 @@
                     const serverName = pcEscapeHtml(server.name || managedServerNames.get(server.ip) || '未命名主机');
                     const serverIp = pcEscapeHtml(server.ip);
 
-                    let proxyBadges = '';
+                    let proxyEgress = '';
+                    let proxyStatuses = '';
                     if (details.length === 0) {
                         if (timeAgo < 120) {
-                            proxyBadges = `
+                            proxyEgress = `
                             <div class="inline-flex items-center bg-slate-900 border border-sky-500/30 rounded-xl px-3 py-1.5 shadow-inner text-sky-400/90 text-sm">
                                 <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                 通道握手初始化中...
                             </div>`;
                         } else if (timeAgo < 360) {
-                            proxyBadges = `
+                            proxyEgress = `
                             <div class="inline-flex items-center bg-slate-900 border border-slate-700/50 rounded-xl px-3 py-1.5 shadow-inner text-slate-400/80 text-xs">
                                 <svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                 隧道数据同步中...
                             </div>`;
                         } else {
-                            proxyBadges = `
+                            proxyEgress = `
                             <div class="inline-flex items-center bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-1.5 shadow-inner text-amber-400/90 text-sm">
                                 <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                 双路通道失联，正在抢救拨号中...
                             </div>`;
                         }
+                        proxyStatuses = '<span class="pc-matrix-status text-slate-500 text-xs">等待同步</span>';
                     } else {
-                        proxyBadges = '<div class="flex flex-col gap-2">' + details.map(d => {
+                        proxyEgress = '<div class="pc-matrix-egress">' + details.map(d => `
+                            <div class="pc-matrix-line pc-tunnel-row inline-flex items-center">
+                                <span class="pc-tunnel-name bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md border border-slate-700 font-bold">${pcEscapeHtml(d.tunnel)}</span>
+                                <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md border border-indigo-500/20">${pcEscapeHtml(d.country)}</span>
+                                <span class="font-mono text-slate-300 text-xs tracking-wide" title="出口物理 IP">${pcEscapeHtml(d.node_ip || '---.---.---.---')}:${pcEscapeHtml(d.port)}</span>
+                            </div>`).join('') + '</div>';
+                        proxyStatuses = '<div class="pc-matrix-status">' + details.map(d => {
                             const isActive = d.active;
                             const statusColorClass = isActive ? 'bg-emerald-500' : 'bg-sky-500';
                             const statusText = isActive ? 'ACTIVE（业务出口）' : 'STANDBY（热备就绪）';
                             const textColorClass = isActive ? 'text-emerald-400' : 'text-sky-400';
 
-                            return `
-                            <div class="pc-tunnel-row inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-lg px-2.5 py-1.5 shadow-inner">
-                                <div class="pc-tunnel-identity">
-                                    <span class="pc-tunnel-name bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md border border-slate-700 font-bold">${pcEscapeHtml(d.tunnel)}</span>
-                                    <span class="pc-tunnel-status ${textColorClass}">
-                                        <span class="pc-tunnel-status-dot ${statusColorClass} shadow-[0_0_5px_currentColor]"></span>${statusText}
-                                    </span>
-                                </div>
-                                <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-indigo-500/20">${pcEscapeHtml(d.country)}</span>
-                                <span class="font-mono text-slate-300 text-sm tracking-wide mr-3" title="出口物理 IP">${pcEscapeHtml(d.node_ip || '---.---.---.---')}:${pcEscapeHtml(d.port)}</span>
-                            </div>`;
+                            return `<div class="pc-matrix-line pc-tunnel-status ${textColorClass}"><span class="pc-tunnel-status-dot ${statusColorClass} shadow-[0_0_5px_currentColor]"></span>${statusText}</div>`;
                         }).join('') + '</div>';
                     }
 
                     return `
                         <tr class="pc-node-row transition-colors group">
-                            <td class="py-3 px-5 align-middle">
+                            <td class="pc-matrix-host-name py-3 px-4 align-middle">
                                 <div class="pc-host-identity flex items-center gap-2">
                                     <svg class="w-4 h-4 text-slate-600 group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-                                    <span class="pc-host-name">${serverName}</span><span class="pc-host-separator">：</span><span class="pc-host-ip">${serverIp}</span>
+                                    <span class="pc-host-name">${serverName}</span>
                                 </div>
                             </td>
-                            <td class="py-3 px-5 align-middle">
+                            <td class="pc-matrix-host-ip py-3 px-4 align-middle"><span class="pc-host-ip">${serverIp}</span></td>
+                            <td class="py-3 px-4 align-middle">
                                 <span class="flex items-center gap-1.5 ${timeAgo < 20 ? 'text-emerald-400' : 'text-rose-400'} font-mono text-xs">
                                     <span class="w-1.5 h-1.5 rounded-full ${timeAgo < 20 ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}"></span>
                                     ${timeAgo}s 前
                                 </span>
                             </td>
-                            <td class="py-3 px-5 align-middle">${proxyBadges}</td>
-                            <td class="py-3 px-5 align-middle text-right">
+                            <td class="py-3 px-4 align-middle">
                                 <span class="pc-channel-count ${details.length === 2 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (details.length === 1 ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30')} py-1 px-3 rounded-md text-xs font-mono font-bold">
                                     ${details.length}/2
                                 </span>
                             </td>
+                            <td class="py-3 px-4 align-middle">${proxyEgress}</td>
+                            <td class="py-3 px-4 align-middle">${proxyStatuses}</td>
                         </tr>
                     `;
                 }).join('');

@@ -10,7 +10,7 @@
 
     <nav class="kui-sidebar-nav" aria-label="主导航">
       <template v-if="role === 'admin'">
-        <button v-for="item in adminItems" :key="item.id" @click="go(item.id)" :class="{ active: activeTab === item.id }">
+        <button v-for="item in adminItems" :key="item.id" @click="activateAdminItem(item.id)" :class="{ active: activeTab === item.id }">
           <span class="kui-nav-icon">{{ item.icon }}</span><span>{{ item.label }}</span>
         </button>
       </template>
@@ -22,12 +22,6 @@
     </nav>
 
     <div v-if="role === 'admin'" class="kui-sidebar-secondary">
-      <button @click="openAddVps">
-        <span class="kui-nav-icon">＋</span><span>接入 VPS</span>
-      </button>
-      <button @click="go('public-listener')" :class="{ active: activeTab === 'public-listener' }">
-        <span class="kui-nav-icon">◉</span><span>公网监听</span>
-      </button>
       <label class="kui-sidebar-theme-picker" title="界面配色">
         <span class="kui-nav-icon" aria-hidden="true">{{ effectiveColorMode === 'dark' ? '☾' : '☀' }}</span>
         <select v-model="colorMode" aria-label="界面配色">
@@ -58,6 +52,8 @@ const adminItems = [
   { id: 'proxy', icon: '⌁', label: '住宅 IP 代理' },
   { id: 'users', icon: '◎', label: '用户与授权' },
   { id: 'thirdparty', icon: '↗', label: '第三方订阅' },
+  { id: 'public-listener', icon: '◉', label: '公网监听' },
+  { id: 'add-vps', icon: '＋', label: '接入 VPS' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '我的主页' },
@@ -69,7 +65,8 @@ export default {
     const state = inject(KUI_KEY);
     const go = id => { state.activeTab.value = id; if (id === 'probe') state.probeDetailId.value = null; };
     const openAddVps = () => { state.addVpsModalOpen.value = true; };
-    return { ...state, adminItems, userItems, go, openAddVps };
+    const activateAdminItem = id => { if (id === 'add-vps') openAddVps(); else go(id); };
+    return { ...state, activateAdminItem, adminItems, userItems, go };
   },
 };
 </script>

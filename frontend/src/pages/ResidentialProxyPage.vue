@@ -81,14 +81,16 @@
                               <table class="w-full text-left border-collapse">
                                   <thead>
                                       <tr class="bg-slate-900/80 text-slate-400 text-xs uppercase tracking-wider">
-                                          <th class="py-3 px-5 font-medium w-1/4">母机宿主</th>
-                                          <th class="py-3 px-5 font-medium w-28">心跳</th>
-                                          <th class="py-3 px-5 font-medium">主备双路出口状态</th>
-                                          <th class="py-3 px-5 font-medium text-right w-20">通道</th>
+                                          <th class="py-3 px-4 font-medium">主机名</th>
+                                          <th class="py-3 px-4 font-medium">IP</th>
+                                          <th class="py-3 px-4 font-medium w-24">心跳</th>
+                                          <th class="py-3 px-4 font-medium w-16">通道</th>
+                                          <th class="py-3 px-4 font-medium">主备出口</th>
+                                          <th class="py-3 px-4 font-medium w-32">状态</th>
                                       </tr>
                                   </thead>
                                   <tbody id="pc-nodes-table" class="divide-y divide-slate-800/50 text-sm">
-                                      <tr><td colspan="4" class="py-12 text-center text-slate-500">正在与 D1 数据库建立量子纠缠...</td></tr>
+                                      <tr><td colspan="6" class="py-12 text-center text-slate-500">正在与 D1 数据库建立量子纠缠...</td></tr>
                                   </tbody>
                               </table>
                           </div>

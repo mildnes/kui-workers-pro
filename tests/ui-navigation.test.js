@@ -26,19 +26,19 @@ test('removed and hidden pages are absent from the active UI', () => {
     assert.doesNotMatch(topBar, /第三方服务|Realm 中转/);
 });
 
-test('desktop navigation keeps residential proxy below servers and settings above the user footer', () => {
-    const nodes = desktopNavigation.indexOf("id: 'nodes'");
-    const proxy = desktopNavigation.indexOf("id: 'proxy'");
-    const users = desktopNavigation.indexOf("id: 'users'");
-    assert.ok(nodes >= 0 && nodes < proxy && proxy < users);
+test('desktop navigation keeps all operational entries in the requested upper order', () => {
+    const itemOrder = ['nodes', 'proxy', 'users', 'thirdparty', 'public-listener', 'add-vps'];
+    const positions = itemOrder.map(id => desktopNavigation.indexOf(`id: '${id}'`));
+    assert.ok(positions.every(position => position >= 0));
+    assert.deepEqual([...positions].sort((a, b) => a - b), positions);
     assert.ok(desktopNavigation.indexOf('kui-sidebar-secondary') < desktopNavigation.indexOf('kui-sidebar-footer'));
-    assert.match(desktopNavigation, /kui-sidebar-secondary[\s\S]*go\('settings'\)/);
+    assert.match(desktopNavigation, /kui-sidebar-secondary[\s\S]*kui-sidebar-theme-picker[\s\S]*go\('settings'\)/);
 });
 
 test('public listener control is placed before settings on desktop and mobile', () => {
-    const desktopPublic = desktopNavigation.indexOf("go('public-listener')");
-    const desktopSettings = desktopNavigation.indexOf("go('settings')");
-    assert.ok(desktopPublic >= 0 && desktopPublic < desktopSettings);
+    const desktopPublic = desktopNavigation.indexOf("id: 'public-listener'");
+    assert.ok(desktopPublic >= 0);
+    assert.match(desktopNavigation, /kui-sidebar-secondary[\s\S]*go\('settings'\)/);
     const mobilePublic = mobileNavigation.indexOf("id: 'public-listener'");
     const mobileSettings = mobileNavigation.indexOf("id: 'settings'", mobilePublic);
     assert.ok(mobilePublic >= 0 && mobilePublic < mobileSettings);
@@ -47,10 +47,10 @@ test('public listener control is placed before settings on desktop and mobile', 
     assert.match(publicListenerPage, /防火墙或云安全组/);
 });
 
-test('VPS onboarding opens a shared modal before public listener navigation', () => {
-    const desktopAdd = desktopNavigation.indexOf('openAddVps');
-    const desktopPublic = desktopNavigation.indexOf("go('public-listener')");
-    assert.ok(desktopAdd >= 0 && desktopAdd < desktopPublic);
+test('VPS onboarding opens a shared modal after public listener navigation', () => {
+    const desktopPublic = desktopNavigation.indexOf("id: 'public-listener'");
+    const desktopAdd = desktopNavigation.indexOf("id: 'add-vps'");
+    assert.ok(desktopPublic >= 0 && desktopPublic < desktopAdd);
     const mobileAdd = mobileNavigation.indexOf("id: 'add-vps'");
     const mobilePublic = mobileNavigation.indexOf("id: 'public-listener'");
     assert.ok(mobileAdd >= 0 && mobileAdd < mobilePublic);
@@ -87,6 +87,10 @@ test('servers page uses compact Chinese overview', () => {
     for (const label of ['在线服务器', '累计流量', '实时下载', '实时上传']) assert.match(serversPage, new RegExp(label));
     assert.doesNotMatch(serversPage, /ONLINE SERVERS|AGGREGATE TRAFFIC|>DOWNLOAD<|>UPLOAD</);
     assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
+});
+
+test('desktop server cards use a four-column grid', () => {
+    assert.match(serversPage, /class="kui-server-grid grid grid-cols-1 xl:grid-cols-4/);
 });
 
 test('global color modes reuse the servers light palette and residential dark palette', () => {
@@ -231,7 +235,7 @@ test('residential proxy panels share spacing and matrix and score details stay r
         assert.match(panelStack, new RegExp(className));
     }
 
-    assert.match(residentialProxyPage, /母机宿主[\s\S]*心跳[\s\S]*主备双路出口状态[\s\S]*通道/);
+    assert.match(residentialProxyPage, /主机名[\s\S]*>IP<[\s\S]*心跳[\s\S]*通道[\s\S]*主备出口[\s\S]*状态/);
     assert.match(legacyProxy, /class="pc-channel-count/);
     assert.match(legacyProxy, /\$\{details\.length\}\/2/);
     assert.match(legacyProxy, /class="pc-score-value[^"]*" title="\$\{orgStr\}"/);
@@ -241,13 +245,14 @@ test('residential proxy panels share spacing and matrix and score details stay r
     assert.match(appStyles, /\.pc-score-value \{[^}]*overflow-wrap: anywhere/);
 });
 
-test('residential tunnel status sits compactly below each tunnel name', () => {
-    assert.match(legacyProxy, /class="pc-tunnel-identity/);
+test('residential tunnel exits and statuses stay compactly aligned', () => {
+    assert.match(legacyProxy, /class="pc-matrix-egress/);
+    assert.match(legacyProxy, /class="pc-matrix-status/);
     assert.match(legacyProxy, /class="pc-tunnel-name/);
     assert.match(legacyProxy, /class="pc-tunnel-status/);
     assert.match(legacyProxy, /ACTIVE（业务出口）/);
     assert.match(legacyProxy, /STANDBY（热备就绪）/);
-    assert.match(appStyles, /\.pc-tunnel-identity \{[^}]*flex-direction: column/);
+    assert.match(appStyles, /\.pc-matrix-line \{[^}]*min-height: 24px/);
     assert.match(appStyles, /\.pc-tunnel-status \{[^}]*font-size: 9px/);
 });
 
@@ -256,4 +261,13 @@ test('mobile residential node matrix keeps headings and values on one line', () 
     assert.match(appStyles, /\.pc-node-matrix thead \{ display: table-header-group/);
     assert.match(appStyles, /\.pc-node-matrix #pc-nodes-table td \{[^}]*white-space: nowrap/);
     assert.doesNotMatch(appStyles, /#pc-nodes-table td:nth-child\([^)]*\)::before/);
+});
+
+test('residential node matrix exposes six explicit columns in order', () => {
+    assert.match(residentialProxyPage, /主机名[\s\S]*>IP<[\s\S]*心跳[\s\S]*通道[\s\S]*主备出口[\s\S]*状态/);
+    assert.match(residentialProxyPage, /colspan="6"/);
+    assert.match(legacyProxy, /class="pc-matrix-host-name/);
+    assert.match(legacyProxy, /class="pc-matrix-host-ip/);
+    assert.match(legacyProxy, /class="pc-matrix-egress/);
+    assert.match(legacyProxy, /class="pc-matrix-status/);
 });
