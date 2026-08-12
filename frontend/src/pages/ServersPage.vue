@@ -155,18 +155,40 @@
                           </details>
 
                           <div class="kui-node-list-section p-6 md:p-8 bg-slate-50/50 border-t border-white flex-1">
-                              <div v-for="node in getNodesByIp(vps.ip)" :key="node.id" class="kui-node-card bg-white/80 border border-white p-4 rounded-2xl mb-3 shadow-sm hover:shadow-md group transition-all">
-                                  <div class="flex justify-between items-start mb-3">
-                                      <div class="flex-1 overflow-hidden pr-2">
-                                          <div class="flex items-center gap-2 mb-1.5"><span class="font-black text-slate-700">{{ node.protocol }} <span class="font-mono text-slate-400 text-xs bg-slate-100 px-1.5 rounded">#{{ node.port }}</span></span><span class="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-md font-bold">👤 {{ node.username }}</span><span v-if="node.enable === 0" class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-bold">已停用</span></div>
-                                          <div v-if="node.protocol === 'VLESS-Argo'" class="text-[11px] p-1.5 rounded-lg overflow-hidden text-ellipsis whitespace-nowrap max-w-full inline-block" :class="node.sni.includes('等待') ? 'bg-amber-50 text-amber-600 animate-pulse font-bold' : 'bg-emerald-50 border border-emerald-100 text-emerald-700 font-mono font-bold'">Argo: {{ node.sni }}</div>
-                                          <div v-else-if="node.sni" class="text-[11px] bg-slate-50 text-slate-500 p-1.5 rounded-lg overflow-hidden text-ellipsis font-mono inline-block">SNI: {{ node.sni }}</div>
+                              <details v-for="node in getNodesByIp(vps.ip)" :key="node.id" class="kui-node-card mb-3">
+                                  <summary class="kui-node-summary">
+                                      <span class="kui-node-summary-protocol">{{ node.protocol }}</span>
+                                      <span class="kui-node-summary-user">👤 {{ node.username }}</span>
+                                      <span class="kui-node-summary-traffic">已用流量 {{ formatBytes(node.traffic_used) }}</span>
+                                      <span class="kui-node-summary-chevron" aria-hidden="true">⌄</span>
+                                  </summary>
+                                  <div class="kui-node-details">
+                                      <div class="kui-node-details-heading">
+                                          <div>
+                                              <strong>节点详细配置</strong>
+                                              <span :class="node.enable === 1 ? 'is-enabled' : 'is-disabled'">{{ node.enable === 1 ? '已启用' : '已停用' }}</span>
+                                          </div>
+                                          <div class="kui-node-actions">
+                                              <button @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)">{{ node.enable === 1 ? '停用' : '启用' }}</button>
+                                              <button class="is-danger" @click="deleteNode(node.id)">删除</button>
+                                          </div>
                                       </div>
-                                      <div class="flex gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"><button @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)" class="text-[11px] px-2 py-1 rounded-md bg-white border border-slate-200 hover:bg-slate-50 font-bold text-slate-600 shadow-sm">{{ node.enable === 1 ? '停用' : '启用' }}</button><button @click="deleteNode(node.id)" class="text-rose-500 text-[11px] px-2 py-1 bg-white border border-rose-100 rounded-md hover:bg-rose-50 font-bold shadow-sm">删除</button></div>
+                                      <dl class="kui-node-detail-grid">
+                                          <div v-for="row in buildNodeDetailRows(node)" :key="row.label">
+                                              <dt>{{ row.label }}</dt>
+                                              <dd>{{ row.value }}</dd>
+                                          </div>
+                                      </dl>
+                                      <div class="kui-node-usage">
+                                          <div class="kui-node-usage-labels">
+                                              <span>流量：{{ formatBytes(node.traffic_used) }}<template v-if="node.traffic_limit > 0"> / {{ formatBytes(node.traffic_limit) }}</template><template v-else> / 不限</template></span>
+                                              <span>到期：{{ node.expire_time > 0 ? formatDate(node.expire_time) : '永久' }}</span>
+                                          </div>
+                                          <div class="kui-node-usage-bar"><i :class="(node.traffic_limit > 0 && node.traffic_used >= node.traffic_limit) ? 'is-exhausted' : ''" :style="{ width: getTrafficPercent(node.traffic_used, node.traffic_limit) + '%' }"></i></div>
+                                          <button v-if="node.traffic_used > 0" @click="resetTraffic(node.id)">清零已用流量</button>
+                                      </div>
                                   </div>
-                                  <div class="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden"><div :class="(node.traffic_limit > 0 && node.traffic_used >= node.traffic_limit) ? 'bg-rose-400' : 'bg-slate-800'" class="h-1.5 rounded-full transition-all duration-500" :style="{ width: getTrafficPercent(node.traffic_used, node.traffic_limit) + '%' }"></div></div>
-                                  <div class="flex justify-between text-[10px] text-slate-400 mt-2 font-medium"><span>已用: {{ formatBytes(node.traffic_used) }} <span v-if="node.traffic_limit > 0">/ {{ formatBytes(node.traffic_limit) }}</span></span><div class="flex gap-3"><span v-if="node.expire_time > 0">到期: {{ formatDate(node.expire_time) }}</span><button v-if="node.traffic_used > 0" @click="resetTraffic(node.id)" class="text-indigo-500 hover:underline font-bold">清零</button></div></div>
-                              </div>
+                              </details>
                               <div v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-slate-400 text-xs py-6 border-2 border-dashed border-slate-200 rounded-2xl font-medium">节点矩阵为空，请在上方一键下发建立</div>
                           </div>
 
@@ -195,10 +217,11 @@
 <script>
 import { inject } from 'vue';
 import { KUI_KEY } from '../app/context.js';
+import { buildNodeDetailRows } from '../utils/nodeDetails.js';
 
 export default {
   setup() {
-    return inject(KUI_KEY);
+    return { ...inject(KUI_KEY), buildNodeDetailRows };
   },
 };
 </script>

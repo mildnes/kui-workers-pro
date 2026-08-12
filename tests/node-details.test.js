@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import test from 'node:test';
+import { buildNodeDetailRows } from '../frontend/src/utils/nodeDetails.js';
+
+const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
+const appStyles = fs.readFileSync(new URL('../frontend/src/styles/app.css', import.meta.url), 'utf8');
+
+const asObject = rows => Object.fromEntries(rows.map(row => [row.label, row.value]));
+
+test('configured node cards are collapsed summaries with only protocol, user and used traffic', () => {
+    const start = serversPage.indexOf('<details v-for="node in getNodesByIp(vps.ip)"');
+    const summary = serversPage.slice(serversPage.indexOf('<summary', start), serversPage.indexOf('</summary>', start));
+    assert.ok(start >= 0);
+    assert.doesNotMatch(serversPage.slice(start, serversPage.indexOf('>', start) + 1), /\sopen(?:\s|>)/);
+    assert.match(summary, /node\.protocol/);
+    assert.match(summary, /node\.username/);
+    assert.match(summary, /已用流量 \{\{ formatBytes\(node\.traffic_used\) \}\}/);
+    assert.doesNotMatch(summary, /node\.port|node\.sni|private_key|public_key|short_id/);
+    assert.match(appStyles, /\.kui-node-card\[open\]/);
+});
+
+test('Reality node details expose transport and key material', () => {
+    const details = asObject(buildNodeDetailRows({
+        id: 'node-1', protocol: 'gRPC-Reality', port: 443, uuid: 'uuid', sni: 'example.com',
+        public_key: 'public', private_key: 'private', short_id: 'abcd',
+    }));
+    assert.equal(details['监听端口'], '443');
+    assert.equal(details.UUID, 'uuid');
+    assert.equal(details['传输方式'], 'gRPC + Reality');
+    assert.equal(details['Reality 公钥'], 'public');
+    assert.equal(details['Reality 私钥'], 'private');
+    assert.equal(details['Reality 短 ID'], 'abcd');
+});
+
+test('credential protocols expose their protocol-specific fields', () => {
+    const ss = asObject(buildNodeDetailRows({ protocol: 'Shadowsocks2022', port: 8388, uuid: '2022-blake3-aes-256-gcm', private_key: 'secret' }));
+    assert.equal(ss['加密方式'], '2022-blake3-aes-256-gcm');
+    assert.equal(ss['密码'], 'secret');
+
+    const tuic = asObject(buildNodeDetailRows({ protocol: 'TUIC', port: 443, uuid: 'uuid', private_key: 'password', sni: 'tuic.example' }));
+    assert.equal(tuic.UUID, 'uuid');
+    assert.equal(tuic['密码'], 'password');
+    assert.match(tuic['传输方式'], /QUIC/);
+
+    const naive = asObject(buildNodeDetailRows({ protocol: 'Naive', port: 443, uuid: 'user', private_key: 'pass', sni: 'naive.example' }));
+    assert.equal(naive['用户名'], 'user');
+    assert.equal(naive['密码'], 'pass');
+});
+
+test('relay and Argo details expose targets instead of unrelated credentials', () => {
+    const relay = asObject(buildNodeDetailRows({ protocol: 'dokodemo-door', port: 9000, relay_type: 'external', target_ip: '10.0.0.1', target_port: 443 }));
+    assert.equal(relay['转发类型'], '外部地址');
+    assert.equal(relay['转发目标'], '10.0.0.1:443');
+    assert.equal(relay['密码'], undefined);
+
+    const argo = asObject(buildNodeDetailRows({ protocol: 'VLESS-Argo', port: 10000, uuid: 'uuid', sni: 'tunnel.example.com' }));
+    assert.equal(argo['本地监听端口'], '10000');
+    assert.equal(argo['公网域名'], 'tunnel.example.com');
+    assert.equal(argo['公网端口'], '443');
+});
