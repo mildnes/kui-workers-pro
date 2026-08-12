@@ -198,7 +198,7 @@
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">IP 原生性</span> <span class="font-medium text-sm">${isNative ? '<span class="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">原生 IP (Native)</span>' : `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold">${nativeType}</span>`}</span></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">业务标记</span> <div class="flex gap-1">${tags}</div></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">运营类型</span> <span class="font-medium ${isHosting ? 'text-rose-400' : 'text-emerald-400'} text-sm">${ispType}</span></div>
-                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">归属机构</span> <span class="font-medium text-slate-300 text-sm truncate max-w-[150px]" title="${orgStr}">${orgStr}</span></div>
+                        <div class="pc-score-field flex justify-between items-start gap-3"><span class="text-slate-400 text-sm">归属机构</span> <span class="pc-score-value font-medium text-slate-300 text-sm" title="${orgStr}">${orgStr}</span></div>
                     </div>
 
                     <div class="pc-score-card bg-slate-800/40 border border-slate-700/60 p-5 rounded-xl flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
@@ -212,7 +212,7 @@
                     <div class="pc-score-card bg-slate-800/40 border border-slate-700/60 p-5 rounded-xl flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">风险深度检测</h4>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">Spamhaus 情报</span> <span class="${threat ? 'px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold' : 'px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold'}">${threat ? '🚨 已在黑名单' : '✅ 纯净无异常'}</span></div>
-                        <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">代理/机房特征</span> <span class="font-medium text-xs font-bold ${d.isp.warning ? 'text-amber-400' : 'text-emerald-400'} truncate max-w-[150px]" title="${warning}">${warning}</span></div>
+                        <div class="pc-score-field flex justify-between items-start gap-3"><span class="text-slate-400 text-sm">代理/机房特征</span> <span class="pc-score-value font-medium text-xs font-bold ${d.isp.warning ? 'text-amber-400' : 'text-emerald-400'}" title="${warning}">${warning}</span></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">数据源</span> <span class="font-medium text-slate-400 text-xs">${dataSource}</span></div>
                     </div>
                 `;
@@ -311,16 +311,16 @@
                                     <span class="pc-host-name">${serverName}</span><span class="pc-host-separator">：</span><span class="pc-host-ip">${serverIp}</span>
                                 </div>
                             </td>
-                            <td class="py-3 px-5 align-middle">${proxyBadges}</td>
                             <td class="py-3 px-5 align-middle">
                                 <span class="flex items-center gap-1.5 ${timeAgo < 20 ? 'text-emerald-400' : 'text-rose-400'} font-mono text-xs">
                                     <span class="w-1.5 h-1.5 rounded-full ${timeAgo < 20 ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}"></span>
                                     ${timeAgo}s 前
                                 </span>
                             </td>
+                            <td class="py-3 px-5 align-middle">${proxyBadges}</td>
                             <td class="py-3 px-5 align-middle text-right">
-                                <span class="${details.length === 2 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (details.length === 1 ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30')} py-1 px-3 rounded-md text-xs font-mono font-bold">
-                                    ${details.length} / 2
+                                <span class="pc-channel-count ${details.length === 2 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (details.length === 1 ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30')} py-1 px-3 rounded-md text-xs font-mono font-bold">
+                                    ${details.length}/2
                                 </span>
                             </td>
                         </tr>

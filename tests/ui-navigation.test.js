@@ -207,3 +207,21 @@ test('residential proxy details are compact and readable in both color modes', (
     assert.match(appStyles, /data-kui-theme="light"[\s\S]*\.pc-score-ip/);
     assert.match(appStyles, /\.pc-section-stack \{ display: grid; gap: 12px/);
 });
+
+test('residential proxy panels share spacing and matrix and score details stay readable', () => {
+    const stackStart = residentialProxyPage.indexOf('class="pc-section-stack"');
+    const stackEnd = residentialProxyPage.indexOf('</div>\n              </div>\n</template>', stackStart);
+    const panelStack = residentialProxyPage.slice(stackStart, stackEnd);
+    for (const className of ['pc-country-panel', 'pc-scheduler-panel', 'pc-node-matrix', 'pc-score-panel', 'pc-log-panel']) {
+        assert.match(panelStack, new RegExp(className));
+    }
+
+    assert.match(residentialProxyPage, /母机宿主[\s\S]*心跳[\s\S]*主备双路出口状态[\s\S]*通道/);
+    assert.match(legacyProxy, /class="pc-channel-count/);
+    assert.match(legacyProxy, /\$\{details\.length\}\/2/);
+    assert.match(legacyProxy, /class="pc-score-value[^"]*" title="\$\{orgStr\}"/);
+    assert.match(legacyProxy, /class="pc-score-value[^"]*" title="\$\{warning\}"/);
+    assert.doesNotMatch(legacyProxy, /title="\$\{(?:orgStr|warning)\}"[^>]*truncate/);
+    assert.match(appStyles, /\.pc-channel-count \{[^}]*white-space: nowrap/);
+    assert.match(appStyles, /\.pc-score-value \{[^}]*overflow-wrap: anywhere/);
+});

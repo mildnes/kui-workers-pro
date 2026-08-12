@@ -238,7 +238,10 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .pc-host-separator { color: #64748b; }
 .pc-host-ip { color: #a5b4fc; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .pc-tunnel-row { width: fit-content; max-width: 100%; }
+.pc-channel-count { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 .pc-score-ip { color: #f8fafc; }
+.pc-score-field > span:first-child { flex: 0 0 auto; }
+.pc-score-value { min-width: 0; max-width: 68%; overflow-wrap: anywhere; text-align: right; white-space: normal; }
 .pc-log-panel { padding-bottom: 0 !important; }
 
 /* Global palette compatibility for migrated utility-class pages. */
@@ -501,7 +504,8 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .kui-admin-content .pc-body #pc-nodes-table tr { border-bottom: 1px solid #1e293b; padding: 10px; }
   .kui-admin-content .pc-body #pc-nodes-table td { border: 0; padding: 7px 5px; text-align: left; }
   .kui-admin-content .pc-body #pc-nodes-table td:nth-child(1)::before { content: 'VPS  '; color: #64748b; }
-  .kui-admin-content .pc-body #pc-nodes-table td:nth-child(3)::before { content: '心跳  '; color: #64748b; }
+  .kui-admin-content .pc-body #pc-nodes-table td:nth-child(2)::before { content: '心跳  '; color: #64748b; }
+  .kui-admin-content .pc-body #pc-nodes-table td:nth-child(3)::before { content: '出口  '; color: #64748b; }
   .kui-admin-content .pc-body #pc-nodes-table td:nth-child(4)::before { content: '通道  '; color: #64748b; }
   .kui-admin-content .pc-body #pc-native-score-container { padding: 12px; gap: 10px; }
   .kui-admin-content .pc-body #pc-terminal-output { height: 220px; font-size: 12px; }

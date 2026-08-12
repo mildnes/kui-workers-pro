@@ -69,7 +69,6 @@
                                   </button>
                               </div>
                           </div>
-                      </div>
 
                       <div class="pc-panel pc-node-matrix bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20">
                           <div class="px-5 py-3 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
@@ -83,8 +82,8 @@
                                   <thead>
                                       <tr class="bg-slate-900/80 text-slate-400 text-xs uppercase tracking-wider">
                                           <th class="py-3 px-5 font-medium w-1/4">母机宿主</th>
-                                          <th class="py-3 px-5 font-medium">主备双路出口状态</th>
                                           <th class="py-3 px-5 font-medium w-28">心跳</th>
+                                          <th class="py-3 px-5 font-medium">主备双路出口状态</th>
                                           <th class="py-3 px-5 font-medium text-right w-20">通道</th>
                                       </tr>
                                   </thead>
@@ -129,6 +128,7 @@
                           <div class="p-4 h-64 overflow-y-auto bg-[#0D1117] pc-font-mono text-[13px] leading-relaxed text-slate-300" id="pc-terminal-output">
                               <div class="text-slate-500 animate-pulse">等待 VPS 心跳回传日志数据...</div>
                           </div>
+                      </div>
                       </div>
                   </div>
               </div>
