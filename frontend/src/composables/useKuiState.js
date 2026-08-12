@@ -1,4 +1,4 @@
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { pcFetchNodes, pcInitProxy, pcStopProxy } from '../proxy/legacyProxy.js';
 import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
@@ -15,12 +15,17 @@ export function useKuiState() {
                   const preferredTab = localStorage.getItem('monitor_preferred_tab') || 'probe';
                   const activeTab = ref(['services', 'realm'].includes(preferredTab) ? (role.value === 'admin' ? 'nodes' : 'dashboard') : preferredTab);
                   const savedColorMode = localStorage.getItem('kui_color_mode');
-                  const colorMode = ref(savedColorMode === 'dark' ? 'dark' : 'light');
+                  const colorMode = ref(['system', 'light', 'dark'].includes(savedColorMode) ? savedColorMode : 'system');
+                  const systemColorQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                  const systemPrefersDark = ref(systemColorQuery.matches);
+                  const effectiveColorMode = computed(() => colorMode.value === 'system' ? (systemPrefersDark.value ? 'dark' : 'light') : colorMode.value);
                   const applyColorMode = () => {
-                      document.documentElement.dataset.kuiTheme = colorMode.value;
-                      document.documentElement.style.colorScheme = colorMode.value;
+                      document.documentElement.dataset.kuiTheme = effectiveColorMode.value;
+                      document.documentElement.style.colorScheme = effectiveColorMode.value;
                   };
-                  const toggleColorMode = () => { colorMode.value = colorMode.value === 'light' ? 'dark' : 'light'; };
+                  const syncSystemColor = event => { systemPrefersDark.value = event.matches; };
+                  systemColorQuery.addEventListener('change', syncSystemColor);
+                  onBeforeUnmount(() => systemColorQuery.removeEventListener('change', syncSystemColor));
                   applyColorMode();
                   const currentDomain = window.location.origin;
 
@@ -75,7 +80,8 @@ export function useKuiState() {
                   const showWelcomePopup = ref(false);
 
                   watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') { updateCustomStyles(); updateCustomScript(probeSys.custom_script); } else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); document.getElementById('kui-custom-head')?.remove(); updateCustomScript(''); } });
-                  watch(colorMode, (val) => { localStorage.setItem('kui_color_mode', val); applyColorMode(); });
+                  watch(colorMode, (val) => localStorage.setItem('kui_color_mode', val));
+                  watch(effectiveColorMode, applyColorMode);
                   watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
 
                   const hasCustomCssFlag = computed(() => {
@@ -1039,7 +1045,7 @@ export function useKuiState() {
                   });
 
                   return { 
-                      isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, toggleColorMode, refreshing, refreshPanel,
+                      isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, effectiveColorMode, refreshing, refreshPanel,
                       servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addVpsModalOpen, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
