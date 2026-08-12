@@ -22,6 +22,9 @@
     </nav>
 
     <div v-if="role === 'admin'" class="kui-sidebar-secondary">
+      <button @click="go('public-listener')" :class="{ active: activeTab === 'public-listener' }">
+        <span class="kui-nav-icon">◉</span><span>公网监听</span>
+      </button>
       <button @click="go('settings')" :class="{ active: activeTab === 'settings' }">
         <span class="kui-nav-icon">⚙</span><span>系统设置</span>
       </button>

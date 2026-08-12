@@ -33,11 +33,13 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 | `ADMIN_PASSWORD` | Secret | 是 | 管理员登录密码 |
 | `PROXY_USER` / `PROXY_PASS` | Secret | 住宅代理需要 | SOCKS5 认证凭据 |
 | `ADMIN_USERNAME` | 普通变量 | 否 | 管理员用户名，默认 `admin` |
-| `PROXY_PUBLIC_LISTENER` | 普通变量 | 否 | 允许公网监听住宅 SOCKS，默认 `false` |
+| `PROXY_PUBLIC_LISTENER` | 普通变量 | 否 | 新 VPS 公网监听的默认值，默认 `false`；可在面板按 VPS 覆盖 |
 
 密码和代理凭据必须在 Cloudflare 中选择 **Secret** 类型，不能写入仓库。非敏感配置使用普通变量，D1 与 Durable Objects 则在 **Bindings** 中配置。仓库已启用 `keep_vars: true`，部署到同一个 Worker 时会保留 Dashboard 中未写入 `wrangler.jsonc` 的普通变量；Secrets 本身也不会被常规部署删除。Deploy 按钮仅用于首次安装，后续应通过 Git 自动部署或 `wrangler deploy` 更新同一个 Worker。
 
 实时服务已集成到主 Worker，不需要配置 `REALTIME_URL`、`PAGES_ORIGIN` 或单独的 Realtime Worker。
+
+管理员可在面板的 **公网监听** 页面按 VPS 开启或关闭住宅代理公网入口。`PROXY_PUBLIC_LISTENER` 仅作为尚未单独设置 VPS 时的默认值；面板中的独立开关优先级更高。
 
 ## VPS 接入
 

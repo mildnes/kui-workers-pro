@@ -16,6 +16,7 @@ export function useKuiState() {
                   const currentDomain = window.location.origin;
 
                   const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);
+                  const proxyCredentialsReady = ref(false); const proxyPublicListenerManageable = ref(true); const publicListenerSaving = reactive({});
                   const realtimeUrl = ref('');
                   const realtimeConnected = ref(false);
                   const refreshing = ref(false);
@@ -424,6 +425,8 @@ export function useKuiState() {
                           if (data.siteTitle) { siteTitle.value = data.siteTitle; siteTitleInput.value = data.siteTitle; }
                           if (data.mySubToken) mySubToken.value = data.mySubToken;
                           securityWarnings.value = data.securityWarnings || [];
+                          proxyCredentialsReady.value = data.proxyCredentialsReady === true;
+                          proxyPublicListenerManageable.value = data.proxyPublicListenerManageable !== false;
                           if (data.realtimeUrl && data.realtimeUrl !== realtimeUrl.value) { realtimeUrl.value = data.realtimeUrl; connectRealtime(); }
                           servers.value.forEach(s => { 
                               if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: generateSs2022Password(), relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
@@ -745,6 +748,30 @@ export function useKuiState() {
                       }
                   };
 
+                  const setProxyPublicListener = async (vps, enabled) => {
+                      if (!vps?.ip || publicListenerSaving[vps.ip]) return;
+                      if (!proxyPublicListenerManageable.value) return alert('当前使用外部住宅控制器，无法从本面板修改 VPS 监听范围。');
+                      if (enabled && !proxyCredentialsReady.value) return alert('请先在 Cloudflare 配置 PROXY_USER 与 PROXY_PASS Secret。');
+                      if (enabled && !confirm(`⚠️ 即将开放 ${vps.name || vps.ip} (${vps.ip}) 的住宅代理公网入口。\n\n请确认代理凭据足够强，并已通过防火墙或云安全组限制允许访问的来源 IP。是否继续？`)) return;
+                      const previous = vps.proxy_public_listener === true;
+                      publicListenerSaving[vps.ip] = true;
+                      try {
+                          const response = await fetchApi('/api/proxy/config', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ip: vps.ip, public_listener: enabled }),
+                          });
+                          const result = await response.json();
+                          vps.proxy_public_listener = result.proxy?.public_listener === true;
+                          await refreshData();
+                          alert(enabled ? '公网监听已开启，proxy-lite 将自动重启监听器。' : '公网监听已关闭，proxy-lite 将恢复为本机或 Docker 网桥监听。');
+                      } catch (error) {
+                          vps.proxy_public_listener = previous;
+                      } finally {
+                          publicListenerSaving[vps.ip] = false;
+                      }
+                  };
+
                   const switchProxyIP = async () => {
                       if (!proxyConfig.ip) { alert('⚠️ 请先在上方选择一台目标 VPS。'); return; }
                       try {
@@ -867,7 +894,7 @@ export function useKuiState() {
 
                   return { 
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, refreshing, refreshPanel,
-                      servers, nodes, users, groups, securityWarnings, newVps, newNodeParams, newUser, newGroupName,
+                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, newVps, newNodeParams, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,

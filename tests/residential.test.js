@@ -8,7 +8,7 @@ const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url)
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const frontendState = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
-const { sanitizeProxyListenHost, validateProxyReport } = __test;
+const { proxyPublicListenerEnabled, sanitizeProxyListenHost, validateProxyReport } = __test;
 
 test('proxy-lite reports the active tunnel exit IP', () => {
     assert.match(manager, /"node_ip": tun\.egress_ip if tun\.egress_ip else tun\.entry_ip,\s*"exit_ip": tun\.egress_ip if tun\.egress_ip else tun\.entry_ip/);
@@ -36,6 +36,18 @@ test('validates private Docker bridge listener addresses', async () => {
     assert.equal(sanitizeProxyListenHost(''), '');
     assert.equal(sanitizeProxyListenHost('172.999.0.1'), null);
     assert.equal(sanitizeProxyListenHost('host.docker.internal'), null);
+});
+
+test('per-VPS public listener setting overrides the deployment default', () => {
+    assert.equal(proxyPublicListenerEnabled({}, { PROXY_PUBLIC_LISTENER: 'true' }), true);
+    assert.equal(proxyPublicListenerEnabled({}, { PROXY_PUBLIC_LISTENER: 'false' }), false);
+    assert.equal(proxyPublicListenerEnabled({ public_listener: false }, { PROXY_PUBLIC_LISTENER: 'true' }), false);
+    assert.equal(proxyPublicListenerEnabled({ public_listener: true }, { PROXY_PUBLIC_LISTENER: 'false' }), true);
+    assert.match(api, /server\.proxy_public_listener = proxyPublicListenerEnabled\(slotConfig, env\)/);
+    assert.match(api, /server\.proxy_public_port =/);
+    assert.match(api, /if \(!proxyPublicListenerEnabled\(slotConfig, env\)\) continue/);
+    assert.match(api, /public_listener must be boolean/);
+    assert.match(api, /PROXY_USER and PROXY_PASS must be configured before enabling public listener/);
 });
 
 test('rejects markup in proxy report IP fields', () => {

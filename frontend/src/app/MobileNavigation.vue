@@ -32,7 +32,7 @@ const primaryAdminItems = [
   { id: 'users', icon: '◎', label: '用户' },
 ];
 const moreItems = [
-  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'settings', icon: '⚙', label: '设置' },
+  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'public-listener', icon: '◉', label: '公网监听' }, { id: 'settings', icon: '⚙', label: '设置' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针监控' },

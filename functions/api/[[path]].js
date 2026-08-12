@@ -943,56 +943,71 @@ async function proxyBridge(method, subPath, request, env, body = null) {
     }
 }
 
+async function getProxySlotConfig(db, ip = '') {
+    let row = ip ? await db.prepare("SELECT value FROM probe_settings WHERE key = ?").bind(`proxy_slot_map_${ip}`).first() : null;
+    if (!row) row = await db.prepare("SELECT value FROM probe_settings WHERE key = 'proxy_slot_map'").first();
+    if (!row?.value) return {};
+    try {
+        const parsed = JSON.parse(row.value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function proxyPublicListenerEnabled(config, env) {
+    return typeof config?.public_listener === 'boolean' ? config.public_listener : env.PROXY_PUBLIC_LISTENER === 'true';
+}
+
 async function proxyLocal(method, subPath, req, env, body = null) {
     const db = env.DB;
     await ensureDbSchema(db);
     const url = new URL(req.url);
     const proxyUser = env.PROXY_USER || '';
     const proxyPass = env.PROXY_PASS || '';
-    if (!proxyUser || !proxyPass) return Response.json({ error: 'PROXY_USER and PROXY_PASS must be configured' }, { status: 503 });
+    const credentialsReady = !!(proxyUser && proxyPass);
 
     if (subPath === 'config') {
         if (method === 'GET') {
             try {
                 const requestIp = url.searchParams.get('ip');
-                const row = requestIp
-                    ? await db.prepare("SELECT value FROM probe_settings WHERE key = ?").bind(`proxy_slot_map_${requestIp}`).first()
-                    : null;
-                const globalRow = row || await db.prepare("SELECT value FROM probe_settings WHERE key = 'proxy_slot_map'").first();
-                let slotMap = { "0": "JP", "port": 7920 };
-                if (globalRow && globalRow.value) {
-                    try { slotMap = JSON.parse(globalRow.value); } catch(e) {}
-                }
+                const slotMap = { "0": "JP", "port": 7920, ...(await getProxySlotConfig(db, requestIp || '')) };
                 const rawCountry = (slotMap["0"] || slotMap.country || "JP").toString().toUpperCase();
                 const listenHost = sanitizeProxyListenHost(slotMap.listen_host);
-                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: listenHost || '', public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
+                const publicListener = proxyPublicListenerEnabled(slotMap, env);
+                const proxyCfg = { enabled: slotMap.enabled !== false, port: slotMap.port || 7920, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: listenHost || '', public_listener: publicListener };
                 const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
-                return new Response(JSON.stringify({ ...slotMap, "0": rawCountry, "port": slotMap.port || 7920, "country": rawCountry, switch_trigger: slotMap.switch_trigger || 0, proxy: proxyCfg, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' } });
+                return new Response(JSON.stringify({ ...slotMap, "0": rawCountry, "port": slotMap.port || 7920, "country": rawCountry, public_listener: publicListener, switch_trigger: slotMap.switch_trigger || 0, proxy: proxyCfg, realtime_url: env.REALTIME_URL || realtime && realtime.val || '' }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' } });
             } catch (e) { return new Response(JSON.stringify({ success: false, error: "GET config failed: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
         if (method === 'POST') {
             try {
                 const data = await req.json();
                 const configKey = data.ip ? `proxy_slot_map_${data.ip}` : 'proxy_slot_map';
-                const existingRow = await db.prepare("SELECT value FROM probe_settings WHERE key = ?").bind(configKey).first();
-                let existing = {};
-                try { existing = JSON.parse(existingRow && existingRow.value || '{}'); } catch (error) {}
-                const rawCountry = (data["0"] || data.country || "JP").toString().toUpperCase().trim();
-                const sanitized = { ...existing, "0": rawCountry, "country": rawCountry, "port": parseInt(data.port) || 7920 };
+                const existing = await getProxySlotConfig(db, data.ip || '');
+                const rawCountry = (data["0"] || data.country || existing["0"] || existing.country || "JP").toString().toUpperCase().trim();
+                const sanitized = { ...existing, "0": rawCountry, "country": rawCountry, "port": parseInt(data.port ?? existing.port) || 7920 };
                 if (data.listen_host !== undefined) {
                     const listenHost = sanitizeProxyListenHost(data.listen_host);
                     if (listenHost === null) return Response.json({ success: false, error: 'listen_host must be an IPv4 address or empty' }, { status: 400 });
                     sanitized.listen_host = listenHost;
                 }
                 if (data.enabled !== undefined) sanitized.enabled = !!data.enabled;
+                if (data.public_listener !== undefined) {
+                    if (typeof data.public_listener !== 'boolean') return Response.json({ success: false, error: 'public_listener must be boolean' }, { status: 400 });
+                    if (data.public_listener && !credentialsReady) return Response.json({ success: false, error: 'PROXY_USER and PROXY_PASS must be configured before enabling public listener' }, { status: 503 });
+                    sanitized.public_listener = data.public_listener;
+                }
                 if (data.mesh && typeof data.mesh === 'object') sanitized.mesh = data.mesh;
                 if (data.switch_trigger) sanitized.switch_trigger = data.switch_trigger;
                 await db.prepare("INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(configKey, JSON.stringify(sanitized)).run();
-                const proxyCfg = { enabled: true, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: sanitized.listen_host || '', public_listener: env.PROXY_PUBLIC_LISTENER === 'true' };
+                const proxyCfg = { enabled: sanitized.enabled !== false, port: sanitized.port, user: proxyUser, pass: proxyPass, country: rawCountry, listen_host: sanitized.listen_host || '', public_listener: proxyPublicListenerEnabled(sanitized, env) };
                 return new Response(JSON.stringify({ success: true, slot_map: sanitized, proxy: proxyCfg }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
             } catch (e) { console.error('[proxy-config-save] FAILED:', e.message); return new Response(JSON.stringify({ success: false, error: "CONFIG_WRITE_ERR: " + e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }); }
         }
     }
+
+    if (!credentialsReady) return Response.json({ error: 'PROXY_USER and PROXY_PASS must be configured' }, { status: 503 });
 
     if (subPath === 'pool' && method === 'GET') {
         const cutoff = Date.now() - 1800000;
@@ -1035,6 +1050,8 @@ async function proxyLocal(method, subPath, req, env, body = null) {
         const list = [];
         if (results) {
             for (const s of results) {
+                const slotConfig = await getProxySlotConfig(db, s.ip);
+                if (!proxyPublicListenerEnabled(slotConfig, env)) continue;
                 const details = JSON.parse(s.details || '[]');
                 const node = details.find(d => d.active) || details[0];
                 if (node) list.push(`socks5://${proxyUser}:${proxyPass}@${s.ip}:${node.port}#${node.country}_ActiveNode_${node.node_ip || 'IP'}`);
@@ -1655,12 +1672,14 @@ export async function onRequest(context) {
         // regular protocol nodes, so append them explicitly for the admin.
         // They include shared proxy credentials and must never be exposed to
         // ordinary user subscriptions.
-        if (reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS && env.PROXY_PUBLIC_LISTENER === 'true') {
+        if (reqUser === adminUser && env.PROXY_USER && env.PROXY_PASS) {
             try {
                 const cutoff = Date.now() - 1800000;
                 const { results: proxyServers } = await db.prepare('SELECT ip, details FROM proxy_ctrl_servers WHERE last_seen >= ?').bind(cutoff).all();
                 for (const server of proxyServers || []) {
                     if (ip && server.ip !== ip) continue;
+                    const slotConfig = await getProxySlotConfig(db, server.ip);
+                    if (!proxyPublicListenerEnabled(slotConfig, env)) continue;
                     let details = [];
                     try { details = JSON.parse(server.details || '[]'); } catch {}
                     const active = details.find(detail => detail?.active && Number.isInteger(Number(detail.port)) && Number(detail.port) >= 1 && Number(detail.port) <= 65535);
@@ -1800,6 +1819,9 @@ rules:
                         await db.prepare("UPDATE servers SET agent_token = ? WHERE ip = ? AND agent_token IS NULL").bind(server.agent_token, server.ip).run();
                     }
                     const state = proxyStateByIp.get(server.ip);
+                    const slotConfig = await getProxySlotConfig(db, server.ip);
+                    server.proxy_public_listener = proxyPublicListenerEnabled(slotConfig, env);
+                    server.proxy_public_port = Math.min(65535, Math.max(1, Number(slotConfig.port) || 7920));
                     let details = [];
                     try { details = JSON.parse(state?.details || '[]'); } catch {}
                     const active = Array.isArray(details) ? details.find(item => item?.active && Number(item.port || 0) >= 1 && Number(item.port || 0) <= 65535 && (item.exit_ip || item.node_ip)) : null;
@@ -1835,12 +1857,13 @@ rules:
             }
             else { const u = await db.prepare("SELECT sub_token FROM users WHERE username = ?").bind(currentUser).first(); if(u && u.sub_token) mySubToken = u.sub_token; }
             const realtime = await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
+            const publicListenerCount = isAdmin ? servers.filter(server => server.proxy_public_listener).length : 0;
             const securityWarnings = isAdmin ? [
                 !env.ADMIN_PASSWORD ? '尚未配置 ADMIN_PASSWORD Secret。' : (env.ADMIN_PASSWORD === 'admin' ? '管理员仍在使用默认密码，请立即在 Cloudflare 中轮换 ADMIN_PASSWORD。' : ''),
                 !env.PROXY_USER || !env.PROXY_PASS ? '尚未完整配置住宅代理 PROXY_USER / PROXY_PASS Secret。' : (env.PROXY_USER === 'kui' && env.PROXY_PASS === 'kui' ? '住宅代理仍在使用默认凭据，请立即轮换 PROXY_USER / PROXY_PASS。' : ''),
-                env.PROXY_PUBLIC_LISTENER === 'true' ? '住宅 SOCKS 服务已开放公网监听，请确认防火墙和代理凭据足够安全。' : '',
+                publicListenerCount ? `${publicListenerCount} 台 VPS 的住宅 SOCKS 服务已开放公网监听，请确认防火墙、安全组和代理凭据足够安全。` : '',
             ].filter(Boolean) : [];
-            return Response.json({ servers, nodes, users, groups, siteTitle, mySubToken, securityWarnings, realtimeUrl: env.REALTIME_URL || realtime && realtime.val || '' });
+            return Response.json({ servers, nodes, users, groups, siteTitle, mySubToken, securityWarnings, proxyCredentialsReady: !!(env.PROXY_USER && env.PROXY_PASS), proxyPublicListenerManageable: !env.PROXY_CTRL_URL, realtimeUrl: env.REALTIME_URL || realtime && realtime.val || '' });
         }
         
         if (action === "settings" && method === "POST" && isAdmin) {
@@ -1987,4 +2010,5 @@ export const __test = {
     validateSs2022Credentials,
     sanitizeProxyListenHost,
     validateProxyReport,
+    proxyPublicListenerEnabled,
 };

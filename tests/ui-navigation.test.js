@@ -9,6 +9,7 @@ const mobileNavigation = read('../frontend/src/app/MobileNavigation.vue');
 const serversPage = read('../frontend/src/pages/ServersPage.vue');
 const appStyles = read('../frontend/src/styles/app.css');
 const topBar = read('../frontend/src/app/TopBar.vue');
+const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
 
 test('removed and hidden pages are absent from the active UI', () => {
     assert.doesNotMatch(appShell, /ServicesPage|RealmPage/);
@@ -24,6 +25,18 @@ test('desktop navigation keeps residential proxy below servers and settings abov
     assert.ok(nodes >= 0 && nodes < proxy && proxy < users);
     assert.ok(desktopNavigation.indexOf('kui-sidebar-secondary') < desktopNavigation.indexOf('kui-sidebar-footer'));
     assert.match(desktopNavigation, /kui-sidebar-secondary[\s\S]*go\('settings'\)/);
+});
+
+test('public listener control is placed before settings on desktop and mobile', () => {
+    const desktopPublic = desktopNavigation.indexOf("go('public-listener')");
+    const desktopSettings = desktopNavigation.indexOf("go('settings')");
+    assert.ok(desktopPublic >= 0 && desktopPublic < desktopSettings);
+    const mobilePublic = mobileNavigation.indexOf("id: 'public-listener'");
+    const mobileSettings = mobileNavigation.indexOf("id: 'settings'", mobilePublic);
+    assert.ok(mobilePublic >= 0 && mobilePublic < mobileSettings);
+    assert.match(publicListenerPage, /role="switch"/);
+    assert.match(publicListenerPage, /setProxyPublicListener/);
+    assert.match(publicListenerPage, /防火墙或云安全组/);
 });
 
 test('probe monitor is displayed before subscription exports and remains visible on mobile', () => {
