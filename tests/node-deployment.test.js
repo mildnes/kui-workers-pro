@@ -84,7 +84,8 @@ test('node forms stay compact and mark required fields explicitly', () => {
     assert.match(serversPage, /目标节点 <b class="kui-required">\*<\/b>/);
     assert.match(serversPage, /class="kui-node-form-grid kui-node-form-primary"/);
     assert.match(appStyles, /min-height: 36px !important/);
-    assert.match(appStyles, /min-height: 44px !important/);
+    assert.match(appStyles, /--kui-control-height:\s*36px/);
+    assert.doesNotMatch(appStyles, /min-height: 44px !important/);
 });
 
 test('single-node form exposes every credential used by supported protocols', () => {

@@ -89,8 +89,8 @@ test('servers page uses compact Chinese overview', () => {
     assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
 });
 
-test('desktop server cards use a four-column grid', () => {
-    assert.match(serversPage, /class="kui-server-grid grid grid-cols-1 xl:grid-cols-4/);
+test('desktop server cards use a two-column grid', () => {
+    assert.match(serversPage, /class="kui-server-grid grid grid-cols-1 xl:grid-cols-2/);
 });
 
 test('global color modes reuse the servers light palette and residential dark palette', () => {
@@ -270,4 +270,19 @@ test('residential node matrix exposes six explicit columns in order', () => {
     assert.match(legacyProxy, /class="pc-matrix-host-ip/);
     assert.match(legacyProxy, /class="pc-matrix-egress/);
     assert.match(legacyProxy, /class="pc-matrix-status/);
+});
+
+test('light residential node matrix uses explicit shared-theme surfaces', () => {
+    assert.match(appStyles, /data-kui-theme="light"\] \.pc-node-matrix \{/);
+    assert.match(appStyles, /data-kui-theme="light"\] \.pc-node-matrix thead/);
+    assert.match(appStyles, /data-kui-theme="light"\] \.pc-node-row/);
+    assert.match(appStyles, /data-kui-theme="light"\] \.pc-matrix-line/);
+});
+
+test('regular form controls and action buttons share the egress mode height', () => {
+    assert.match(appStyles, /--kui-control-height:\s*36px/);
+    assert.match(appStyles, /\.kui-admin-content input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),[\s\S]*\.kui-admin-content select[\s\S]*height: var\(--kui-control-height\)/);
+    assert.match(appStyles, /\.kui-egress-mode-button \{[^}]*height: var\(--kui-control-height\)/);
+    assert.match(appStyles, /\.kui-admin-content button:not\(\.kui-control-size-exempt\)[^\{]*\{[^}]*height: var\(--kui-control-height\)/);
+    assert.doesNotMatch(appStyles, /\.kui-admin-content button, \.kui-admin-content input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\), \.kui-admin-content select \{ min-height: 44px/);
 });

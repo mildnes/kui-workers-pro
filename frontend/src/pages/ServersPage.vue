@@ -7,7 +7,7 @@
                       <div class="bg-white/60 backdrop-blur-xl p-5 rounded-[2rem] border border-white shadow-lg shadow-indigo-100/30 text-center"><div class="text-[10px] text-slate-400 font-bold mb-1 tracking-widest">实时上传</div><div class="text-2xl font-black text-blue-500 truncate">↑ {{ formatBytes(globalSpeedOut) }}/s</div></div>
                   </div>
 
-                  <div class="kui-server-grid grid grid-cols-1 xl:grid-cols-4 gap-8">
+                  <div class="kui-server-grid grid grid-cols-1 xl:grid-cols-2 gap-8">
                       <div v-for="vps in servers" :key="vps.ip" class="kui-server-card bg-white/70 backdrop-blur-xl rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 flex flex-col overflow-hidden transition-all hover:shadow-2xl">
                           <div class="p-6 md:p-8 relative">
                               <div class="flex justify-between items-start mb-4">
