@@ -7,14 +7,6 @@
       </div>
     </div>
     <div class="kui-topbar-actions">
-      <label class="kui-theme-picker" title="界面配色">
-        <span aria-hidden="true">{{ effectiveColorMode === 'dark' ? '☾' : '☀' }}</span>
-        <select v-model="colorMode" class="kui-theme-select" aria-label="界面配色">
-          <option value="system">跟随系统</option>
-          <option value="light">浅色模式</option>
-          <option value="dark">深色模式</option>
-        </select>
-      </label>
       <button @click="openProbe" class="kui-button kui-button-ghost kui-probe-button" title="探针监控" aria-label="探针监控">
         <span>◉</span><span class="kui-probe-button-label">探针监控</span>
       </button>

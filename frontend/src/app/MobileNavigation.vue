@@ -15,7 +15,16 @@
       <div class="kui-sheet-handle"></div>
       <div class="flex items-center justify-between mb-3"><strong>更多功能</strong><button class="kui-icon-button" @click="moreOpen = false">×</button></div>
       <div class="kui-mobile-more-grid">
-        <button v-for="item in moreItems" :key="item.id" @click="go(item.id)" :class="{ active: activeTab === item.id }"><span>{{ item.icon }}</span>{{ item.label }}</button>
+        <button v-for="item in moreItemsBeforeTheme" :key="item.id" @click="go(item.id)" :class="{ active: activeTab === item.id }"><span>{{ item.icon }}</span>{{ item.label }}</button>
+        <label class="kui-mobile-theme-picker" title="界面配色">
+          <span aria-hidden="true">{{ effectiveColorMode === 'dark' ? '☾' : '☀' }}</span>
+          <select v-model="colorMode" aria-label="界面配色">
+            <option value="system">跟随系统</option>
+            <option value="light">浅色模式</option>
+            <option value="dark">深色模式</option>
+          </select>
+        </label>
+        <button v-for="item in moreItemsAfterTheme" :key="item.id" @click="go(item.id)" :class="{ active: activeTab === item.id }"><span>{{ item.icon }}</span>{{ item.label }}</button>
       </div>
       <button class="kui-mobile-logout" @click="logout">退出登录</button>
     </section>
@@ -34,6 +43,8 @@ const primaryAdminItems = [
 const moreItems = [
   { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'add-vps', icon: '＋', label: '接入 VPS' }, { id: 'public-listener', icon: '◉', label: '公网监听' }, { id: 'settings', icon: '⚙', label: '设置' },
 ];
+const moreItemsBeforeTheme = moreItems.filter(item => item.id !== 'settings');
+const moreItemsAfterTheme = moreItems.filter(item => item.id === 'settings');
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '主页' }, { id: 'settings', icon: '⚙', label: '设置' }, { id: 'probe', icon: '◉', label: '探针监控' },
 ];
@@ -49,7 +60,7 @@ export default {
       state.activeTab.value = id;
       if (id === 'probe') state.probeDetailId.value = null;
     };
-    return { ...state, go, moreIds, moreItems, moreOpen, primaryAdminItems, userItems };
+    return { ...state, go, moreIds, moreItemsAfterTheme, moreItemsBeforeTheme, moreOpen, primaryAdminItems, userItems };
   },
 };
 </script>

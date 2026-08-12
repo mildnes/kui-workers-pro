@@ -100,16 +100,31 @@ test('global color modes reuse the servers light palette and residential dark pa
     assert.match(state, /document\.documentElement\.dataset\.kuiTheme = effectiveColorMode\.value/);
     assert.match(state, /systemColorQuery\.addEventListener\('change'/);
     assert.match(state, /systemColorQuery\.removeEventListener\('change'/);
-    assert.match(topBar, /v-model="colorMode"/);
-    assert.match(topBar, /value="system">跟随系统/);
-    assert.match(topBar, /value="light">浅色模式/);
-    assert.match(topBar, /value="dark">深色模式/);
+    assert.doesNotMatch(topBar, /v-model="colorMode"|kui-theme-picker/);
+    for (const navigation of [desktopNavigation, mobileNavigation]) {
+        assert.match(navigation, /v-model="colorMode"/);
+        assert.match(navigation, /value="system">跟随系统/);
+        assert.match(navigation, /value="light">浅色模式/);
+        assert.match(navigation, /value="dark">深色模式/);
+    }
     assert.doesNotMatch(residentialProxyPage.match(/<div[^>]+class="pc-body[^>]+>/)?.[0] || '', /bg-\[#090E17\]|text-slate-300/);
     assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-server-card/);
     assert.match(appStyles, /data-kui-theme="light"[\s\S]*\.pc-body/);
     assert.match(qrModal, /kui-modal-surface/);
     assert.match(probeEditModal, /kui-modal-surface/);
     assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-modal-surface/);
+});
+
+test('theme controls live above desktop settings and left of mobile settings', () => {
+    const desktopTheme = desktopNavigation.indexOf('kui-sidebar-theme-picker');
+    const desktopSettings = desktopNavigation.indexOf("go('settings')");
+    assert.ok(desktopTheme >= 0 && desktopTheme < desktopSettings);
+
+    const mobileTheme = mobileNavigation.indexOf('kui-mobile-theme-picker');
+    const mobileSettings = mobileNavigation.indexOf("id: 'settings'", mobileTheme);
+    assert.ok(mobileTheme >= 0 && mobileTheme < mobileSettings);
+    assert.match(appStyles, /\.kui-sidebar-theme-picker/);
+    assert.match(appStyles, /\.kui-mobile-theme-picker/);
 });
 
 test('server cards expose clear visual boundaries between operational modules', () => {
@@ -234,4 +249,11 @@ test('residential tunnel status sits compactly below each tunnel name', () => {
     assert.match(legacyProxy, /STANDBY（热备就绪）/);
     assert.match(appStyles, /\.pc-tunnel-identity \{[^}]*flex-direction: column/);
     assert.match(appStyles, /\.pc-tunnel-status \{[^}]*font-size: 9px/);
+});
+
+test('mobile residential node matrix keeps headings and values on one line', () => {
+    assert.match(appStyles, /@media \(max-width: 640px\)[\s\S]*\.pc-node-matrix table \{[^}]*min-width:/);
+    assert.match(appStyles, /\.pc-node-matrix thead \{ display: table-header-group/);
+    assert.match(appStyles, /\.pc-node-matrix #pc-nodes-table td \{[^}]*white-space: nowrap/);
+    assert.doesNotMatch(appStyles, /#pc-nodes-table td:nth-child\([^)]*\)::before/);
 });

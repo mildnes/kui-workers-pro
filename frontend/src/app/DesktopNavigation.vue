@@ -28,6 +28,14 @@
       <button @click="go('public-listener')" :class="{ active: activeTab === 'public-listener' }">
         <span class="kui-nav-icon">◉</span><span>公网监听</span>
       </button>
+      <label class="kui-sidebar-theme-picker" title="界面配色">
+        <span class="kui-nav-icon" aria-hidden="true">{{ effectiveColorMode === 'dark' ? '☾' : '☀' }}</span>
+        <select v-model="colorMode" aria-label="界面配色">
+          <option value="system">跟随系统</option>
+          <option value="light">浅色模式</option>
+          <option value="dark">深色模式</option>
+        </select>
+      </label>
       <button @click="go('settings')" :class="{ active: activeTab === 'settings' }">
         <span class="kui-nav-icon">⚙</span><span>系统设置</span>
       </button>
