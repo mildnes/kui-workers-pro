@@ -99,13 +99,15 @@ function compactRoleState(role, data) {
 
 async function verifyAdmin(header, request, env) {
   try {
-    if (!header?.startsWith("Bearer ")) return false;
-    const token = header.slice(7);
-    if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return false;
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-    const tokenHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-    const session = await env.DB.prepare("SELECT username FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").bind(tokenHash, Date.now()).first();
-    if (session?.username === (env.ADMIN_USERNAME || "admin")) return true;
+    if (!header) return false;
+    if (header.startsWith("Bearer ")) {
+      const token = header.slice(7);
+      if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return false;
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+      const tokenHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      const session = await env.DB.prepare("SELECT username FROM auth_sessions WHERE token_hash = ? AND expires_at > ?").bind(tokenHash, Date.now()).first();
+      if (session?.username === (env.ADMIN_USERNAME || "admin")) return true;
+    }
 
     // Signed browser requests are validated by the Pages API. Keep this
     // fallback for clients that have not yet migrated to session tokens.
@@ -207,6 +209,18 @@ export default {
       return json({ success: true, notified: ips.length }, 200, cors(request, env));
     }
 
+    if (url.pathname === "/egress-refresh" && request.method === "POST") {
+      if (!(await verifyAdmin(request.headers.get("Authorization"), request, env))) return json({ error: "Forbidden" }, 403, cors(request, env));
+      const body = await request.json().catch(() => ({}));
+      const ip = String(body.ip || "");
+      const name = await presenceName(ip, env);
+      if (!name) return json({ error: "VPS not found" }, 404, cors(request, env));
+      const requestId = /^[0-9a-f-]{36}$/i.test(String(body.request_id || "")) ? String(body.request_id) : crypto.randomUUID();
+      const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(name));
+      const response = await stub.fetch(new Request("https://presence.internal/egress-refresh", { method: "POST", headers: { "X-KUI-Request-ID": requestId } }));
+      return new Response(response.body, { status: response.status, headers: { ...Object.fromEntries(response.headers), ...cors(request, env) } });
+    }
+
     if (url.pathname === "/public-policy" && request.method === "POST") {
       if (!(await verifyAdmin(request.headers.get("Authorization"), request, env))) return json({ error: "Forbidden" }, 403, cors(request, env));
       const body = await request.json().catch(() => ({}));
@@ -284,6 +298,16 @@ export class VpsPresence extends DurableObject {
       }
       return json({ success: true });
     }
+    if (url.pathname === "/egress-refresh" && request.method === "POST") {
+      const sockets = this.ctx.getWebSockets("core");
+      if (!sockets.length) return json({ error: "VPS Agent 当前离线" }, 409);
+      const requestId = request.headers.get("X-KUI-Request-ID") || crypto.randomUUID();
+      let sent = false;
+      for (const ws of sockets) {
+        try { ws.send(JSON.stringify({ type: "egress.refresh", request_id: requestId, ts: Date.now() })); sent = true; } catch {}
+      }
+      return sent ? json({ success: true, request_id: requestId }) : json({ error: "出口检测指令发送失败" }, 503);
+    }
     if (url.pathname === "/dashboard-active" && request.method === "POST") {
       this.setDashboardActivity(request.headers.get("X-KUI-Active") === "1", Number(request.headers.get("X-KUI-Interval")) || IDLE_STATUS_INTERVAL, Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000);
       return json({ success: true });
@@ -326,6 +350,23 @@ export class VpsPresence extends DurableObject {
         try { ws.send(JSON.stringify({ type: "config.result.ack", component: "egress", revision: result.revision, success: result.success, accepted, ts: Date.now() })); } catch {}
       }
       this.snapshot[`${role}_config_result_at`] = Date.now();
+      ws.serializeAttachment(attachment);
+      await this.persistAndBroadcast();
+      return;
+    }
+    if (messageType === "egress.probe.result") {
+      if (role !== "core") return;
+      const result = {
+        success: envelope.data?.success === true,
+        request_id: String(envelope.data?.request_id || "").slice(0, 64),
+        applied_mode: String(envelope.data?.applied_mode || "").slice(0, 32),
+        egress_ip: safeProxyAddress(envelope.data?.egress_ip),
+        error: String(envelope.data?.error || "").slice(0, 500),
+        measured_at: Number(envelope.data?.measured_at) || Date.now(),
+      };
+      if (result.success && result.egress_ip) await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ?").bind(result.egress_ip, attachment.ip).run();
+      this.snapshot.core_egress_probe_result = result;
+      this.snapshot.core_egress_probe_result_at = Date.now();
       ws.serializeAttachment(attachment);
       await this.persistAndBroadcast();
       return;

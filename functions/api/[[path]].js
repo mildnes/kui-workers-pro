@@ -265,6 +265,21 @@ async function notifyRealtimeVps(env, db, ip, pagesOrigin = '') {
     await fetch(`${configured.replace(/\/$/, '')}/notify`, { method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin }, body: JSON.stringify({ ip }), signal: AbortSignal.timeout(10000) });
 }
 
+async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin = '') {
+    const authorization = await realtimeAdminHeader(env);
+    const configured = env.REALTIME_URL || (await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first())?.val;
+    if (!authorization || !configured || !/^https:\/\//i.test(configured)) throw new Error('实时服务未配置');
+    const response = await fetch(`${configured.replace(/\/$/, '')}/egress-refresh`, {
+        method: 'POST',
+        headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
+        body: JSON.stringify({ ip, request_id: requestId }),
+        signal: AbortSignal.timeout(10000),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return { response, result };
+    return { response, result };
+}
+
 async function chunkBatch(db, statements, size = 100) {
     for (let i = 0; i < statements.length; i += size) {
         await db.batch(statements.slice(i, i + size));
@@ -2085,6 +2100,18 @@ rules:
         
         if (action === "vps" && isAdmin) {
             await ensureDbSchema(db);
+            if (params.path[1] === "egress-refresh" && method === "POST") {
+                const data = await readJsonBody(request, 4 * 1024);
+                const ip = String(data.ip || '');
+                const requestId = /^[0-9a-f-]{36}$/i.test(String(data.request_id || '')) ? String(data.request_id) : crypto.randomUUID();
+                if (!ip || !(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
+                try {
+                    const { response, result } = await requestRealtimeEgressRefresh(env, db, ip, requestId, url.origin);
+                    return Response.json(result, { status: response.status });
+                } catch (error) {
+                    return Response.json({ error: error.message || '出口检测指令发送失败' }, { status: 503 });
+                }
+            }
             if (method === "POST") { const { ip, name } = await request.json(); if (!/^[0-9A-Fa-f:.]{2,64}$/.test(String(ip || ''))) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 }); const agentToken = crypto.randomUUID(); const inserted = await db.prepare("INSERT INTO servers (ip, name, alert_sent, agent_token) SELECT ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM servers) < 100 ON CONFLICT(ip) DO NOTHING RETURNING ip").bind(ip, String(name || ip).slice(0, 100), agentToken).first(); if (!inserted) { if (await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first()) return Response.json({ error: 'VPS already exists' }, { status: 409 }); return Response.json({ error: "当前版本最多管理 100 台 VPS" }, { status: 409 }); } return Response.json({ success: true }); }
             if (method === "PUT") {
                 const data = await readJsonBody(request, 16 * 1024);

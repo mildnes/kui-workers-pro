@@ -4,6 +4,7 @@ import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
 import { countryCoords, iso2To3 } from './useProbe.js';
 import { nextRealtimeRetryDelay, normalizeRealtimeKey } from './useRealtime.js';
+import { applyEgressRealtimeResult } from '../utils/egressState.js';
 
 
 export function useKuiState() {
@@ -32,6 +33,9 @@ export function useKuiState() {
                   
                   let initOsMap = {}; try { initOsMap = JSON.parse(localStorage.getItem('kui_deploy_os') || '{}'); } catch(e) {}
                   const deployOsMap = reactive(initOsMap);
+                  const egressIpRefreshing = reactive({});
+                  const egressRefreshRequests = reactive({});
+                  const egressRefreshTimers = new Map();
 
                   // --- 动态拉取核心 ---
                   const availableThemes = ref([
@@ -602,7 +606,10 @@ export function useKuiState() {
                           }
                           const res = await fetchApi('/api/vps', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
                           const saved = await res.json();
-                          vps.egress_mode = saved.egress_mode || mode; vps.egress_revision = saved.egress_revision; vps.egress_status = saved.egress_status || 'pending';
+                          const savedRevision = Number(saved.egress_revision || 0);
+                          const alreadyApplied = vps.egress_status === 'applied' && Number(vps.egress_applied_revision || 0) === savedRevision;
+                          vps.egress_mode = saved.egress_mode || mode; vps.egress_revision = savedRevision;
+                          if (!alreadyApplied) vps.egress_status = saved.egress_status || 'pending';
                           vps.proxy_mode = saved.proxy_mode || (vps.egress_mode === 'residential' || vps.egress_mode === 'socks5' ? 'global' : '');
                           vps.proxy_categories = saved.proxy_categories || '';
                           vps._proxy_categories_dirty = false;
@@ -614,6 +621,24 @@ export function useKuiState() {
                   const forceReapplyEgress = async vps => {
                       vps._egress_mode_draft = '';
                       await updateVpsEgress(vps, vps.egress_mode || 'native', proxyModeOf(vps), proxyCategoriesOf(vps));
+                  };
+                  const refreshVpsEgressIp = async vps => {
+                      if (egressIpRefreshing[vps.ip]) return;
+                      egressIpRefreshing[vps.ip] = true;
+                      clearTimeout(egressRefreshTimers.get(vps.ip));
+                      const requestId = crypto.randomUUID();
+                      egressRefreshRequests[vps.ip] = requestId;
+                      egressRefreshTimers.set(vps.ip, setTimeout(() => {
+                          if (egressIpRefreshing[vps.ip]) alert(`刷新 ${vps.name || vps.ip} 实际出口 IP 超时，请确认 Agent 在线且出口可访问。`);
+                          egressIpRefreshing[vps.ip] = false;
+                      }, 90000));
+                      try {
+                          await fetchApi('/api/vps/egress-refresh', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ip: vps.ip, request_id: requestId }) });
+                      } catch (error) {
+                          clearTimeout(egressRefreshTimers.get(vps.ip)); egressRefreshTimers.delete(vps.ip);
+                          egressIpRefreshing[vps.ip] = false;
+                          egressRefreshRequests[vps.ip] = '';
+                      }
                   };
 
                   const addNode = async (ip) => {
@@ -846,7 +871,14 @@ export function useKuiState() {
                       const key = normalizeRealtimeKey(snapshot.ip);
                       const resultServer = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
                       const egressResult = snapshot.core_egress_result || snapshot.core_config_result;
-                      if (resultServer && egressResult?.component === 'egress' && Number(egressResult.revision) === Number(resultServer.egress_revision)) { resultServer.egress_status = egressResult.status === 'preparing' ? 'preparing' : (egressResult.success ? 'applied' : 'failed'); resultServer.egress_applied_mode = egressResult.applied_mode; resultServer.egress_error = egressResult.status === 'preparing' ? (egressResult.message || '') : (egressResult.error || ''); if (resultServer.egress_status === 'applied') resultServer.egress_applied_revision = egressResult.revision; if (egressResult.egress_ip) resultServer.egress_ip = egressResult.egress_ip; }
+                      applyEgressRealtimeResult(resultServer, egressResult);
+                      const egressProbe = snapshot.core_egress_probe_result;
+                      if (resultServer && egressProbe?.request_id && egressProbe.request_id === egressRefreshRequests[resultServer.ip]) {
+                          clearTimeout(egressRefreshTimers.get(resultServer.ip)); egressRefreshTimers.delete(resultServer.ip);
+                          egressIpRefreshing[resultServer.ip] = false; egressRefreshRequests[resultServer.ip] = '';
+                          if (egressProbe.success && egressProbe.egress_ip) resultServer.egress_ip = egressProbe.egress_ip;
+                          else alert(`刷新实际出口 IP 失败：${egressProbe.error || 'VPS 未返回有效出口 IP'}`);
+                      }
                       if (snapshot.core) {
                           const timestamp = Number(snapshot.core_last_seen || snapshot.updated_at || 0);
                           const server = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
@@ -958,6 +990,6 @@ export function useKuiState() {
                       qrModalOpen, qrCodeImage, showQrCode, 
                       showWelcomePopup, closePopup,
                       availableThemes, pingNodes, pullGithubNodes, hasCustomCssFlag,
-                      proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, setProxyMode, applyProxyCategories, onEgressModeChange,
+                      proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, refreshVpsEgressIp, egressIpRefreshing, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, setProxyMode, applyProxyCategories, onEgressModeChange,
                   };
 }

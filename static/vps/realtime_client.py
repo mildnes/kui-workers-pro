@@ -108,7 +108,7 @@ class RealtimeChannel:
                     try: self.on_message({"type": "transport.connected"})
                     except Exception: pass
                 delay = 1
-                self.send({"capabilities": ["http-fallback", "config-refresh", "config-result"]}, "hello")
+                self.send({"capabilities": ["http-fallback", "config-refresh", "config-result", "egress-probe"]}, "hello")
                 while not self._stop.is_set():
                     try:
                         raw = self._socket.recv()

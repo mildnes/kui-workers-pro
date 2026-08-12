@@ -20,6 +20,7 @@ function isRealtimeRoute(pathname) {
         || pathname === '/dashboard/snapshot'
         || pathname === '/public/ws'
         || pathname === '/notify'
+        || pathname === '/egress-refresh'
         || pathname === '/public-policy'
         || pathname === '/frequency-policy';
 }

@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
+import { applyEgressRealtimeResult } from '../frontend/src/utils/egressState.js';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const frontend = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
+const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
+const worker = fs.readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
 
 test('egress requests normalize selective categories and validate SOCKS5 endpoints', () => {
     const { normalizeEgressRequest } = __test;
@@ -90,4 +93,29 @@ test('legacy egress columns and WARP-only state names are no longer active', () 
     }
     assert.doesNotMatch(agent, /def _load_warp_state|def _save_warp_state/);
     assert.match(agent, /def _load_egress_state|def _save_egress_state/);
+});
+
+test('admins can refresh the actual VPS egress IP without reapplying configuration', () => {
+    assert.match(serversPage, /@click="refreshVpsEgressIp\(vps\)"/);
+    assert.match(serversPage, /aria-label="刷新 VPS 实际出口 IP"/);
+    assert.match(frontend, /fetchApi\('\/api\/vps\/egress-refresh'/);
+    assert.match(api, /params\.path\[1\] === "egress-refresh"/);
+    assert.match(realtime, /type: "egress\.refresh"/);
+    assert.match(realtime, /messageType === "egress\.probe\.result"/);
+    assert.match(worker, /pathname === '\/egress-refresh'/);
+    assert.match(agent, /def _verify_current_egress_exit\(\)/);
+    assert.match(agent, /"egress\.probe\.result"/);
+    assert.doesNotMatch(api.slice(api.indexOf('params.path[1] === "egress-refresh"'), api.indexOf('if (method === "DELETE")')), /egress_revision\s*=\s*egress_revision\s*\+\s*1/);
+});
+
+test('an egress apply result received before the save response still refreshes the IP', () => {
+    const server = { egress_mode: 'warp_ipv4', egress_revision: 4, egress_applied_revision: 4, egress_status: 'pending', egress_ip: '198.51.100.1' };
+    const applied = applyEgressRealtimeResult(server, { component: 'egress', success: true, revision: 5, desired_mode: 'warp_ipv4', applied_mode: 'warp_ipv4', egress_ip: '104.28.222.43' });
+    assert.equal(applied, true);
+    assert.equal(server.egress_status, 'applied');
+    assert.equal(server.egress_revision, 5);
+    assert.equal(server.egress_applied_revision, 5);
+    assert.equal(server.egress_ip, '104.28.222.43');
+    assert.match(frontend, /const alreadyApplied = vps\.egress_status === 'applied'/);
+    assert.match(frontend, /if \(!alreadyApplied\) vps\.egress_status/);
 });

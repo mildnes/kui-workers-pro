@@ -493,6 +493,23 @@ def _verify_native_exit():
         raise RuntimeError("native data-plane verification failed")
     return ip
 
+def _current_egress_check_host():
+    try:
+        with open(SINGBOX_CONF_PATH, "r", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+        inbound = next((item for item in config.get("inbounds", []) if item.get("tag") == "egress-check-in"), None)
+        return normalize_check_host(inbound.get("listen")) if inbound else "127.0.0.1"
+    except Exception:
+        return "127.0.0.1"
+
+def _verify_current_egress_exit():
+    mode = _load_egress_state().get("applied_mode", "native")
+    check_host = _current_egress_check_host()
+    if mode == "native": return mode, _verify_native_exit()
+    if mode.startswith("warp_"): return mode, _verify_warp_exit(mode[5:], check_host)
+    if mode in {"residential", "socks5"}: return mode, _verify_socks5_exit(check_host)
+    raise RuntimeError(f"unsupported applied egress mode: {mode}")
+
 def _post_warp_result(payload):
     parsed = urllib.parse.urlsplit(API_URL)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -641,6 +658,7 @@ except (TypeError, ValueError):
 pending_report_payload = _pending.get("payload")
 egress_retry_timer = None
 egress_retry_lock = threading.Lock()
+egress_probe_lock = threading.Lock()
 
 def _schedule_egress_retry(delay):
     global egress_retry_timer
@@ -1630,6 +1648,20 @@ if __name__ == "__main__":
             pending = state.get("pending_result") or {}
             if int(pending.get("revision", -1)) == int(message.get("revision", -2)):
                 _save_egress_state(state["applied_mode"], state["applied_revision"], deployment_id=state.get("deployment_id", ""), applied_config=state.get("applied_config"))
+        if message.get("type") == "egress.refresh":
+            request_id = str(message.get("request_id", ""))[:64]
+            def probe():
+                if not egress_probe_lock.acquire(blocking=False):
+                    realtime_channel.send({"success": False, "request_id": request_id, "error": "出口检测正在进行中", "measured_at": int(time.time() * 1000)}, "egress.probe.result")
+                    return
+                try:
+                    mode, egress_ip = _verify_current_egress_exit()
+                    realtime_channel.send({"success": True, "request_id": request_id, "applied_mode": mode, "egress_ip": egress_ip, "measured_at": int(time.time() * 1000)}, "egress.probe.result")
+                except Exception as error:
+                    realtime_channel.send({"success": False, "request_id": request_id, "error": str(error)[:500], "measured_at": int(time.time() * 1000)}, "egress.probe.result")
+                finally:
+                    egress_probe_lock.release()
+            threading.Thread(target=probe, name="kui-egress-probe", daemon=True).start()
 
     def create_realtime_channel():
         return RealtimeChannel(REALTIME_URL, VPS_IP, TOKEN, "core", on_realtime_message)
