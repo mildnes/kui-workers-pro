@@ -6,39 +6,31 @@
                   <div class="max-w-7xl mx-auto p-6 relative z-10">
                       <div class="pc-page-intro">
                           <div><h2>双通道住宅出口</h2><p>管理候选地区、主备隧道与出口质量。</p></div>
-                          <details>
-                              <summary>接入与 API 说明</summary>
-                              <div class="pc-help-panel">
-                                  <p>鉴权提取 API：<a href="javascript:void(0)" @click="openProxyList">/api/proxy/proxies</a></p>
-                                  <div id="agent-cmd" class="pc-font-mono">住宅代理已合并到服务器 Full Deploy Command，无需二次安装。</div>
-                                  <p>控制权限：仅管理员 · 代理凭证：读取 Pages 环境变量</p>
-                              </div>
-                          </details>
                       </div>
 
-                      <div class="space-y-6 mb-8">
-                          <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl shadow-black/20">
-                              <div class="flex items-center gap-2 mb-4">
+                      <div class="pc-section-stack">
+                          <div class="pc-panel pc-country-panel bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl shadow-black/20">
+                              <div class="flex items-center gap-2 mb-3">
                                   <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                               <h2 class="text-lg font-bold text-slate-200">国家代码与候选节点</h2>
                           </div>
-                              <p class="text-xs text-slate-500 mb-4 leading-relaxed">数量来自 VPN Gate 当前可见节点，仅代表可尝试的候选池，不等于已建立的住宅隧道。点击代码可填入目标地区。</p>
-                              <div id="countries-list" class="flex flex-wrap gap-2 max-h-[128px] overflow-y-auto pr-1">
+                              <p class="text-xs text-slate-500 mb-3 leading-relaxed">数量来自 VPN Gate 当前可见节点，仅代表可尝试的候选池，不等于已建立的住宅隧道。点击代码可填入目标地区。</p>
+                              <div id="countries-list" class="flex flex-wrap gap-1.5 max-h-[112px] overflow-y-auto pr-1">
                                   <span class="text-slate-600 text-sm animate-pulse">正在同步数据库...</span>
                               </div>
                           </div>
 
-                          <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 min-h-[240px] shadow-xl shadow-black/20 flex flex-col justify-center relative overflow-hidden">
+                          <div class="pc-panel pc-scheduler-panel bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-xl shadow-black/20 flex flex-col justify-center relative overflow-hidden">
                               <div class="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
                                   <svg class="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                               </div>
 
-                              <div class="mb-6 relative z-10">
-                                  <h2 class="text-2xl font-bold text-slate-100 tracking-wide mb-1 flex items-center gap-2">主备双活调度引擎 <span class="bg-indigo-500/20 text-indigo-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-indigo-500/30">Active-Standby</span></h2>
-                                  <p class="text-sm text-slate-400">单路端口锁定，内置主备双路隧道 (tun_main / tun_backup)，通道死活将由软开关瞬间接管。</p>
+                              <div class="mb-4 relative z-10">
+                                  <h2 class="text-xl font-bold text-slate-100 tracking-wide mb-1 flex items-center gap-2">主备双活调度引擎 <span class="bg-indigo-500/20 text-indigo-400 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border border-indigo-500/30">Active-Standby</span></h2>
+                                  <p class="text-xs text-slate-400">单路端口锁定，内置主备双路隧道 (tun_main / tun_backup)，通道死活将由软开关瞬间接管。</p>
                               </div>
 
-                              <div class="flex flex-wrap items-center bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 relative z-10 gap-y-4">
+                              <div class="flex flex-wrap items-center bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 relative z-10 gap-y-3">
                                   <div class="flex items-center gap-3 mr-3 border-r border-slate-700/50 pr-4">
                                       <span class="text-slate-400 text-sm font-medium whitespace-nowrap">目标 VPS:</span>
                                       <select id="slot-target-ip" @change="pcLoadConfig(); pcFetchNodes()" class="bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 w-52 sm:w-64 max-w-full text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none transition-all shadow-inner"></select>
@@ -79,8 +71,8 @@
                           </div>
                       </div>
 
-                      <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 mb-8">
-                          <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                      <div class="pc-panel pc-node-matrix bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20">
+                          <div class="px-5 py-3 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
                               <h3 class="font-semibold text-slate-200 flex items-center gap-2">
                                   <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
                                   活跃节点矩阵
@@ -90,10 +82,10 @@
                               <table class="w-full text-left border-collapse">
                                   <thead>
                                       <tr class="bg-slate-900/80 text-slate-400 text-xs uppercase tracking-wider">
-                                          <th class="py-4 px-6 font-medium w-1/5">母机宿主 IP</th>
-                                          <th class="py-4 px-6 font-medium">主备双路出口状态 (Active / Standby)</th>
-                                          <th class="py-4 px-6 font-medium w-32">心跳延迟</th>
-                                          <th class="py-4 px-6 font-medium text-right w-24">负载率</th>
+                                          <th class="py-3 px-5 font-medium w-1/4">母机宿主</th>
+                                          <th class="py-3 px-5 font-medium">主备双路出口状态</th>
+                                          <th class="py-3 px-5 font-medium w-28">心跳</th>
+                                          <th class="py-3 px-5 font-medium text-right w-20">通道</th>
                                       </tr>
                                   </thead>
                                   <tbody id="pc-nodes-table" class="divide-y divide-slate-800/50 text-sm">
@@ -103,8 +95,8 @@
                           </div>
                       </div>
 
-                      <div id="pc-ip-score-section" style="display: none;" class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 mb-8">
-                          <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                      <div id="pc-ip-score-section" style="display: none;" class="pc-panel pc-score-panel bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20">
+                          <div class="px-5 py-3 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
                               <h3 class="font-semibold text-slate-200 flex items-center gap-2">
                                   <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                                   原生深度质检报告 (testisp.info)
@@ -114,7 +106,7 @@
                               </a>
                           </div>
 
-                          <div id="pc-native-score-container" class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 bg-[#090E17]">
+                          <div id="pc-native-score-container" class="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 bg-[#090E17]">
                               <div class="col-span-full py-16 flex flex-col items-center justify-center text-slate-500">
                                   <svg class="animate-spin h-8 w-8 text-indigo-500 mb-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                   <span>穿透请求中，正在构建原生质检报告...</span>
@@ -122,7 +114,7 @@
                           </div>
                       </div>
 
-                      <div class="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20 pb-8">
+                      <div class="pc-panel pc-log-panel bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-xl overflow-hidden shadow-black/20">
                           <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
                               <span class="text-xs text-slate-400 font-mono flex items-center gap-2">
                                   <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 17h16a2 2 0 002-2V5a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>

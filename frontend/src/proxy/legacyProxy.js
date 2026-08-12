@@ -47,7 +47,7 @@
                     const code = pcEscapeHtml(item.code.toUpperCase());
                     const count = item.nodes === null ? '—' : item.nodes;
                     const countClass = item.nodes === null ? 'text-slate-500' : (item.nodes > 0 ? 'text-emerald-400' : 'text-rose-400');
-                    return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="bg-slate-800/80 hover:bg-indigo-500/20 text-slate-300 hover:text-indigo-300 transition-colors border border-slate-700/50 px-2.5 py-1 rounded-md text-xs font-mono font-bold shadow-sm cursor-pointer">${code}<span class="ml-1 ${countClass}">${count}</span></button>`;
+                    return `<button type="button" data-country-code="${code}" title="选择 ${code}，候选节点 ${count} 个" class="pc-country-chip">${code}<span class="ml-1 ${countClass}">${count}</span></button>`;
                 }).join('');
                 container.onclick = event => {
                     const button = event.target.closest('[data-country-code]');
@@ -183,9 +183,9 @@
                 const dataSource = pcEscapeHtml(d.data_source || 'Unknown');
 
                 container.innerHTML = `
-                    <div class="col-span-full bg-slate-800/60 border border-slate-700/80 p-5 rounded-2xl flex flex-wrap gap-4 justify-between items-center mb-2 shadow-lg">
+                    <div class="pc-score-summary col-span-full bg-slate-800/60 border border-slate-700/80 p-4 rounded-xl flex flex-wrap gap-3 justify-between items-center shadow-lg">
                         <div class="flex items-center gap-4">
-                            <span class="text-3xl font-extrabold font-mono text-white tracking-tight drop-shadow-sm">${safeIp}</span>
+                            <span class="pc-score-ip text-2xl font-extrabold font-mono tracking-tight">${safeIp}</span>
                             <span class="text-slate-400 text-sm hidden sm:flex items-center border-l border-slate-700 pl-4 h-6">
                                 <span class="uppercase tracking-widest text-indigo-400 mr-2 text-xs font-bold">${countryCode}</span>
                                 ${locStr} · ${orgStr}
@@ -193,7 +193,7 @@
                         </div>
                     </div>
 
-                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                    <div class="pc-score-card bg-slate-800/40 border border-slate-700/60 p-5 rounded-xl flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">基础物理画像</h4>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">IP 原生性</span> <span class="font-medium text-sm">${isNative ? '<span class="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">原生 IP (Native)</span>' : `<span class="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold">${nativeType}</span>`}</span></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">业务标记</span> <div class="flex gap-1">${tags}</div></div>
@@ -201,7 +201,7 @@
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">归属机构</span> <span class="font-medium text-slate-300 text-sm truncate max-w-[150px]" title="${orgStr}">${orgStr}</span></div>
                     </div>
 
-                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                    <div class="pc-score-card bg-slate-800/40 border border-slate-700/60 p-5 rounded-xl flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">ISP 网络底层</h4>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">ASN</span> <span class="font-medium text-indigo-300 text-sm font-mono">${asn}</span></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">解析时区</span> <span class="font-medium text-slate-300 text-sm font-mono">${timezone}</span></div>
@@ -209,7 +209,7 @@
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">反向 DNS (rDNS)</span> <span class="font-medium text-slate-400 text-xs font-mono truncate max-w-[150px]" title="${rdns}">${rdns}</span></div>
                     </div>
 
-                    <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
+                    <div class="pc-score-card bg-slate-800/40 border border-slate-700/60 p-5 rounded-xl flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow hover:bg-slate-800/60">
                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest pb-3 border-b border-slate-700/50">风险深度检测</h4>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">Spamhaus 情报</span> <span class="${threat ? 'px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold' : 'px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold'}">${threat ? '🚨 已在黑名单' : '✅ 纯净无异常'}</span></div>
                         <div class="flex justify-between items-center"><span class="text-slate-400 text-sm">代理/机房特征</span> <span class="font-medium text-xs font-bold ${d.isp.warning ? 'text-amber-400' : 'text-emerald-400'} truncate max-w-[150px]" title="${warning}">${warning}</span></div>
@@ -254,9 +254,12 @@
                     return;
                 }
 
+                const managedServerNames = new Map((window.kuiManagedServers?.() || []).map(server => [server.ip, String(server.name || '').trim()]));
                 tbody.innerHTML = servers.map(server => {
                     const details = JSON.parse(server.details || '[]');
                     const timeAgo = Math.floor((Date.now() - server.last_seen) / 1000);
+                    const serverName = pcEscapeHtml(server.name || managedServerNames.get(server.ip) || '未命名主机');
+                    const serverIp = pcEscapeHtml(server.ip);
 
                     let proxyBadges = '';
                     if (details.length === 0) {
@@ -289,7 +292,7 @@
                             const textColorClass = isActive ? 'text-emerald-400' : 'text-sky-400';
 
                             return `
-                            <div class="inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-xl px-2.5 py-1.5 shadow-inner">
+                            <div class="pc-tunnel-row inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-lg px-2.5 py-1.5 shadow-inner">
                                 <span class="bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-slate-700 font-bold">${pcEscapeHtml(d.tunnel)}</span>
                                 <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-indigo-500/20">${pcEscapeHtml(d.country)}</span>
                                 <span class="font-mono text-slate-300 text-sm tracking-wide mr-3" title="出口物理 IP">${pcEscapeHtml(d.node_ip || '---.---.---.---')}:${pcEscapeHtml(d.port)}</span>
@@ -301,21 +304,21 @@
                     }
 
                     return `
-                        <tr class="hover:bg-slate-800/30 transition-colors group">
-                            <td class="py-5 px-6 font-mono text-indigo-300 align-middle">
-                                <div class="flex items-center gap-2">
+                        <tr class="pc-node-row transition-colors group">
+                            <td class="py-3 px-5 align-middle">
+                                <div class="pc-host-identity flex items-center gap-2">
                                     <svg class="w-4 h-4 text-slate-600 group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-                                    ${pcEscapeHtml(server.ip)}
+                                    <span class="pc-host-name">${serverName}</span><span class="pc-host-separator">：</span><span class="pc-host-ip">${serverIp}</span>
                                 </div>
                             </td>
-                            <td class="py-5 px-6 align-middle">${proxyBadges}</td>
-                            <td class="py-5 px-6 align-middle">
+                            <td class="py-3 px-5 align-middle">${proxyBadges}</td>
+                            <td class="py-3 px-5 align-middle">
                                 <span class="flex items-center gap-1.5 ${timeAgo < 20 ? 'text-emerald-400' : 'text-rose-400'} font-mono text-xs">
                                     <span class="w-1.5 h-1.5 rounded-full ${timeAgo < 20 ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}"></span>
                                     ${timeAgo}s 前
                                 </span>
                             </td>
-                            <td class="py-5 px-6 align-middle text-right">
+                            <td class="py-3 px-5 align-middle text-right">
                                 <span class="${details.length === 2 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : (details.length === 1 ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30')} py-1 px-3 rounded-md text-xs font-mono font-bold">
                                     ${details.length} / 2
                                 </span>
@@ -381,12 +384,6 @@
         export function pcInitProxy() {
             pcStopProxy();
             pcCurrentScoreIp = "";
-
-            try {
-                const origin = window.location.origin;
-                const el = document.getElementById('agent-cmd');
-                if (el) el.textContent = '住宅代理已合并到服务器 Full Deploy Command，无需二次安装。';
-            } catch (e) {}
 
             pcPopulateTargets();
             pcFetchCountries();

@@ -11,6 +11,7 @@ const appStyles = read('../frontend/src/styles/app.css');
 const tokens = read('../frontend/src/styles/tokens.css');
 const topBar = read('../frontend/src/app/TopBar.vue');
 const residentialProxyPage = read('../frontend/src/pages/ResidentialProxyPage.vue');
+const legacyProxy = read('../frontend/src/proxy/legacyProxy.js');
 const state = read('../frontend/src/composables/useKuiState.js');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
 const addVpsModal = read('../frontend/src/components/modals/AddVpsModal.vue');
@@ -190,4 +191,19 @@ test('egress panel uses the same neutral palette and controls as adjacent server
     assert.match(appStyles, /\.kui-egress-mode-button\.is-active[\s\S]*background: #4f46e5/);
     assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-egress-panel/);
     assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-egress-control/);
+});
+
+test('residential proxy details are compact and readable in both color modes', () => {
+    assert.doesNotMatch(residentialProxyPage, /接入与 API 说明|pc-help-panel/);
+    assert.match(residentialProxyPage, /class="pc-section-stack"/);
+    assert.match(residentialProxyPage, /class="pc-panel pc-country-panel/);
+    assert.match(residentialProxyPage, /class="pc-panel pc-node-matrix/);
+    assert.match(residentialProxyPage, /class="pc-panel pc-score-panel/);
+    assert.match(legacyProxy, /class="pc-country-chip/);
+    assert.match(legacyProxy, /class="pc-host-identity/);
+    assert.match(legacyProxy, /managedServerNames\.get\(server\.ip\)/);
+    assert.match(legacyProxy, /class="pc-score-ip/);
+    assert.match(appStyles, /data-kui-theme="light"[\s\S]*\.pc-country-chip/);
+    assert.match(appStyles, /data-kui-theme="light"[\s\S]*\.pc-score-ip/);
+    assert.match(appStyles, /\.pc-section-stack \{ display: grid; gap: 12px/);
 });
