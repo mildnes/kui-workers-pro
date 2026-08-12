@@ -2106,7 +2106,7 @@ rules:
                 const requestId = /^[0-9a-f-]{36}$/i.test(String(data.request_id || '')) ? String(data.request_id) : crypto.randomUUID();
                 if (!ip || !(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
                 try {
-                    const { response, result } = await requestRealtimeEgressRefresh(env, db, ip, requestId, url.origin);
+                    const { response, result } = await requestRealtimeEgressRefresh(env, db, ip, requestId, new URL(request.url).origin);
                     return Response.json(result, { status: response.status });
                 } catch (error) {
                     return Response.json({ error: error.message || '出口检测指令发送失败' }, { status: 503 });

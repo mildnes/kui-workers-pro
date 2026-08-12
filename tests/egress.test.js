@@ -100,6 +100,7 @@ test('admins can refresh the actual VPS egress IP without reapplying configurati
     assert.match(serversPage, /aria-label="刷新 VPS 实际出口 IP"/);
     assert.match(frontend, /fetchApi\('\/api\/vps\/egress-refresh'/);
     assert.match(api, /params\.path\[1\] === "egress-refresh"/);
+    assert.match(api, /requestRealtimeEgressRefresh\(env, db, ip, requestId, new URL\(request\.url\)\.origin\)/);
     assert.match(realtime, /type: "egress\.refresh"/);
     assert.match(realtime, /messageType === "egress\.probe\.result"/);
     assert.match(worker, /pathname === '\/egress-refresh'/);
