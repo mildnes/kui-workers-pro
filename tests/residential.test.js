@@ -56,6 +56,15 @@ test('residential apply failures include the controller readiness reason', () =>
     assert.match(agent, /residential\.get\("reason"\)/);
 });
 
+test('residential data-plane verification follows the configured listener with safe fallbacks', () => {
+    assert.match(api, /const residentialAddr = listenHost \|\| '127\.0\.0\.1'/);
+    assert.match(api, /addr: residentialAddr[\s\S]{0,120}check_addr: residentialAddr/);
+    assert.match(agent, /proxy\.get\("addr"\), proxy\.get\("check_addr"\), "127\.0\.0\.1"/);
+    assert.match(agent, /residential_addr == "127\.0\.0\.1" and egress_check_host != "127\.0\.0\.1"/);
+    assert.match(agent, /"addr": residential_addr, "check_addr": egress_check_host/);
+    assert.match(agent, /residential proxy verification failed via/);
+});
+
 test('realtime egress results are persisted and acknowledged without HTTP', () => {
     assert.match(realtime, /persistEgressResult\(attachment\.ip, result\)/);
     assert.match(realtime, /UPDATE servers SET egress_applied_mode/);

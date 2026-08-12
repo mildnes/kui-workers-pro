@@ -332,7 +332,6 @@ def _verified_public_ip(value):
 
 def _verify_residential_exit(proxy):
     global _residential_exit_ip
-    host = str(proxy.get("addr") or "127.0.0.1")
     try:
         port = int(proxy.get("port") or PROXY_PORT)
     except (TypeError, ValueError):
@@ -342,15 +341,25 @@ def _verify_residential_exit(proxy):
     user = str(proxy.get("user") or "")
     password = str(proxy.get("pass") or "")
     auth = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@" if user or password else ""
-    proxy_url = f"socks5h://{auth}{host}:{port}"
-    for _ in range(4):
-        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--proxy", proxy_url, "https://api.ipify.org"], capture_output=True, text=True)
-        ip = _verified_public_ip(result.stdout)
-        if result.returncode == 0 and ip and ip != VPS_IP:
-            _residential_exit_ip = ip
-            return True
-        time.sleep(2)
-    raise RuntimeError("residential proxy data-plane verification failed")
+    hosts = []
+    for candidate in (proxy.get("addr"), proxy.get("check_addr"), "127.0.0.1"):
+        host = normalize_check_host(candidate or "127.0.0.1")
+        if host not in hosts:
+            hosts.append(host)
+    failures = []
+    for host in hosts:
+        proxy_url = f"socks5h://{auth}{host}:{port}"
+        for attempt in range(2):
+            result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--proxy", proxy_url, "https://api.ipify.org"], capture_output=True, text=True)
+            ip = _verified_public_ip(result.stdout)
+            if result.returncode == 0 and ip and ip != VPS_IP:
+                _residential_exit_ip = ip
+                return True
+            error = result.stderr.strip()[-200:] or (f"invalid exit IP: {result.stdout.strip()[:64]}" if result.returncode == 0 else f"curl exit {result.returncode}")
+            if attempt == 0:
+                time.sleep(1)
+        failures.append(f"{host}:{port}: {error}")
+    raise RuntimeError(f"residential proxy verification failed via {'; '.join(failures)}")
 
 def _verify_socks5_exit(check_host="127.0.0.1"):
     check_host = normalize_check_host(check_host)
@@ -1350,7 +1359,10 @@ def fetch_and_apply_configs():
             proxy_categories_list = [c.strip() for c in proxy_categories.split(",") if c.strip()] if proxy_categories else []
             proxy_domains = json.dumps({"categories": proxy_categories_list}) if proxy_mode == "selective" and proxy_categories_list else ""
             if runtime_egress == "residential":
-                runtime_socks = {"enabled": True, "source": "residential", "addr": residential.get("addr", "127.0.0.1"), "port": residential.get("port", 7920), "user": residential.get("user", ""), "pass": residential.get("pass", ""), "mode": proxy_mode, "domains": proxy_domains}
+                residential_addr = normalize_check_host(residential.get("addr", "127.0.0.1"))
+                if residential_addr == "127.0.0.1" and egress_check_host != "127.0.0.1":
+                    residential_addr = egress_check_host
+                runtime_socks = {"enabled": True, "source": "residential", "addr": residential_addr, "check_addr": egress_check_host, "port": residential.get("port", 7920), "user": residential.get("user", ""), "pass": residential.get("pass", ""), "mode": proxy_mode, "domains": proxy_domains}
             elif runtime_egress == "socks5":
                 runtime_socks = {"enabled": True, "source": "manual", "addr": egress.get("socks5_addr", ""), "port": int(egress.get("socks5_port", 0)), "user": egress.get("socks5_user", ""), "pass": egress.get("socks5_pass", ""), "mode": proxy_mode, "domains": proxy_domains}
             else:

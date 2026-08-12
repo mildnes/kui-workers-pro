@@ -1361,13 +1361,14 @@ export async function onRequest(context) {
             else if (!proxyState) reason = 'proxy-lite 尚未上报状态';
             else if (!fresh) reason = 'proxy-lite 状态已过期';
             else if (!active) reason = '住宅 OpenVPN 主通道尚未就绪';
+            const residentialAddr = listenHost || '127.0.0.1';
             residential_outbound = {
                 available: ready,
                 ready,
                 reason,
-                addr: '127.0.0.1',
+                addr: residentialAddr,
                 port: Number(active?.port || port),
-                check_addr: listenHost || '127.0.0.1',
+                check_addr: residentialAddr,
                 active_exit_ip: active?.node_ip || '',
                 last_seen: Number(proxyState?.last_seen || 0),
                 user: agentAuthenticated && localResidential ? env.PROXY_USER || '' : '',
