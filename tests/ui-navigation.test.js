@@ -225,3 +225,13 @@ test('residential proxy panels share spacing and matrix and score details stay r
     assert.match(appStyles, /\.pc-channel-count \{[^}]*white-space: nowrap/);
     assert.match(appStyles, /\.pc-score-value \{[^}]*overflow-wrap: anywhere/);
 });
+
+test('residential tunnel status sits compactly below each tunnel name', () => {
+    assert.match(legacyProxy, /class="pc-tunnel-identity/);
+    assert.match(legacyProxy, /class="pc-tunnel-name/);
+    assert.match(legacyProxy, /class="pc-tunnel-status/);
+    assert.match(legacyProxy, /ACTIVE（业务出口）/);
+    assert.match(legacyProxy, /STANDBY（热备就绪）/);
+    assert.match(appStyles, /\.pc-tunnel-identity \{[^}]*flex-direction: column/);
+    assert.match(appStyles, /\.pc-tunnel-status \{[^}]*font-size: 9px/);
+});

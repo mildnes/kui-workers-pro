@@ -47,14 +47,16 @@
                             <div class="inline-flex items-center bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-1.5 shadow-inner text-amber-400/90 text-sm">
                                 <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                 双路通道失联，正在抢救拨号中...
-                            </div>`:`<div class="flex flex-col gap-2">`+t.map(e=>{let t=e.active,n=t?`bg-emerald-500`:`bg-sky-500`,r=t?`ACTIVE (业务出口)`:`STANDBY (热备就绪)`,i=t?`border-emerald-500/30`:`border-sky-500/30`,a=t?`bg-emerald-500/10`:`bg-sky-500/10`,o=t?`text-emerald-400`:`text-sky-400`;return`
+                            </div>`:`<div class="flex flex-col gap-2">`+t.map(e=>{let t=e.active,n=t?`bg-emerald-500`:`bg-sky-500`,r=t?`ACTIVE（业务出口）`:`STANDBY（热备就绪）`,i=t?`text-emerald-400`:`text-sky-400`;return`
                             <div class="pc-tunnel-row inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-lg px-2.5 py-1.5 shadow-inner">
-                                <span class="bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-slate-700 font-bold">${$(e.tunnel)}</span>
+                                <div class="pc-tunnel-identity">
+                                    <span class="pc-tunnel-name bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md border border-slate-700 font-bold">${$(e.tunnel)}</span>
+                                    <span class="pc-tunnel-status ${i}">
+                                        <span class="pc-tunnel-status-dot ${n} shadow-[0_0_5px_currentColor]"></span>${r}
+                                    </span>
+                                </div>
                                 <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-indigo-500/20">${$(e.country)}</span>
                                 <span class="font-mono text-slate-300 text-sm tracking-wide mr-3" title="出口物理 IP">${$(e.node_ip||`---.---.---.---`)}:${$(e.port)}</span>
-                                <span class="flex items-center gap-1.5 ${o} ${a} px-2 py-0.5 rounded-md border ${i} text-xs font-medium">
-                                    <span class="w-1.5 h-1.5 rounded-full ${n} shadow-[0_0_5px_currentColor]"></span> ${r}
-                                </span>
                             </div>`}).join(``)+`</div>`,`
                         <tr class="pc-node-row transition-colors group">
                             <td class="py-3 px-5 align-middle">

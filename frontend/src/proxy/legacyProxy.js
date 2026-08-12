@@ -286,19 +286,19 @@
                         proxyBadges = '<div class="flex flex-col gap-2">' + details.map(d => {
                             const isActive = d.active;
                             const statusColorClass = isActive ? 'bg-emerald-500' : 'bg-sky-500';
-                            const statusText = isActive ? 'ACTIVE (业务出口)' : 'STANDBY (热备就绪)';
-                            const borderColorClass = isActive ? 'border-emerald-500/30' : 'border-sky-500/30';
-                            const bgColorClass = isActive ? 'bg-emerald-500/10' : 'bg-sky-500/10';
+                            const statusText = isActive ? 'ACTIVE（业务出口）' : 'STANDBY（热备就绪）';
                             const textColorClass = isActive ? 'text-emerald-400' : 'text-sky-400';
 
                             return `
                             <div class="pc-tunnel-row inline-flex items-center bg-slate-950 border border-slate-800/80 rounded-lg px-2.5 py-1.5 shadow-inner">
-                                <span class="bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-slate-700 font-bold">${pcEscapeHtml(d.tunnel)}</span>
+                                <div class="pc-tunnel-identity">
+                                    <span class="pc-tunnel-name bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md border border-slate-700 font-bold">${pcEscapeHtml(d.tunnel)}</span>
+                                    <span class="pc-tunnel-status ${textColorClass}">
+                                        <span class="pc-tunnel-status-dot ${statusColorClass} shadow-[0_0_5px_currentColor]"></span>${statusText}
+                                    </span>
+                                </div>
                                 <span class="bg-indigo-500/20 text-indigo-400 font-bold font-mono text-xs px-2 py-0.5 rounded-md mr-3 border border-indigo-500/20">${pcEscapeHtml(d.country)}</span>
                                 <span class="font-mono text-slate-300 text-sm tracking-wide mr-3" title="出口物理 IP">${pcEscapeHtml(d.node_ip || '---.---.---.---')}:${pcEscapeHtml(d.port)}</span>
-                                <span class="flex items-center gap-1.5 ${textColorClass} ${bgColorClass} px-2 py-0.5 rounded-md border ${borderColorClass} text-xs font-medium">
-                                    <span class="w-1.5 h-1.5 rounded-full ${statusColorClass} shadow-[0_0_5px_currentColor]"></span> ${statusText}
-                                </span>
                             </div>`;
                         }).join('') + '</div>';
                     }
