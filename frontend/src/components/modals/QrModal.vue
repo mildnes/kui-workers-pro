@@ -1,6 +1,6 @@
 <template>
-  <div v-if="qrModalOpen" class="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="qrModalOpen = false">
-              <div class="bg-white rounded-3xl p-8 shadow-2xl w-full max-w-sm relative text-center">
+  <div v-if="qrModalOpen" class="kui-modal-backdrop fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" @click.self="qrModalOpen = false">
+              <div class="kui-modal-surface bg-white rounded-3xl p-8 shadow-2xl w-full max-w-sm relative text-center">
                   <button @click="qrModalOpen = false" class="absolute top-4 right-5 text-2xl text-slate-400 hover:text-slate-600">&times;</button>
                   <h3 class="text-xl font-black text-slate-800 mb-2">订阅二维码</h3>
                   <p class="text-xs text-slate-500 mb-6">请使用客户端扫描 (暂仅支持普通订阅解析)</p>

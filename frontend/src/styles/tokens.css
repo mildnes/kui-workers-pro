@@ -1,14 +1,44 @@
-:root {
+:root,
+:root[data-kui-theme="light"] {
   --kui-color-bg: #f4f6fb;
+  --kui-color-bg-soft: #f8fafc;
   --kui-color-surface: rgba(255, 255, 255, 0.92);
+  --kui-color-surface-solid: #ffffff;
+  --kui-color-surface-raised: #ffffff;
   --kui-color-border: #e2e8f0;
+  --kui-color-border-strong: #cbd5e1;
   --kui-color-text: #172033;
+  --kui-color-text-soft: #334155;
   --kui-color-muted: #64748b;
+  --kui-color-subtle: #94a3b8;
   --kui-color-primary: #4f46e5;
+  --kui-color-primary-hover: #4338ca;
+  --kui-color-primary-soft: #eef2ff;
+  --kui-color-overlay: rgba(15, 23, 42, 0.42);
   --kui-radius-sm: 10px;
   --kui-radius-md: 14px;
   --kui-radius-lg: 16px;
   --kui-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
   --kui-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
   --kui-space-page: clamp(12px, 2vw, 24px);
+}
+
+:root[data-kui-theme="dark"] {
+  --kui-color-bg: #090e17;
+  --kui-color-bg-soft: #0d1117;
+  --kui-color-surface: rgba(15, 23, 42, 0.82);
+  --kui-color-surface-solid: #0f172a;
+  --kui-color-surface-raised: #111827;
+  --kui-color-border: #1e293b;
+  --kui-color-border-strong: #334155;
+  --kui-color-text: #e2e8f0;
+  --kui-color-text-soft: #cbd5e1;
+  --kui-color-muted: #94a3b8;
+  --kui-color-subtle: #64748b;
+  --kui-color-primary: #6366f1;
+  --kui-color-primary-hover: #818cf8;
+  --kui-color-primary-soft: rgba(79, 70, 229, 0.18);
+  --kui-color-overlay: rgba(2, 6, 23, 0.72);
+  --kui-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --kui-shadow-md: 0 12px 30px rgba(0, 0, 0, 0.32);
 }

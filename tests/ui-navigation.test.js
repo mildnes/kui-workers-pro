@@ -8,9 +8,14 @@ const desktopNavigation = read('../frontend/src/app/DesktopNavigation.vue');
 const mobileNavigation = read('../frontend/src/app/MobileNavigation.vue');
 const serversPage = read('../frontend/src/pages/ServersPage.vue');
 const appStyles = read('../frontend/src/styles/app.css');
+const tokens = read('../frontend/src/styles/tokens.css');
 const topBar = read('../frontend/src/app/TopBar.vue');
+const residentialProxyPage = read('../frontend/src/pages/ResidentialProxyPage.vue');
+const state = read('../frontend/src/composables/useKuiState.js');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
 const addVpsModal = read('../frontend/src/components/modals/AddVpsModal.vue');
+const qrModal = read('../frontend/src/components/modals/QrModal.vue');
+const probeEditModal = read('../frontend/src/components/modals/ProbeEditModal.vue');
 const app = read('../frontend/src/App.vue');
 
 test('removed and hidden pages are absent from the active UI', () => {
@@ -81,6 +86,24 @@ test('servers page uses compact Chinese overview', () => {
     for (const label of ['在线服务器', '累计流量', '实时下载', '实时上传']) assert.match(serversPage, new RegExp(label));
     assert.doesNotMatch(serversPage, /ONLINE SERVERS|AGGREGATE TRAFFIC|>DOWNLOAD<|>UPLOAD</);
     assert.match(appStyles, /\.kui-servers-page[\s\S]*margin-top: 10px/);
+});
+
+test('global color modes reuse the servers light palette and residential dark palette', () => {
+    assert.match(tokens, /:root,\s*:root\[data-kui-theme="light"\]/);
+    assert.match(tokens, /:root\[data-kui-theme="dark"\]/);
+    assert.match(tokens, /--kui-color-bg:\s*#f4f6fb/);
+    assert.match(tokens, /--kui-color-bg:\s*#090e17/i);
+    assert.match(state, /localStorage\.getItem\('kui_color_mode'\)/);
+    assert.match(state, /document\.documentElement\.dataset\.kuiTheme = colorMode\.value/);
+    assert.match(state, /const toggleColorMode/);
+    assert.match(topBar, /@click="toggleColorMode"/);
+    assert.match(topBar, /深色模式|浅色模式/);
+    assert.doesNotMatch(residentialProxyPage.match(/<div[^>]+class="pc-body[^>]+>/)?.[0] || '', /bg-\[#090E17\]|text-slate-300/);
+    assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-server-card/);
+    assert.match(appStyles, /data-kui-theme="light"[\s\S]*\.pc-body/);
+    assert.match(qrModal, /kui-modal-surface/);
+    assert.match(probeEditModal, /kui-modal-surface/);
+    assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-modal-surface/);
 });
 
 test('server cards expose clear visual boundaries between operational modules', () => {

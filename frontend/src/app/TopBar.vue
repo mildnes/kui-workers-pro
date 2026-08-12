@@ -7,6 +7,9 @@
       </div>
     </div>
     <div class="kui-topbar-actions">
+      <button @click="toggleColorMode" class="kui-button kui-button-ghost kui-theme-toggle" :title="colorMode === 'light' ? '切换到深色模式' : '切换到浅色模式'" :aria-label="colorMode === 'light' ? '切换到深色模式' : '切换到浅色模式'">
+        <span aria-hidden="true">{{ colorMode === 'light' ? '☾' : '☀' }}</span><span class="kui-theme-label">{{ colorMode === 'light' ? '深色模式' : '浅色模式' }}</span>
+      </button>
       <button @click="openProbe" class="kui-button kui-button-ghost kui-probe-button" title="探针监控" aria-label="探针监控">
         <span>◉</span><span class="kui-probe-button-label">探针监控</span>
       </button>

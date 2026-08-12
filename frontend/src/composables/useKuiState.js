@@ -14,6 +14,14 @@ export function useKuiState() {
                   const currentUser = ref(sessionStorage.getItem('kui_user') || ''); const authKey = ref(sessionStorage.getItem('kui_auth_key') || ''); const role = ref(sessionStorage.getItem('kui_role') || '');
                   const preferredTab = localStorage.getItem('monitor_preferred_tab') || 'probe';
                   const activeTab = ref(['services', 'realm'].includes(preferredTab) ? (role.value === 'admin' ? 'nodes' : 'dashboard') : preferredTab);
+                  const savedColorMode = localStorage.getItem('kui_color_mode');
+                  const colorMode = ref(savedColorMode === 'dark' ? 'dark' : 'light');
+                  const applyColorMode = () => {
+                      document.documentElement.dataset.kuiTheme = colorMode.value;
+                      document.documentElement.style.colorScheme = colorMode.value;
+                  };
+                  const toggleColorMode = () => { colorMode.value = colorMode.value === 'light' ? 'dark' : 'light'; };
+                  applyColorMode();
                   const currentDomain = window.location.origin;
 
                   const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);
@@ -67,6 +75,7 @@ export function useKuiState() {
                   const showWelcomePopup = ref(false);
 
                   watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') { updateCustomStyles(); updateCustomScript(probeSys.custom_script); } else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); document.getElementById('kui-custom-head')?.remove(); updateCustomScript(''); } });
+                  watch(colorMode, (val) => { localStorage.setItem('kui_color_mode', val); applyColorMode(); });
                   watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
 
                   const hasCustomCssFlag = computed(() => {
@@ -1030,7 +1039,7 @@ export function useKuiState() {
                   });
 
                   return { 
-                      isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, refreshing, refreshPanel,
+                      isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, toggleColorMode, refreshing, refreshPanel,
                       servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addVpsModalOpen, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
