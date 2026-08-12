@@ -1057,8 +1057,16 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         clean_uuid = node.get('uuid', '').replace('-', '')
         
         if proto in ["Hysteria2", "TUIC", "Trojan", "VLESS-WS-TLS", "AnyTLS", "Naive"]:
-            cert_path, key_path = f"/opt/kui/cert_{node['id']}.pem", f"/opt/kui/key_{node['id']}.pem"
-            active_certs.extend([f"cert_{node['id']}.pem", f"key_{node['id']}.pem"])
+            cert_path, key_path, sni_path = f"/opt/kui/cert_{node['id']}.pem", f"/opt/kui/key_{node['id']}.pem", f"/opt/kui/cert_{node['id']}.sni"
+            active_certs.extend([f"cert_{node['id']}.pem", f"key_{node['id']}.pem", f"cert_{node['id']}.sni"])
+            previous_sni = ""
+            try:
+                with open(sni_path, "r") as marker: previous_sni = marker.read().strip()
+            except OSError: pass
+            if previous_sni != sni:
+                for stale_path in (cert_path, key_path):
+                    try: os.remove(stale_path)
+                    except OSError: pass
             if not os.path.exists(cert_path):
                 parts = sni.split('.'); cn = f"{parts[-2]}.{parts[-1]}" if len(parts) >= 2 else sni
                 conf_path = f"/opt/kui/cert_{node['id']}.conf"
@@ -1067,6 +1075,8 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 subprocess.run(["openssl", "req", "-new", "-x509", "-days", "36500", "-key", key_path, "-out", cert_path, "-config", conf_path, "-extensions", "v3_req"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 os.chmod(cert_path, 0o644)
                 os.chmod(key_path, 0o600)
+                with open(sni_path, "w") as marker: marker.write(sni)
+                os.chmod(sni_path, 0o600)
                 try: os.remove(conf_path)
                 except: pass
         
@@ -1318,7 +1328,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         rollback_healthy = new_config_str == old_config_str or _restore_singbox_config(old_config_str)
         raise RuntimeError(f"{verification_error}; previous_config_restored={str(rollback_healthy).lower()}") from verification_error
     for filename in os.listdir("/opt/kui/"):
-        if (filename.startswith("cert_") or filename.startswith("key_")) and filename.endswith(".pem") and filename not in active_certs:
+        if (filename.startswith("cert_") or filename.startswith("key_")) and (filename.endswith(".pem") or filename.endswith(".sni")) and filename not in active_certs:
             try: os.remove(os.path.join("/opt/kui/", filename))
             except OSError: pass
     return verified_egress_ip

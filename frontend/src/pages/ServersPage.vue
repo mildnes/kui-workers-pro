@@ -200,10 +200,32 @@
                                               <span :class="node.enable === 1 ? 'is-enabled' : 'is-disabled'">{{ node.enable === 1 ? '已启用' : '已停用' }}</span>
                                           </div>
                                           <div class="kui-node-actions">
-                                              <button @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)">{{ node.enable === 1 ? '停用' : '启用' }}</button>
-                                              <button class="is-danger" @click="deleteNode(node.id)">删除</button>
+                                              <button v-if="!nodeEditDrafts[node.id]" @click="startEditNode(node)">修改</button>
+                                              <button v-if="!nodeEditDrafts[node.id]" @click="toggleNode(node.id, node.enable === 1 ? 0 : 1)">{{ node.enable === 1 ? '停用' : '启用' }}</button>
+                                              <button v-if="!nodeEditDrafts[node.id]" class="is-danger" @click="deleteNode(node.id)">删除</button>
+                                              <button v-else @click="cancelEditNode(node.id)">取消修改</button>
                                           </div>
                                       </div>
+                                      <div v-if="nodeEditDrafts[node.id]" class="kui-node-edit-form">
+                                          <div class="kui-node-form-grid kui-node-form-primary">
+                                              <label><span>归属用户 <b class="kui-required">*</b></span><select v-model="nodeEditDrafts[node.id].username"><option value="admin">管理员自身</option><option v-for="u in users" :value="u.username">{{ u.username }}</option></select></label>
+                                              <label><span>协议 <b class="kui-required">*</b></span><select v-model="nodeEditDrafts[node.id].protocol"><option value="VLESS">VLESS</option><option value="XTLS-Reality">XTLS + Reality</option><option value="Hysteria2">Hysteria2</option><option value="TUIC">TUIC v5</option><option value="Shadowsocks2022">Shadowsocks 2022</option><option value="Trojan">Trojan</option><option value="H2-Reality">H2 + Reality</option><option value="gRPC-Reality">gRPC + Reality</option><option value="AnyTLS">AnyTLS</option><option value="Naive">Naive</option><option value="Socks5">SOCKS5</option><option value="VLESS-Argo">VLESS Argo</option><option value="dokodemo-door">Dokodemo</option></select></label>
+                                              <label><span>端口 <b class="kui-required">*</b></span><input v-model.number="nodeEditDrafts[node.id].port" type="number" min="1" max="65535"></label>
+                                          </div>
+                                          <div class="kui-node-form-grid kui-node-form-optional"><label><span>流量配额 <em>GB，0 为无限</em></span><input v-model="nodeEditDrafts[node.id].traffic_limit_gb" type="number" min="0" placeholder="0"></label><label><span>到期日期 <em>留空为永久</em></span><input v-model="nodeEditDrafts[node.id].expire_date" type="date"></label></div>
+                                          <div v-if="['VLESS', 'XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'TUIC', 'VLESS-Argo'].includes(nodeEditDrafts[node.id].protocol)" class="kui-node-protocol-fields"><label><span>UUID <em>留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].node_uuid" type="text" spellcheck="false"></label></div>
+                                          <div v-if="['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(nodeEditDrafts[node.id].protocol)" class="kui-node-protocol-fields kui-node-reality-fields">
+                                              <label><span>Reality 伪装域名 <em>留空使用默认</em></span><input v-model.trim="nodeEditDrafts[node.id].sni" placeholder="addons.mozilla.org"></label><label><span>短 ID <em>留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].reality_short_id" maxlength="32"></label>
+                                              <label><span>Reality 私钥 <em>与公钥同时留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].reality_private_key" maxlength="43"></label><label><span>Reality 公钥 <em>与私钥配对</em></span><input v-model.trim="nodeEditDrafts[node.id].reality_public_key" maxlength="43"></label>
+                                          </div>
+                                          <div v-if="['Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive'].includes(nodeEditDrafts[node.id].protocol)" class="kui-node-protocol-fields"><label><span>SNI / 主机名 <em>留空使用默认</em></span><input v-model.trim="nodeEditDrafts[node.id].sni" placeholder="addons.mozilla.org"></label></div>
+                                          <div v-if="['Hysteria2', 'TUIC', 'Trojan', 'AnyTLS'].includes(nodeEditDrafts[node.id].protocol)" class="kui-node-protocol-fields"><label><span>密码 <em>留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].node_password" type="text"></label></div>
+                                          <div v-if="['Naive', 'Socks5'].includes(nodeEditDrafts[node.id].protocol)" class="kui-node-protocol-fields"><label><span>用户名 <em>留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].node_username" type="text"></label><label><span>密码 <em>留空重新生成</em></span><input v-model.trim="nodeEditDrafts[node.id].node_password" type="text"></label></div>
+                                          <div v-if="nodeEditDrafts[node.id].protocol === 'Shadowsocks2022'" class="kui-node-protocol-fields"><label><span>加密方式</span><select v-model="nodeEditDrafts[node.id].ss_method" @change="nodeEditDrafts[node.id].ss_password = ''"><option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option><option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option></select></label><label><span>Base64 密钥 <em>留空重新生成</em></span><div class="kui-node-input-action"><input v-model.trim="nodeEditDrafts[node.id].ss_password" type="text"><button type="button" @click="nodeEditDrafts[node.id].ss_password = generateSs2022Password(nodeEditDrafts[node.id].ss_method)">随机</button></div></label></div>
+                                          <div v-if="nodeEditDrafts[node.id].protocol === 'dokodemo-door'" class="kui-node-protocol-fields"><label><span>转发类型 <b class="kui-required">*</b></span><select v-model="nodeEditDrafts[node.id].relay_type"><option value="external">外部目标地址</option><option value="internal">面板内部节点</option></select></label><div v-if="nodeEditDrafts[node.id].relay_type === 'external'" class="kui-node-form-grid"><label><span>目标 IP / 域名 <b class="kui-required">*</b></span><input v-model="nodeEditDrafts[node.id].target_ip"></label><label><span>目标端口 <b class="kui-required">*</b></span><input v-model.number="nodeEditDrafts[node.id].target_port" type="number" min="1" max="65535"></label></div><label v-else><span>目标节点 <b class="kui-required">*</b></span><select v-model="nodeEditDrafts[node.id].target_id"><option value="">选择本 VPS 的目标节点</option><option v-for="target in nodes.filter(n => n.id !== node.id && n.vps_ip === node.vps_ip && n.enable && ['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS'].includes(n.protocol))" :value="target.id">{{ target.protocol }}:{{ target.port }}</option></select></label></div>
+                                          <div class="kui-node-edit-actions"><button @click="cancelEditNode(node.id)">取消</button><button class="is-primary" @click="saveNodeEdit(node)">保存并应用</button></div>
+                                      </div>
+                                      <template v-else>
                                       <dl class="kui-node-detail-grid">
                                           <div v-for="row in buildNodeDetailRows(node)" :key="row.label">
                                               <dt>{{ row.label }}</dt>
@@ -223,6 +245,7 @@
                                           <button @click="copyCommand(generateSubLink(vps.ip, 'clash', node.id), '该节点 Clash 订阅已复制！')">复制 Clash 订阅</button>
                                           <button @click="copySurgeConfig(vps.ip, node.id)">复制 Surge 配置段</button>
                                       </div>
+                                      </template>
                                   </div>
                               </details>
                               <div v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-slate-400 text-xs py-6 border-2 border-dashed border-slate-200 rounded-2xl font-medium">节点矩阵为空，请在上方一键下发建立</div>

@@ -2274,9 +2274,34 @@ rules:
                 return Response.json({ success: true });
             }
             if (method === "PUT") {
-                const { id, enable, reset_traffic } = await readJsonBody(request, 8 * 1024);
+                const body = await readJsonBody(request, 16 * 1024);
+                const { id, enable, reset_traffic } = body;
                 const node = await db.prepare('SELECT id, vps_ip, protocol, port, relay_type, target_id FROM nodes WHERE id = ?').bind(id).first();
                 if (!node) return Response.json({ error: 'Node not found' }, { status: 404 });
+                if (body.protocol !== undefined) {
+                    let updated;
+                    try { updated = normalizeNodePayload({ ...body, id: node.id, vps_ip: node.vps_ip }); }
+                    catch (error) { return Response.json({ error: error.message || 'Invalid node configuration' }, { status: 400 }); }
+                    const existing = await db.prepare('SELECT enable FROM nodes WHERE id = ?').bind(id).first();
+                    if (existing.enable === 1) {
+                        const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, updated.port).all();
+                        if (nodeListenerConflicts(listeners, updated)) return Response.json({ error: `${nodeTransport(updated.protocol).toUpperCase()} port ${updated.port} is already in use on this VPS` }, { status: 409 });
+                    }
+                    let nodeUser = normalizeNodeText(updated.username || currentUser, 'username', 64);
+                    if (nodeUser === 'admin') nodeUser = currentUser;
+                    if (updated.expire_time && updated.expire_time <= Date.now()) return Response.json({ error: 'Node expiry must be in the future' }, { status: 400 });
+                    if (nodeUser !== currentUser && !(await db.prepare('SELECT username FROM users WHERE username = ? AND enable = 1 AND (traffic_limit = 0 OR traffic_used < traffic_limit) AND (expire_time = 0 OR expire_time > ?)').bind(nodeUser, Date.now()).first())) return Response.json({ error: 'Node user is unavailable' }, { status: 400 });
+                    const referenced = await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ? AND id != ?").bind(id, id).first();
+                    if (referenced && !INTERNAL_RELAY_PROTOCOLS.has(updated.protocol)) return Response.json({ error: 'Node is used by an internal relay and must keep a supported target protocol' }, { status: 409 });
+                    if (updated.protocol === 'dokodemo-door' && updated.relay_type === 'internal') {
+                        if (updated.target_id === id) return Response.json({ error: 'Internal relay cannot target itself' }, { status: 400 });
+                        const target = await db.prepare('SELECT protocol, enable FROM nodes WHERE id = ? AND vps_ip = ?').bind(updated.target_id, node.vps_ip).first();
+                        if (!target || target.enable !== 1 || !INTERNAL_RELAY_PROTOCOLS.has(target.protocol)) return Response.json({ error: 'Internal relay target is unavailable or unsupported' }, { status: 400 });
+                    }
+                    await db.prepare(`UPDATE nodes SET uuid = ?, protocol = ?, port = ?, sni = ?, private_key = ?, public_key = ?, short_id = ?, relay_type = ?, target_ip = ?, target_port = ?, target_id = ?, traffic_limit = ?, expire_time = ?, username = ?, network = ? WHERE id = ?`).bind(updated.uuid || '', updated.protocol, updated.port, updated.sni || null, updated.private_key || null, updated.public_key || null, updated.short_id || null, updated.relay_type || null, updated.target_ip || null, updated.target_port || null, updated.target_id || null, updated.traffic_limit, updated.expire_time, nodeUser, updated.network, id).run();
+                    context.waitUntil(notifyRealtimeVps(env, db, node.vps_ip).catch(() => {}));
+                    return Response.json({ success: true });
+                }
                 if (enable === false && await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ? AND enable = 1").bind(id).first()) return Response.json({ error: 'Node is used by an enabled internal relay' }, { status: 409 });
                 if (enable === true) {
                     const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, node.port).all();

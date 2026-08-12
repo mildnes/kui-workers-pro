@@ -26,7 +26,7 @@ export function useKuiState() {
                   const refreshing = ref(false);
                   let realtimeSocket = null; let realtimeReconnectTimer = null; let realtimeFallbackTimer = null; let realtimeConnectTimer = null; let realtimePingTimer = null; let realtimeGeneration = 0; let realtimeDisconnectedAt = 0; let lastRealtimePing = 0; let realtimeRetryDelay = 5000;
                   let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeConnectTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
-                  const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
+                  const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const nodeEditDrafts = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
                   const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
                   const batchStartPort = reactive({}); const batchUser = reactive({}); 
                   const thirdPartySubscriptions = ref([]); const newThirdParty = reactive({ name: '', url: '' }); const loadingThirdParty = ref(false);
@@ -640,16 +640,16 @@ export function useKuiState() {
                       }
                   };
 
-                  const addNode = async (ip) => {
-                      const p = newNodeParams[ip]; if(!p.port) return alert('请填写端口!');
+                  const buildNodePayload = (ip, p, id) => {
+                      if (!p.port) { alert('请填写端口!'); return null; }
                       const optionalText = value => String(value || '').trim();
                       const randomSecret = (bytes = 18) => { const value = new Uint8Array(bytes); crypto.getRandomValues(value); return btoa(String.fromCharCode(...value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); };
                       let limitBytes = p.traffic_limit_gb ? Math.floor(parseFloat(p.traffic_limit_gb) * 1073741824) : 0; let expireTs = expiryTimestamp(p.expire_date);
-                      const payload = { id: Date.now().toString(), uuid: optionalText(p.node_uuid) || crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: optionalText(p.sni) };
+                      const payload = { id, uuid: optionalText(p.node_uuid) || crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: optionalText(p.sni) };
                       if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive'].includes(p.protocol) && !payload.sni) payload.sni = 'addons.mozilla.org';
                       if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) {
                           const privateKey = optionalText(p.reality_private_key); const publicKey = optionalText(p.reality_public_key);
-                          if (!!privateKey !== !!publicKey) return alert('Reality 私钥与公钥必须同时填写，或同时留空自动生成');
+                          if (!!privateKey !== !!publicKey) { alert('Reality 私钥与公钥必须同时填写，或同时留空自动生成'); return null; }
                           const keys = privateKey ? { privateKey, publicKey, shortId: optionalText(p.reality_short_id) || crypto.randomUUID().replace(/-/g, '').substring(0, 16) } : generateRealityKeys();
                           payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = optionalText(p.reality_short_id) || keys.shortId;
                       } else if (p.protocol === 'Hysteria2') {
@@ -658,19 +658,46 @@ export function useKuiState() {
                           payload.private_key = optionalText(p.node_password) || randomSecret();
                       } else if (p.protocol === 'Shadowsocks2022') {
                           const method = p.ss_method || '2022-blake3-aes-256-gcm'; const password = optionalText(p.ss_password) || generateSs2022Password(method); const expectedBytes = method.includes('128') ? 16 : 32; let decoded;
-                          try { decoded = atob(password); } catch (_) { return alert('SS2022 密钥必须是有效的 Base64 原始密钥'); }
-                          if (decoded.length !== expectedBytes || btoa(decoded) !== password) return alert(`SS2022 密钥必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`);
+                          try { decoded = atob(password); } catch (_) { alert('SS2022 密钥必须是有效的 Base64 原始密钥'); return null; }
+                          if (decoded.length !== expectedBytes || btoa(decoded) !== password) { alert(`SS2022 密钥必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`); return null; }
                           payload.uuid = method; payload.private_key = password; payload.network = 'tcp';
                       } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') {
                           payload.uuid = optionalText(p.node_uuid) || crypto.randomUUID(); payload.private_key = optionalText(p.node_password) || randomSecret();
                       } else if (p.protocol === 'Naive' || p.protocol === 'Socks5') {
                           payload.uuid = optionalText(p.node_username) || `user_${crypto.randomUUID().replace(/-/g, '').substring(0, 12)}`; payload.private_key = optionalText(p.node_password) || randomSecret();
                       } else if (p.protocol === 'VLESS-Argo') {
-                          payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...';
+                          payload.sni = optionalText(p.sni) || '⏳ 正在等待 VPS 自动回传穿透域名...';
                       } else if (p.protocol === 'dokodemo-door') {
-                          payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) return alert('请填写外部目标地址和端口'); payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) return alert('请选择内部目标节点'); payload.target_id = p.target_id; }
+                          payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) { alert('请填写外部目标地址和端口'); return null; } payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) { alert('请选择内部目标节点'); return null; } payload.target_id = p.target_id; }
                       }
+                      return payload;
+                  };
+
+                  const addNode = async (ip) => {
+                      const payload = buildNodePayload(ip, newNodeParams[ip], Date.now().toString());
+                      if (!payload) return;
                       await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
+                  };
+
+                  const editDraftFromNode = node => ({
+                      protocol: node.protocol, port: Number(node.port), username: node.username === currentUser.value ? 'admin' : node.username, sni: node.sni || '',
+                      node_uuid: ['VLESS', 'XTLS-Reality', 'Reality', 'H2-Reality', 'gRPC-Reality', 'TUIC', 'VLESS-Argo'].includes(node.protocol) ? node.uuid || '' : '',
+                      node_username: ['Naive', 'Socks5'].includes(node.protocol) ? node.uuid || '' : '',
+                      node_password: node.protocol === 'Hysteria2' ? node.uuid || '' : (['TUIC', 'Trojan', 'AnyTLS', 'Naive', 'Socks5'].includes(node.protocol) ? node.private_key || '' : ''),
+                      reality_private_key: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.private_key || '' : '',
+                      reality_public_key: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.public_key || '' : '',
+                      reality_short_id: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.short_id || '' : '',
+                      ss_method: node.protocol === 'Shadowsocks2022' ? node.uuid : '2022-blake3-aes-256-gcm', ss_password: node.protocol === 'Shadowsocks2022' ? node.private_key || '' : '',
+                      relay_type: node.relay_type || 'external', target_ip: node.target_ip || '', target_port: node.target_port || '', target_id: node.target_id || '',
+                      traffic_limit_gb: node.traffic_limit > 0 ? Number((node.traffic_limit / 1073741824).toFixed(3)) : '', expire_date: node.expire_time > 0 ? formatDate(node.expire_time) : '',
+                  });
+                  const startEditNode = node => { nodeEditDrafts[node.id] = editDraftFromNode(node); };
+                  const cancelEditNode = id => { delete nodeEditDrafts[id]; };
+                  const saveNodeEdit = async node => {
+                      const payload = buildNodePayload(node.vps_ip, nodeEditDrafts[node.id], node.id);
+                      if (!payload) return;
+                      await fetchApi('/api/nodes', { method: 'PUT', body: JSON.stringify(payload) });
+                      delete nodeEditDrafts[node.id]; await refreshData();
                   };
                   
                   const deployAllProtocols = async (ip) => {
@@ -1004,8 +1031,8 @@ export function useKuiState() {
 
                   return { 
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, refreshing, refreshPanel,
-                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addVpsModalOpen, addingVps, newVps, newNodeParams, newUser, newGroupName,
-                      login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, deleteNode, toggleNode, resetTraffic,
+                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addVpsModalOpen, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
+                      login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                       probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,

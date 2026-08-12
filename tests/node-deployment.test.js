@@ -6,6 +6,7 @@ import { __test } from '../functions/api/[[path]].js';
 const frontend = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
 const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
 const appStyles = fs.readFileSync(new URL('../frontend/src/styles/app.css', import.meta.url), 'utf8');
+const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 
 const UUID = '11111111-1111-4111-8111-111111111111';
 const REALITY_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -100,7 +101,7 @@ test('single-node form exposes every credential used by supported protocols', ()
 });
 
 test('blank optional credentials receive protocol-safe random defaults', () => {
-    const addNodeSource = frontend.slice(frontend.indexOf('const addNode = async'), frontend.indexOf('const deployAllProtocols'));
+    const addNodeSource = frontend.slice(frontend.indexOf('const buildNodePayload'), frontend.indexOf('const deployAllProtocols'));
     assert.match(addNodeSource, /optionalText\(p\.node_uuid\) \|\| crypto\.randomUUID\(\)/);
     assert.match(addNodeSource, /optionalText\(p\.node_password\) \|\| randomSecret\(\)/);
     assert.match(addNodeSource, /optionalText\(p\.node_username\) \|\| `user_/);
@@ -108,6 +109,47 @@ test('blank optional credentials receive protocol-safe random defaults', () => {
     assert.match(addNodeSource, /privateKey \? \{ privateKey, publicKey/);
     assert.match(addNodeSource, /: generateRealityKeys\(\)/);
     assert.match(addNodeSource, /replace\(\/\\\+\/g, '-'\).*replace\(\/\\\//s);
+});
+
+test('configured nodes expose an inline editor with full protocol fields', () => {
+    assert.match(serversPage, /@click="startEditNode\(node\)">修改<\/button>/);
+    assert.match(serversPage, /v-if="nodeEditDrafts\[node\.id\]" class="kui-node-edit-form"/);
+    assert.match(serversPage, /@click="saveNodeEdit\(node\)">保存并应用<\/button>/);
+    assert.match(serversPage, /@click="cancelEditNode\(node\.id\)">取消/);
+    for (const field of ['protocol', 'port', 'username', 'node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password', 'relay_type', 'target_ip', 'target_port', 'target_id', 'traffic_limit_gb', 'expire_date']) {
+        assert.match(serversPage, new RegExp(`nodeEditDrafts\\[node\\.id\\]\\.${field}`));
+    }
+    assert.match(appStyles, /\.kui-node-edit-form/);
+});
+
+test('node edit drafts preserve existing credentials and save through the validated PUT route', () => {
+    const editSource = frontend.slice(frontend.indexOf('const editDraftFromNode'), frontend.indexOf('const deployAllProtocols'));
+    assert.match(editSource, /username: node\.username === currentUser\.value \? 'admin' : node\.username/);
+    assert.match(editSource, /reality_private_key: \['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'\]\.includes\(node\.protocol\) \? node\.private_key/);
+    assert.match(editSource, /node_password: node\.protocol === 'Hysteria2' \? node\.uuid/);
+    assert.match(editSource, /ss_password: node\.protocol === 'Shadowsocks2022' \? node\.private_key/);
+    assert.match(editSource, /traffic_limit_gb: node\.traffic_limit > 0/);
+    assert.match(editSource, /buildNodePayload\(node\.vps_ip, nodeEditDrafts\[node\.id\], node\.id\)/);
+    assert.match(editSource, /method: 'PUT'/);
+});
+
+test('node update route normalizes the full payload and protects immutable identity and relay dependencies', () => {
+    const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
+    const putStart = api.indexOf('if (method === "PUT")', api.indexOf('if (action === "nodes"'));
+    const putRoute = api.slice(putStart, api.indexOf('if (method === "DELETE")', putStart));
+    assert.match(putRoute, /normalizeNodePayload\(\{ \.\.\.body, id: node\.id, vps_ip: node\.vps_ip \}\)/);
+    assert.match(putRoute, /nodeListenerConflicts\(listeners, updated\)/);
+    assert.match(putRoute, /Node is used by an internal relay and must keep a supported target protocol/);
+    assert.match(putRoute, /Internal relay cannot target itself/);
+    assert.match(putRoute, /UPDATE nodes SET uuid = \?, protocol = \?, port = \?/);
+    assert.doesNotMatch(putRoute, /SET id =|SET vps_ip =/);
+});
+
+test('changing a TLS node SNI invalidates its cached certificate', () => {
+    assert.match(agent, /f"\/opt\/kui\/cert_\{node\['id'\]\}\.sni"/);
+    assert.match(agent, /if previous_sni != sni:/);
+    assert.match(agent, /for stale_path in \(cert_path, key_path\):/);
+    assert.match(agent, /with open\(sni_path, "w"\) as marker: marker\.write\(sni\)/);
 });
 
 test('integrated Worker notifies the connected VPS agent directly', async () => {
