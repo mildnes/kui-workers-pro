@@ -171,3 +171,18 @@ test('egress panel sits directly below traffic trend and outside node management
     const toolsSection = serversPage.slice(tools, serversPage.indexOf('kui-node-list-section'));
     assert.doesNotMatch(toolsSection, /kui-egress-panel|节点出口/);
 });
+
+test('egress panel uses the same neutral palette and controls as adjacent server modules', () => {
+    const start = serversPage.indexOf('kui-egress-panel');
+    const panel = serversPage.slice(start, serversPage.indexOf('<details class="kui-server-tools">', start));
+    assert.ok(start >= 0);
+    for (const className of ['kui-egress-heading', 'kui-egress-description', 'kui-egress-control', 'kui-egress-mode-button', 'kui-egress-category-button', 'kui-egress-retry']) {
+        assert.match(panel, new RegExp(className));
+        assert.match(appStyles, new RegExp(`\\.${className}`));
+    }
+    assert.doesNotMatch(panel, /bg-sky-50|border-sky-|text-sky-|bg-sky-600/);
+    assert.match(appStyles, /\.kui-egress-panel \{ border: 1px solid #d7dfeb;[\s\S]*background: rgba\(248,250,252,\.92\)/);
+    assert.match(appStyles, /\.kui-egress-mode-button\.is-active[\s\S]*background: #4f46e5/);
+    assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-egress-panel/);
+    assert.match(appStyles, /data-kui-theme="dark"[\s\S]*\.kui-egress-control/);
+});

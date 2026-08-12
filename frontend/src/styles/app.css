@@ -123,7 +123,17 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-node-protocol-note { margin-top: 8px; border-top: 1px dashed #e2e8f0; padding: 8px 2px 0; color: #64748b; font-size: 9px; font-weight: 700; }
 .kui-node-submit { width: 100%; margin-top: 9px; background: #1e293b; }
 .kui-node-submit:hover { background: #0f172a; }
-.kui-egress-panel { border-color: #bae6fd !important; box-shadow: 0 1px 3px rgba(14,116,144,.07); }
+.kui-egress-panel { border: 1px solid #d7dfeb; border-radius: 16px; padding: 14px; background: rgba(248,250,252,.92); box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+.kui-egress-heading { color: #334155; font-size: 12px; font-weight: 850; letter-spacing: .04em; }
+.kui-egress-description { color: #94a3b8; font-size: 10px; font-weight: 650; }
+.kui-egress-control { box-sizing: border-box; min-height: 40px; border: 1px solid #d7dfeb; border-radius: 10px; padding: 0 11px; color: #334155; background: #fff; outline: none; font-size: 12px; font-weight: 700; }
+.kui-egress-control:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
+.kui-egress-mode-button, .kui-egress-category-button, .kui-egress-retry { border: 1px solid #d7dfeb; color: #475569; background: #fff; font-weight: 800; transition: .15s ease; }
+.kui-egress-mode-button { min-height: 36px; border-radius: 10px; padding: 0 12px; font-size: 11px; }
+.kui-egress-category-button { min-height: 30px; border-radius: 8px; padding: 0 11px; font-size: 10px; }
+.kui-egress-mode-button:hover, .kui-egress-category-button:hover, .kui-egress-retry:hover { border-color: #a5b4fc; color: #4338ca; background: #eef2ff; }
+.kui-egress-mode-button.is-active, .kui-egress-category-button.is-active { border-color: #4f46e5; color: #fff; background: #4f46e5; box-shadow: 0 3px 10px rgba(79,70,229,.16); }
+.kui-egress-retry { min-height: 36px; border-radius: 10px; padding: 0 12px; font-size: 11px; }
 .kui-node-list-section { border-color: #d7dfeb !important; background: #f8fafc !important; }
 .kui-node-card { overflow: hidden; border: 1px solid #d7dfeb !important; border-radius: 14px; background: #fff !important; box-shadow: 0 1px 3px rgba(15,23,42,.06); transition: border-color .15s ease, box-shadow .15s ease; }
 .kui-node-card[open] { border-color: #c7d2fe !important; box-shadow: 0 7px 20px rgba(15,23,42,.08); }
@@ -275,6 +285,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 :root[data-kui-theme="dark"] .kui-server-card > * + * { border-top-color: var(--kui-color-border) !important; }
 :root[data-kui-theme="dark"] .kui-server-metric,
 :root[data-kui-theme="dark"] .kui-server-chart,
+:root[data-kui-theme="dark"] .kui-egress-panel,
 :root[data-kui-theme="dark"] .kui-quick-deploy-panel,
 :root[data-kui-theme="dark"] .kui-node-deploy-panel,
 :root[data-kui-theme="dark"] .kui-node-list-section,
@@ -287,6 +298,17 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 :root[data-kui-theme="dark"] .kui-node-summary-protocol,
 :root[data-kui-theme="dark"] .kui-node-details-heading strong,
 :root[data-kui-theme="dark"] .kui-node-detail-grid dd { color: var(--kui-color-text-soft); }
+:root[data-kui-theme="dark"] .kui-egress-heading { color: var(--kui-color-text-soft); }
+:root[data-kui-theme="dark"] .kui-egress-description { color: var(--kui-color-subtle); }
+:root[data-kui-theme="dark"] .kui-egress-control { border-color: var(--kui-color-border-strong); color: var(--kui-color-text); background: var(--kui-color-surface-solid); }
+:root[data-kui-theme="dark"] .kui-egress-mode-button,
+:root[data-kui-theme="dark"] .kui-egress-category-button,
+:root[data-kui-theme="dark"] .kui-egress-retry { border-color: var(--kui-color-border-strong); color: var(--kui-color-text-soft); background: var(--kui-color-surface-raised); }
+:root[data-kui-theme="dark"] .kui-egress-mode-button:hover,
+:root[data-kui-theme="dark"] .kui-egress-category-button:hover,
+:root[data-kui-theme="dark"] .kui-egress-retry:hover { border-color: #6366f1; color: #c7d2fe; background: var(--kui-color-primary-soft); }
+:root[data-kui-theme="dark"] .kui-egress-mode-button.is-active,
+:root[data-kui-theme="dark"] .kui-egress-category-button.is-active { border-color: #6366f1; color: #fff; background: #4f46e5; }
 :root[data-kui-theme="dark"] .kui-node-actions button,
 :root[data-kui-theme="dark"] .kui-node-edit-actions button,
 :root[data-kui-theme="dark"] .kui-node-export-actions button,
