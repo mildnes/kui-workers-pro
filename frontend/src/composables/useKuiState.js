@@ -442,8 +442,7 @@ export function useKuiState() {
                           proxyPublicListenerManageable.value = data.proxyPublicListenerManageable !== false;
                           if (data.realtimeUrl && data.realtimeUrl !== realtimeUrl.value) { realtimeUrl.value = data.realtimeUrl; connectRealtime(); }
                           servers.value.forEach(s => { 
-                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', ss_method: '2022-blake3-aes-256-gcm', ss_password: generateSs2022Password(), relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
-                              if (!newNodeParams[s.ip].ss_password) newNodeParams[s.ip].ss_password = generateSs2022Password(newNodeParams[s.ip].ss_method);
+                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', node_uuid: '', node_username: '', node_password: '', reality_private_key: '', reality_public_key: '', reality_short_id: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: '', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                               if ((s.egress_mode === 'socks5' || s.socks5_addr) && s._socks5_addr === undefined) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = ''; s._socks5_clear_password = false; }
                           });
@@ -643,10 +642,34 @@ export function useKuiState() {
 
                   const addNode = async (ip) => {
                       const p = newNodeParams[ip]; if(!p.port) return alert('请填写端口!');
+                      const optionalText = value => String(value || '').trim();
+                      const randomSecret = (bytes = 18) => { const value = new Uint8Array(bytes); crypto.getRandomValues(value); return btoa(String.fromCharCode(...value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); };
                       let limitBytes = p.traffic_limit_gb ? Math.floor(parseFloat(p.traffic_limit_gb) * 1073741824) : 0; let expireTs = expiryTimestamp(p.expire_date);
-                      const payload = { id: Date.now().toString(), uuid: crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: p.sni || '' };
+                      const payload = { id: Date.now().toString(), uuid: optionalText(p.node_uuid) || crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: optionalText(p.sni) };
                       if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive'].includes(p.protocol) && !payload.sni) payload.sni = 'addons.mozilla.org';
-                      if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) { const keys = generateRealityKeys(); payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } else if (p.protocol === 'TUIC') { payload.private_key = crypto.randomUUID().replace(/-/g, ''); } else if (p.protocol === 'Shadowsocks2022') { const method = p.ss_method || '2022-blake3-aes-256-gcm'; const password = String(p.ss_password || '').trim(); const expectedBytes = method.includes('128') ? 16 : 32; let decoded; try { decoded = atob(password); } catch (_) { return alert('SS2022 密码必须是有效的 Base64 原始密钥'); } if (decoded.length !== expectedBytes || btoa(decoded) !== password) return alert(`SS2022 密码必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`); payload.uuid = method; payload.private_key = password; payload.network = 'tcp'; } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') { const array = new Uint8Array(16); crypto.getRandomValues(array); payload.private_key = btoa(String.fromCharCode.apply(null, array)); } else if (p.protocol === 'Naive') { payload.uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 16); payload.private_key = payload.uuid; } else if (p.protocol === 'VLESS-Argo') { payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...'; } else if (p.protocol === 'dokodemo-door') { payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) return alert('请填写外部目标地址和端口'); payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) return alert('请选择内部目标节点'); payload.target_id = p.target_id; } }
+                      if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) {
+                          const privateKey = optionalText(p.reality_private_key); const publicKey = optionalText(p.reality_public_key);
+                          if (!!privateKey !== !!publicKey) return alert('Reality 私钥与公钥必须同时填写，或同时留空自动生成');
+                          const keys = privateKey ? { privateKey, publicKey, shortId: optionalText(p.reality_short_id) || crypto.randomUUID().replace(/-/g, '').substring(0, 16) } : generateRealityKeys();
+                          payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = optionalText(p.reality_short_id) || keys.shortId;
+                      } else if (p.protocol === 'Hysteria2') {
+                          payload.uuid = optionalText(p.node_password) || randomSecret();
+                      } else if (p.protocol === 'TUIC') {
+                          payload.private_key = optionalText(p.node_password) || randomSecret();
+                      } else if (p.protocol === 'Shadowsocks2022') {
+                          const method = p.ss_method || '2022-blake3-aes-256-gcm'; const password = optionalText(p.ss_password) || generateSs2022Password(method); const expectedBytes = method.includes('128') ? 16 : 32; let decoded;
+                          try { decoded = atob(password); } catch (_) { return alert('SS2022 密钥必须是有效的 Base64 原始密钥'); }
+                          if (decoded.length !== expectedBytes || btoa(decoded) !== password) return alert(`SS2022 密钥必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`);
+                          payload.uuid = method; payload.private_key = password; payload.network = 'tcp';
+                      } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') {
+                          payload.uuid = optionalText(p.node_uuid) || crypto.randomUUID(); payload.private_key = optionalText(p.node_password) || randomSecret();
+                      } else if (p.protocol === 'Naive' || p.protocol === 'Socks5') {
+                          payload.uuid = optionalText(p.node_username) || `user_${crypto.randomUUID().replace(/-/g, '').substring(0, 12)}`; payload.private_key = optionalText(p.node_password) || randomSecret();
+                      } else if (p.protocol === 'VLESS-Argo') {
+                          payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...';
+                      } else if (p.protocol === 'dokodemo-door') {
+                          payload.relay_type = p.relay_type; if (p.relay_type === 'external') { if (!p.target_ip || !p.target_port) return alert('请填写外部目标地址和端口'); payload.target_ip = p.target_ip; payload.target_port = p.target_port; } else { if (!p.target_id) return alert('请选择内部目标节点'); payload.target_id = p.target_id; }
+                      }
                       await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
                   };
                   

@@ -120,6 +120,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-node-input-action { display: flex; min-width: 0; gap: 6px; }
 .kui-node-input-action input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 .kui-node-input-action button { flex: 0 0 auto; min-height: 36px; border: 1px solid #c7d2fe; border-radius: 9px; padding: 0 10px; color: #4f46e5; background: #eef2ff; font-size: 10px; font-weight: 800; }
+.kui-node-protocol-note { margin-top: 8px; border-top: 1px dashed #e2e8f0; padding: 8px 2px 0; color: #64748b; font-size: 9px; font-weight: 700; }
 .kui-node-submit { width: 100%; margin-top: 9px; background: #1e293b; }
 .kui-node-submit:hover { background: #0f172a; }
 .kui-egress-panel { border-color: #bae6fd !important; box-shadow: 0 1px 3px rgba(14,116,144,.07); }

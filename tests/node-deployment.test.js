@@ -27,6 +27,27 @@ test('single-node payloads normalize fields needed by sing-box', () => {
     assert.equal(normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 })).target_ip, 'relay.example.com');
 });
 
+test('every protocol offered by the single-node form reaches a valid normalized payload', () => {
+    const { normalizeNodePayload } = __test;
+    const ssKey = Buffer.alloc(32, 7).toString('base64');
+    const cases = [
+        baseNode('VLESS'),
+        baseNode('XTLS-Reality', { private_key: REALITY_KEY, public_key: REALITY_KEY, short_id: 'aabbccdd' }),
+        baseNode('Hysteria2', { uuid: 'custom-hysteria-password' }),
+        baseNode('TUIC', { private_key: 'custom-tuic-password' }),
+        baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey }),
+        baseNode('Trojan', { uuid: 'metadata', private_key: 'custom-trojan-password' }),
+        baseNode('H2-Reality', { private_key: REALITY_KEY, public_key: REALITY_KEY, short_id: 'aabbccdd' }),
+        baseNode('gRPC-Reality', { private_key: REALITY_KEY, public_key: REALITY_KEY, short_id: 'aabbccdd' }),
+        baseNode('AnyTLS', { uuid: 'metadata', private_key: 'custom-anytls-password' }),
+        baseNode('Naive', { uuid: 'custom-user', private_key: 'custom-naive-password' }),
+        baseNode('Socks5', { uuid: 'custom-user', private_key: 'custom-socks-password' }),
+        baseNode('VLESS-Argo'),
+        baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 }),
+    ];
+    for (const payload of cases) assert.equal(normalizeNodePayload(payload).protocol, payload.protocol);
+});
+
 test('invalid credentials and incomplete relay records are rejected before storage', () => {
     const { normalizeNodePayload } = __test;
     assert.throws(() => normalizeNodePayload(baseNode('XTLS-Reality', { private_key: '', public_key: REALITY_KEY, short_id: 'aabbccdd' })), /private key/i);
@@ -58,11 +79,35 @@ test('node forms stay compact and mark required fields explicitly', () => {
     assert.ok(requiredLabels.length >= 10);
     assert.match(serversPage, /归属用户 <b class="kui-required">\*<\/b>/);
     assert.match(serversPage, /端口 <b class="kui-required">\*<\/b>/);
-    assert.match(serversPage, /Reality 伪装域名 <b class="kui-required">\*<\/b>/);
+    assert.match(serversPage, /Reality 伪装域名 <em>留空使用默认<\/em>/);
     assert.match(serversPage, /目标节点 <b class="kui-required">\*<\/b>/);
     assert.match(serversPage, /class="kui-node-form-grid kui-node-form-primary"/);
     assert.match(appStyles, /min-height: 36px !important/);
     assert.match(appStyles, /min-height: 44px !important/);
+});
+
+test('single-node form exposes every credential used by supported protocols', () => {
+    for (const protocol of ['VLESS', 'XTLS-Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']) {
+        assert.match(serversPage, new RegExp(`value="${protocol}"`));
+    }
+    for (const model of ['node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password']) {
+        assert.match(serversPage, new RegExp(`newNodeParams\\[vps\\.ip\\]\\.${model}`));
+    }
+    assert.match(serversPage, /Reality 私钥/);
+    assert.match(serversPage, /Reality 公钥/);
+    assert.match(serversPage, /留空随机生成/);
+    assert.match(serversPage, /公网域名由 VPS 建立 Argo 隧道后自动回传/);
+});
+
+test('blank optional credentials receive protocol-safe random defaults', () => {
+    const addNodeSource = frontend.slice(frontend.indexOf('const addNode = async'), frontend.indexOf('const deployAllProtocols'));
+    assert.match(addNodeSource, /optionalText\(p\.node_uuid\) \|\| crypto\.randomUUID\(\)/);
+    assert.match(addNodeSource, /optionalText\(p\.node_password\) \|\| randomSecret\(\)/);
+    assert.match(addNodeSource, /optionalText\(p\.node_username\) \|\| `user_/);
+    assert.match(addNodeSource, /optionalText\(p\.ss_password\) \|\| generateSs2022Password\(method\)/);
+    assert.match(addNodeSource, /privateKey \? \{ privateKey, publicKey/);
+    assert.match(addNodeSource, /: generateRealityKeys\(\)/);
+    assert.match(addNodeSource, /replace\(\/\\\+\/g, '-'\).*replace\(\/\\\//s);
 });
 
 test('integrated Worker notifies the connected VPS agent directly', async () => {
