@@ -91,3 +91,14 @@ test('deployment command frame is collapsed by default and contains all three ac
     assert.match(deployPanel, /copyPurgeCommand\(vps\)/);
     assert.match(appStyles, /\.kui-deploy-panel-body \{ padding:/);
 });
+
+test('egress panel sits directly below traffic trend and outside node management', () => {
+    const chart = serversPage.indexOf('kui-server-chart');
+    const egress = serversPage.indexOf('kui-egress-panel');
+    const tools = serversPage.indexOf('<details class="kui-server-tools">');
+    assert.ok(chart >= 0 && chart < egress && egress < tools);
+    const betweenChartAndEgress = serversPage.slice(chart, egress);
+    assert.doesNotMatch(betweenChartAndEgress, /kui-server-tools|kui-node-deploy-panel/);
+    const toolsSection = serversPage.slice(tools, serversPage.indexOf('kui-node-list-section'));
+    assert.doesNotMatch(toolsSection, /kui-egress-panel|节点出口/);
+});
