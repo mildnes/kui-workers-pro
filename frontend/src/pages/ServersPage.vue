@@ -104,8 +104,10 @@
                                       <span v-else>● 等待 VPS 上线后同步</span>
                                       <div v-if="vps.egress_status === 'pending'" class="mt-1 text-slate-500">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；目标：{{ egressModeLabel(vps.egress_mode) }}</div>
                                       <div v-else-if="vps.egress_status === 'failed'" class="mt-1">当前出口：{{ egressModeLabel(vps.egress_applied_mode) }}；原因：{{ vps.egress_error || '未知错误' }}</div>
-                                      <div v-if="vps.egress_status === 'applied' && vps.egress_ip" class="mt-1 text-slate-500">配置应用时验证出口：<span class="font-mono text-indigo-500">{{ vps.egress_ip }}</span></div>
-                                      <div v-if="vps.egress_status === 'applied'" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }}</div>
+                                      <div v-if="vps.egress_status === 'applied'" class="mt-1 flex items-end justify-between gap-3 text-slate-500">
+                                          <span class="min-w-0 flex-1">配置应用时验证出口：<span class="break-all font-mono text-indigo-500">{{ vps.egress_ip || '--' }}</span></span>
+                                          <span class="ml-auto whitespace-nowrap font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }}</span>
+                                      </div>
                                       <div v-else-if="vps.egress_status === 'pending'" class="mt-1 font-mono text-slate-400">版本 {{ vps.egress_applied_revision || 0 }} → {{ vps.egress_revision || 0 }}</div>
                                       <div v-else class="mt-1 font-mono text-slate-400">当前版本 {{ vps.egress_applied_revision || 0 }}，目标版本 {{ vps.egress_revision || 0 }}</div>
                                   </div>

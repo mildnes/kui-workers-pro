@@ -127,6 +127,7 @@ def _controller_json_request(url, *, data=None, headers=None, method=None):
     raise last_error
 
 last_reported_bytes = {}
+last_reported_system_bytes = None
 argo_tunnels = {}
 prev_cpu_total = prev_cpu_idle = 0
 prev_rx = prev_tx = 0
@@ -464,13 +465,22 @@ dynamic_ping = {"ct": None, "cu": None, "cm": None}
 pending_report_id = None
 pending_report_bytes = None
 pending_node_traffic = None
+pending_system_bytes = None
 pending_report_payload = None
 _traffic_state = _load_traffic_state()
 last_reported_bytes = {str(k): int(v) for k, v in (_traffic_state.get("last_reported_bytes") or {}).items()}
+try:
+    last_reported_system_bytes = max(0, int(_traffic_state["last_reported_system_bytes"])) if _traffic_state.get("last_reported_system_bytes") is not None else None
+except (TypeError, ValueError):
+    last_reported_system_bytes = None
 _pending = _traffic_state.get("pending") or {}
 pending_report_id = _pending.get("report_id")
 pending_report_bytes = _pending.get("report_bytes")
 pending_node_traffic = _pending.get("node_traffic")
+try:
+    pending_system_bytes = max(0, int(_pending["system_bytes"])) if _pending.get("system_bytes") is not None else None
+except (TypeError, ValueError):
+    pending_system_bytes = None
 pending_report_payload = _pending.get("payload")
 egress_retry_timer = None
 egress_retry_lock = threading.Lock()
@@ -1131,7 +1141,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             except OSError: pass
 
 def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
-    global last_reported_bytes, global_interval, fast_mode, dynamic_ping, pending_report_id, pending_report_bytes, pending_node_traffic, pending_report_payload, last_http_report
+    global last_reported_bytes, last_reported_system_bytes, global_interval, fast_mode, dynamic_ping, pending_report_id, pending_report_bytes, pending_node_traffic, pending_system_bytes, pending_report_payload, last_http_report
     status = get_system_status(global_interval)
     status["ip"] = VPS_IP
     status["argo_urls"] = argo_urls
@@ -1158,9 +1168,26 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
     if pending_report_payload is None:
         pending_report_bytes = {k: v for k, v in pending_bytes.items() if k in current_ids}
         pending_node_traffic = deltas
+        current_system_bytes = max(0, int(status.get("net_rx") or 0)) + max(0, int(status.get("net_tx") or 0))
+        if last_reported_system_bytes is None:
+            system_traffic_delta = 0
+            # Zero may mean the default-route lookup failed. Wait for a real
+            # counter before establishing the initial baseline.
+            pending_system_bytes = current_system_bytes if current_system_bytes > 0 else None
+        elif current_system_bytes == 0 and last_reported_system_bytes > 0:
+            # A transient default-route lookup failure returns zero. Keep the
+            # acknowledged baseline so the next healthy sample cannot double count.
+            system_traffic_delta = 0
+            pending_system_bytes = last_reported_system_bytes
+        else:
+            system_traffic_delta = current_system_bytes - last_reported_system_bytes if current_system_bytes >= last_reported_system_bytes else current_system_bytes
+            pending_system_bytes = current_system_bytes
+    else:
+        system_traffic_delta = max(0, int(pending_report_payload.get("system_traffic_delta") or 0))
     status["node_traffic"] = pending_node_traffic
+    status["system_traffic_delta"] = system_traffic_delta
     status["report_id"] = pending_report_id
-    _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "pending": {"report_id": pending_report_id, "report_bytes": pending_report_bytes, "node_traffic": pending_node_traffic, "payload": pending_report_payload}})
+    _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "last_reported_system_bytes": last_reported_system_bytes, "pending": {"report_id": pending_report_id, "report_bytes": pending_report_bytes, "node_traffic": pending_node_traffic, "system_bytes": pending_system_bytes, "payload": pending_report_payload}})
 
     websocket_sent = realtime_channel.send(status) if realtime_channel and realtime_channel.connected else False
     if websocket_sent and not force_http and time.time() - last_http_report < REALTIME_HTTP_INTERVAL:
@@ -1174,17 +1201,20 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
         if pending_report_payload is None:
             pending_report_payload = dict(status)
             pending_report_payload["node_traffic"] = list(pending_node_traffic or [])
-            _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "pending": {"report_id": pending_report_id, "report_bytes": pending_report_bytes, "node_traffic": pending_node_traffic, "payload": pending_report_payload}})
+            _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "last_reported_system_bytes": last_reported_system_bytes, "pending": {"report_id": pending_report_id, "report_bytes": pending_report_bytes, "node_traffic": pending_node_traffic, "system_bytes": pending_system_bytes, "payload": pending_report_payload}})
         req = urllib.request.Request(REPORT_URL, data=json.dumps(pending_report_payload).encode(), headers=HEADERS)
         with urllib.request.urlopen(req, timeout=20) as response:
             resp_data = json.loads(response.read().decode('utf-8'))
         last_reported_bytes = pending_report_bytes
+        if pending_system_bytes is not None:
+            last_reported_system_bytes = pending_system_bytes
         pending_report_id = None
         pending_report_bytes = None
         pending_node_traffic = None
+        pending_system_bytes = None
         pending_report_payload = None
         last_http_report = time.time()
-        _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "pending": None})
+        _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "last_reported_system_bytes": last_reported_system_bytes, "pending": None})
         if resp_data and "interval" in resp_data:
             global_interval = min(max(1, int(resp_data["interval"])), 3600)
         new_fast_mode = bool(resp_data.get("fast_mode"))

@@ -107,7 +107,24 @@ function validateTrafficReport(data) {
         ids.add(entry.id); total += entry.delta_bytes;
         if (!Number.isSafeInteger(total) || total > MAX_REPORT_DELTA_BYTES) throw new Error('Traffic report exceeds limit');
     }
-    return { ...data, node_traffic: entries, total_delta: total };
+    const rawSystemDelta = data.system_traffic_delta === undefined ? total : data.system_traffic_delta;
+    if (!Number.isSafeInteger(rawSystemDelta) || rawSystemDelta < 0 || rawSystemDelta > MAX_REPORT_DELTA_BYTES) throw new Error('Invalid system traffic delta');
+    return { ...data, node_traffic: entries, total_delta: total, system_traffic_delta: rawSystemDelta };
+}
+
+function buildSevenDayTrafficSeries(rows, nowMs = Date.now()) {
+    const totals = new Map((rows || []).map(row => [String(row.day || ''), Math.max(0, Number(row.total_bytes) || 0)]));
+    const shanghaiNow = nowMs + 8 * 60 * 60 * 1000;
+    const series = [];
+    for (let offset = 6; offset >= 0; offset -= 1) {
+        const date = new Date(shanghaiNow - offset * 24 * 60 * 60 * 1000);
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(date.getUTCDate()).padStart(2, '0');
+        const key = `${year}-${month}-${day}`;
+        series.push({ day: `${month}-${day}`, total_bytes: totals.get(key) || 0 });
+    }
+    return series;
 }
 
 function validateProxyReport(data) {
@@ -1302,7 +1319,7 @@ export async function onRequest(context) {
             }
         }
         if (data.argo_urls && data.argo_urls.length > 0) { for (let argo of data.argo_urls) { stmts.push(db.prepare("UPDATE nodes SET sni = ? WHERE id = ? AND vps_ip = ? AND protocol = 'VLESS-Argo' AND sni != ?").bind(argo.url, argo.id, vpsIp, argo.url)); } }
-        if (!duplicateReport && totalDelta > 0) stmts.push(db.prepare("INSERT INTO traffic_stats (ip, delta_bytes, timestamp) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM report_receipts WHERE report_id = ? AND applied = 0)").bind(vpsIp, totalDelta, nowMs, data.report_id));
+        if (!duplicateReport && data.system_traffic_delta > 0) stmts.push(db.prepare("INSERT INTO traffic_stats (ip, delta_bytes, timestamp) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM report_receipts WHERE report_id = ? AND applied = 0)").bind(vpsIp, data.system_traffic_delta, nowMs, data.report_id));
         if (!duplicateReport) stmts.push(db.prepare("UPDATE report_receipts SET applied = 1 WHERE report_id = ? AND applied = 0").bind(data.report_id));
         if (stmts.length > 0) {
             await db.batch(stmts);
@@ -1881,7 +1898,33 @@ rules:
         }
         if (action === "user" && params.path[1] === "password" && method === "PUT") { const { password } = await readJsonBody(request, 8 * 1024); if (isAdmin) return Response.json({error: "管理员密码受绝对安全保护，仅可通过 Cloudflare Pages 环境变量修改！"}, {status: 400}); if (String(password || '').length < 12) return Response.json({ error: 'Password must be at least 12 characters' }, { status: 400 }); await db.batch([db.prepare("UPDATE users SET password = ? WHERE username = ?").bind(await passwordHash(password), currentUser), db.prepare("DELETE FROM auth_sessions WHERE username = ?").bind(currentUser)]); return Response.json({ success: true }); }
         if (action === "user" && params.path[1] === "sub_token" && method === "PUT") { const newToken = crypto.randomUUID(); if (isAdmin) await db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('admin_sub_token', ?, ?)").bind(newToken, Date.now()).run(); else await db.prepare("UPDATE users SET sub_token = ? WHERE username = ?").bind(newToken, currentUser).run(); return Response.json({ success: true, token: newToken }); }
-        if (action === "stats" && method === "GET" && isAdmin) { const query = `SELECT strftime('%m-%d', datetime(timestamp / 1000, 'unixepoch', 'localtime')) as day, SUM(delta_bytes) as total_bytes FROM traffic_stats WHERE ip = ? AND timestamp > ? GROUP BY day ORDER BY day ASC`; const { results } = await db.prepare(query).bind(new URL(request.url).searchParams.get("ip"), Date.now() - 604800000).all(); return Response.json(results || []); }
+        if (action === "stats" && method === "GET" && isAdmin) {
+            const url = new URL(request.url);
+            const requestedIp = url.searchParams.get("ip");
+            const nowMs = Date.now();
+            const shanghaiNow = new Date(nowMs + 8 * 60 * 60 * 1000);
+            const shanghaiTodayStart = Date.UTC(shanghaiNow.getUTCFullYear(), shanghaiNow.getUTCMonth(), shanghaiNow.getUTCDate()) - 8 * 60 * 60 * 1000;
+            const cutoff = shanghaiTodayStart - 6 * 24 * 60 * 60 * 1000;
+            if (requestedIp) {
+                if (!validIp(requestedIp)) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 });
+                const { results } = await db.prepare(`SELECT strftime('%Y-%m-%d', datetime(timestamp / 1000, 'unixepoch', '+8 hours')) AS day, SUM(delta_bytes) AS total_bytes FROM traffic_stats WHERE ip = ? AND timestamp >= ? GROUP BY day ORDER BY day ASC`).bind(requestedIp, cutoff).all();
+                return Response.json(buildSevenDayTrafficSeries(results));
+            }
+            const [totalsResult, dailyResult] = await db.batch([
+                db.prepare('SELECT s.ip, COALESCE(SUM(t.delta_bytes), 0) AS total_bytes FROM servers s LEFT JOIN traffic_stats t ON t.ip = s.ip GROUP BY s.ip'),
+                db.prepare(`SELECT ip, strftime('%Y-%m-%d', datetime(timestamp / 1000, 'unixepoch', '+8 hours')) AS day, SUM(delta_bytes) AS total_bytes FROM traffic_stats WHERE timestamp >= ? GROUP BY ip, day ORDER BY day ASC`).bind(cutoff),
+            ]);
+            const dailyByIp = new Map();
+            for (const row of dailyResult.results || []) {
+                if (!dailyByIp.has(row.ip)) dailyByIp.set(row.ip, []);
+                dailyByIp.get(row.ip).push(row);
+            }
+            const ips = new Set((totalsResult.results || []).map(row => row.ip));
+            return Response.json({
+                totals: Object.fromEntries((totalsResult.results || []).map(row => [row.ip, Math.max(0, Number(row.total_bytes) || 0)])),
+                series: Object.fromEntries([...ips].map(ip => [ip, buildSevenDayTrafficSeries(dailyByIp.get(ip) || [])])),
+            });
+        }
         
         if (action === "users" && isAdmin) {
             if (method === "POST") { const { username, password, traffic_limit, expire_time } = await readJsonBody(request, 16 * 1024); const safeUser = String(username || '').trim(); if (!/^[A-Za-z0-9_.-]{1,64}$/.test(safeUser) || safeUser === (env.ADMIN_USERNAME || 'admin')) return Response.json({ error: 'Invalid or reserved username' }, { status: 400 }); if (String(password || '').length < 12) return Response.json({ error: 'Password must be at least 12 characters' }, { status: 400 }); if (await db.prepare("SELECT username FROM users WHERE username = ?").bind(safeUser).first()) return Response.json({ error: "User already exists" }, { status: 409 }); const hash = await passwordHash(password); const subToken = crypto.randomUUID(); await db.prepare("INSERT INTO users (username, password, traffic_limit, expire_time, sub_token) VALUES (?, ?, ?, ?, ?)").bind(safeUser, hash, Math.max(0, Number(traffic_limit)||0), Math.max(0, Number(expire_time)||0), subToken).run(); return Response.json({ success: true }); }
@@ -2006,9 +2049,11 @@ export async function onRequestScheduled(context) {
 }
 
 export const __test = {
+    buildSevenDayTrafficSeries,
     buildSurgeProxyLine,
     validateSs2022Credentials,
     sanitizeProxyListenHost,
     validateProxyReport,
+    validateTrafficReport,
     proxyPublicListenerEnabled,
 };

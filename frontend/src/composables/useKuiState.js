@@ -16,6 +16,8 @@ export function useKuiState() {
                   const currentDomain = window.location.origin;
 
                   const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);
+                  const trafficTotals = ref({}); const trafficSeries = ref({});
+                  let trafficFetchPromise = null; let trafficStatsLastFetchedAt = 0;
                   const proxyCredentialsReady = ref(false); const proxyPublicListenerManageable = ref(true); const publicListenerSaving = reactive({});
                   const realtimeUrl = ref('');
                   const realtimeConnected = ref(false);
@@ -59,7 +61,7 @@ export function useKuiState() {
                   
                   const showWelcomePopup = ref(false);
 
-                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') { updateCustomStyles(); updateCustomScript(probeSys.custom_script); } else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); document.getElementById('kui-custom-head')?.remove(); updateCustomScript(''); } });
+                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') { updateCustomStyles(); updateCustomScript(probeSys.custom_script); } else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); document.getElementById('kui-custom-head')?.remove(); updateCustomScript(''); } });
                   watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
 
                   const hasCustomCssFlag = computed(() => {
@@ -185,7 +187,7 @@ export function useKuiState() {
                   const getPingColor = (ping) => { const p = parseInt(ping); if (p === 0 || isNaN(p)) return '#9ca3af'; if (p < 100) return '#10b981'; if (p < 200) return '#f59e0b'; return '#ef4444'; };
 
                   const globalOnline = computed(() => servers.value.filter(s => isOnline(s.last_report, s.realtime_state)).length);
-                  const globalTraffic = computed(() => nodes.value.reduce((sum, n) => sum + (parseFloat(n.traffic_used) || 0), 0));
+                  const globalTraffic = computed(() => Object.values(trafficTotals.value).reduce((sum, total) => sum + (Number(total) || 0), 0));
                   const globalSpeedIn = computed(() => servers.value.reduce((sum, s) => sum + (parseFloat(s.net_in_speed) || 0), 0));
                   const globalSpeedOut = computed(() => servers.value.reduce((sum, s) => sum + (parseFloat(s.net_out_speed) || 0), 0));
 
@@ -265,7 +267,7 @@ export function useKuiState() {
                       }
                   };
                   
-                  const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
+                  const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; trafficTotals.value = {}; trafficSeries.value = {}; trafficStatsLastFetchedAt = 0; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
                   const logout = () => { const token = authKey.value; if (token) fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, keepalive: true }).catch(() => {}); authGeneration++; sessionStorage.removeItem('kui_auth_key'); sessionStorage.removeItem('kui_user'); sessionStorage.removeItem('kui_role'); isLoggedIn.value = false; currentUser.value = ''; authKey.value = ''; clearPrivateState(); activeTab.value = 'probe'; realtimeGeneration++; realtimeDisconnectedAt = 0; clearTimeout(realtimeFallbackTimer); clearTimeout(realtimeReconnectTimer); clearTimeout(realtimeConnectTimer); clearInterval(realtimePingTimer); const socket = realtimeSocket; realtimeSocket = null; socket?.close(); realtimeConnected.value = false; window.kuiRealtimeConnected = false; stopPolling(); startProbePolling();};
                   const sendUiPing = async () => { try { await fetchApi('/api/ui_ping', { method: 'POST' }); } catch(e) {} };
 
@@ -434,7 +436,7 @@ export function useKuiState() {
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                               if (s.egress_mode === 'socks5' || s.socks5_addr) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = s.socks5_pass || ''; }
                           });
-                      if (activeTab.value === 'nodes') renderKUICharts();
+                      if (activeTab.value === 'nodes' && !throwOnError) await loadTrafficStats();
                       
                       if (activeTab.value === 'thirdparty') loadThirdPartySubscriptions();
                       
@@ -455,6 +457,7 @@ export function useKuiState() {
                       refreshing.value = true;
                       try {
                           await refreshData(true);
+                          if (activeTab.value === 'nodes') await loadTrafficStats(true, true);
                           await fetchProbeData(false, true);
                           if (activeTab.value === 'proxy') {
                               // Realtime mode stops the proxy polling timer, so a
@@ -479,8 +482,30 @@ export function useKuiState() {
                       for (let vps of servers.value) {
                           const chartDom = document.getElementById('chart-' + vps.ip); if (!chartDom) continue;
                           let myChart = echarts.getInstanceByDom(chartDom) || echarts.init(chartDom);
-                          const res = await fetchApi(`/api/stats?ip=${vps.ip}`); const stats = await res.json();
+                          const stats = trafficSeries.value[vps.ip] || [];
                           myChart.setOption({ grid: { left: '8%', right: '5%', top: '5%', bottom: '15%' }, tooltip: { trigger: 'axis', backgroundColor: 'rgba(255, 255, 255, 0.9)', borderColor: '#e2e8f0', textStyle: { color: '#334155' } }, xAxis: { type: 'category', data: stats.map(s=>s.day), axisLabel: { color: '#94a3b8', fontSize: 10 }, axisLine: { lineStyle: { color: '#cbd5e1' } } }, yAxis: { type: 'value', show: false }, series: [{ data: stats.map(s=>(s.total_bytes/1024/1024).toFixed(2)), type: 'line', smooth: true, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(99, 102, 241, 0.2)' }, { offset: 1, color: 'rgba(99, 102, 241, 0)' }]) }, itemStyle: { color: '#6366f1' }, lineStyle: { width: 3 }, symbol: 'none' }] });
+                      }
+                  };
+
+                  const loadTrafficStats = async (force = false, throwOnError = false) => {
+                      if (!isLoggedIn.value || role.value !== 'admin') return;
+                      if (!force && Date.now() - trafficStatsLastFetchedAt < 30000) {
+                          if (activeTab.value === 'nodes') await renderKUICharts();
+                          return;
+                      }
+                      if (!trafficFetchPromise) trafficFetchPromise = (async () => {
+                          const response = await fetchApi('/api/stats');
+                          const data = await response.json();
+                          trafficTotals.value = data.totals || {};
+                          trafficSeries.value = data.series || {};
+                          trafficStatsLastFetchedAt = Date.now();
+                          if (activeTab.value === 'nodes') await renderKUICharts();
+                      })().finally(() => { trafficFetchPromise = null; });
+                      try {
+                          await trafficFetchPromise;
+                      } catch (error) {
+                          console.error('[traffic] statistics refresh failed', error);
+                          if (throwOnError) throw error;
                       }
                   };
 
@@ -845,7 +870,7 @@ export function useKuiState() {
                           realtimeSocket = socket;
                           clearTimeout(realtimeConnectTimer);
                           realtimeConnectTimer = setTimeout(() => { if (realtimeSocket === socket && socket.readyState === WebSocket.CONNECTING) socket.close(); }, 30000);
-                          socket.onopen = () => { if (realtimeSocket !== socket || generation !== realtimeGeneration) return socket.close(); clearTimeout(realtimeConnectTimer); realtimeDisconnectedAt = 0; realtimeRetryDelay = 5000; lastRealtimePing = Date.now(); realtimeConnected.value = true; window.kuiRealtimeConnected = true; clearTimeout(realtimeFallbackTimer); publicRealtimeSocket?.close(); refreshData(); stopPolling(); stopProbePolling(); pcStopProxy(); clearInterval(realtimePingTimer); realtimePingTimer = setInterval(() => { const now = Date.now(); if (realtimeSocket?.readyState === WebSocket.OPEN && now - lastRealtimePing >= 30000) { realtimeSocket.send('ping'); lastRealtimePing = now; } servers.value.forEach(server => { if (server.realtime_state === 'online' && now - server.last_report > 20000) server.realtime_state = 'stale'; }); publicProbeServers.value.forEach(server => { if (server.realtime_state === 'online' && server.last_updated && now - server.last_updated > 20000) server.realtime_state = 'stale'; }); if (activeTab.value === 'proxy') pcFetchNodes(); }, 5000); };
+                          socket.onopen = () => { if (realtimeSocket !== socket || generation !== realtimeGeneration) return socket.close(); clearTimeout(realtimeConnectTimer); realtimeDisconnectedAt = 0; realtimeRetryDelay = 5000; lastRealtimePing = Date.now(); realtimeConnected.value = true; window.kuiRealtimeConnected = true; clearTimeout(realtimeFallbackTimer); publicRealtimeSocket?.close(); refreshData(); stopPolling(); stopProbePolling(); pcStopProxy(); clearInterval(realtimePingTimer); realtimePingTimer = setInterval(() => { const now = Date.now(); if (realtimeSocket?.readyState === WebSocket.OPEN && now - lastRealtimePing >= 30000) { realtimeSocket.send('ping'); lastRealtimePing = now; } servers.value.forEach(server => { if (server.realtime_state === 'online' && now - server.last_report > 20000) server.realtime_state = 'stale'; }); publicProbeServers.value.forEach(server => { if (server.realtime_state === 'online' && server.last_updated && now - server.last_updated > 20000) server.realtime_state = 'stale'; }); if (activeTab.value === 'nodes') loadTrafficStats(); if (activeTab.value === 'proxy') pcFetchNodes(); }, 5000); };
                           socket.onmessage = event => { if (realtimeSocket !== socket) return; try { const message = JSON.parse(event.data); if (message.type === 'snapshot') (message.data || []).forEach(applyRealtimeSnapshot); else if (message.type === 'patch') applyRealtimeSnapshot(message.data); } catch(e) {} };
                           socket.onclose = () => { if (realtimeSocket !== socket) return; clearTimeout(realtimeConnectTimer); clearInterval(realtimePingTimer); realtimeConnected.value = false; window.kuiRealtimeConnected = false; realtimeSocket = null; if (isLoggedIn.value && !document.hidden) { scheduleRealtimeFallback(); clearTimeout(realtimeReconnectTimer); const delay = realtimeRetryDelay; realtimeRetryDelay = nextRealtimeRetryDelay(realtimeRetryDelay); realtimeReconnectTimer = setTimeout(connectRealtime, delay); } };
                           socket.onerror = () => socket.close();
