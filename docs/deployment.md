@@ -11,6 +11,102 @@
 
 如需住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。管理员和代理凭据应使用不同的独立强密码。
 
+一键部署适合快速创建独立实例，但 Cloudflare 会在登录用户的 GitHub 账号中创建项目副本。如果希望修改当前仓库后自动更新同一个 Cloudflare Worker，请使用下一节的手动连接方式。
+
+## 连接现有 GitHub 仓库并自动部署
+
+该方式不会复制或新建 GitHub 仓库。Cloudflare 会监听所选仓库的 `main` 分支，每次推送后自动构建并部署。
+
+### 1. 准备 GitHub 仓库
+
+1. 确认要持续维护的代码已经保存在自己的 GitHub 仓库中。
+2. 确认生产代码位于 `main` 分支，并且该分支包含 `package.json`、`wrangler.jsonc`、`src/` 和 `frontend/`。
+3. 不要把 `ADMIN_PASSWORD`、代理凭据、Telegram Token 或其他 Secret 写入仓库。
+
+本项目自带的 GitHub Actions 只负责检查代码，不会部署 Cloudflare；自动部署必须在 Cloudflare Dashboard 中连接仓库。
+
+### 2. 确认 Worker 名称
+
+仓库中的 `wrangler.jsonc` 默认包含：
+
+```json
+{
+  "name": "kui-worker"
+}
+```
+
+该名称就是 `wrangler deploy` 的目标 Worker。创建新 Worker 时建议直接使用 `kui-worker`；如果要使用其他名称，先在自己的仓库中修改此处并提交。
+
+如果要连接已经运行的 Worker，必须把 `name` 改为该 Worker 的准确名称。名称不一致可能导致构建成功却额外创建第二个 Worker，原来的 D1 数据、自定义域名和 Secrets 也不会自动迁移过去。
+
+### 3. 在 Cloudflare 创建并连接 Worker
+
+全新部署：
+
+1. 登录 **Cloudflare Dashboard → Workers & Pages**。
+2. 选择 **Create application / 创建应用 → Import a repository / 导入存储库**。如果界面先要求创建 Worker，可先创建名称与 `wrangler.jsonc` 一致的 Worker，再进入 **Settings → Builds** 连接 Git 仓库。
+3. 授权 Cloudflare GitHub App 读取目标仓库；私有仓库需要在 GitHub App 权限中显式勾选。
+4. 选择需要维护的现有仓库，生产分支选择 `main`。
+
+复用已部署实例：
+
+1. 打开现有 Worker，不要再创建应用。
+2. 进入 **Settings → Builds**，选择 **Connect repository / 连接存储库**。
+3. 选择现有 GitHub 仓库和 `main` 分支。
+4. 再次确认 Worker 名称与 `wrangler.jsonc` 的 `name` 完全一致。
+
+Cloudflare 不同版本的控制台文案可能略有差异；核心是让目标 Worker 的 **Builds** 页面显示正确的仓库和生产分支。
+
+### 4. 配置构建
+
+使用以下配置：
+
+| 项目 | 配置值 |
+| --- | --- |
+| Production branch | `main` |
+| Root directory | `/` 或留空 |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Node.js version | `22`（如控制台提供该选项） |
+
+保存并触发首次部署。此后向 `main` 推送提交，就会自动执行相同的构建和部署流程。
+
+### 5. 检查自动创建的资源
+
+首次成功部署时，Wrangler 会根据 `wrangler.jsonc` 上传或配置以下内容：
+
+| 资源 | 预期结果 |
+| --- | --- |
+| Worker Assets | 自动上传 `static/` 中的前端和 VPS 安装文件 |
+| D1 | 自动配置 `DB` binding；首次部署后必须确认数据库已经创建并绑定 |
+| Durable Objects | 自动创建并绑定 `VPS_PRESENCE`、`DASHBOARD_HUB` |
+| Cron Trigger | 自动添加 `*/5 * * * *` |
+
+正常情况下无需提前手动创建这些资源。如果首次部署提示 D1 无法自动预配，可在 **Storage & Databases → D1** 创建数据库，然后回到 Worker 的 **Settings → Bindings**，使用固定名称 `DB` 绑定该数据库后重新部署。
+
+### 6. 设置 Secrets
+
+首次部署完成后，在目标 Worker 的 **Settings → Variables and Secrets** 中添加：
+
+- `ADMIN_PASSWORD`：必需，类型选择 **Secret**。
+- `PROXY_USER`、`PROXY_PASS`：仅使用住宅代理时添加，均选择 **Secret**。
+
+普通变量 `ADMIN_USERNAME` 和 `PROXY_PUBLIC_LISTENER` 已在仓库配置中提供默认值。`keep_vars: true` 会在后续部署中保留 Dashboard 中未写入仓库的变量和 Secrets。
+
+### 7. 验证自动更新
+
+1. 在仓库 `main` 分支提交一个可识别的小改动并推送。
+2. 打开 Worker 的 **Builds / Deployments**，确认新构建由该提交触发并成功完成。
+3. 检查 Worker 地址和 `/health`：
+
+```bash
+curl -fsS https://你的-worker-域名/health
+```
+
+4. 确认原有 D1 数据、Secrets、自定义域名和 `DB`、`VPS_PRESENCE`、`DASHBOARD_HUB` bindings 仍然存在。
+
+不要在验证过程中修改 Worker 名称或 binding 名称。自动部署只更新代码和配置，不会把另一个 Worker 的数据自动搬到新实例。
+
 ## 变量与内置配置
 
 ### 用户需要设置的 Secrets

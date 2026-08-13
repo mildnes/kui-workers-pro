@@ -17,6 +17,8 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 
 如需使用住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。项目不内置任何默认密码。
 
+> 一键部署会在你的 GitHub 账号中创建项目副本，这是 Cloudflare 官方部署流程的正常行为。如果希望直接维护当前仓库，并在推送 `main` 后自动部署到 Cloudflare，请不要使用一键部署按钮；应在 Cloudflare 中手动创建 Worker（已有实例则直接复用），再连接当前 GitHub 仓库。创建和配置步骤见[连接现有 GitHub 仓库并自动部署](docs/deployment.md#连接现有-github-仓库并自动部署)。
+
 ## 核心能力
 
 - VPS、代理节点、多用户、订阅令牌、流量配额和到期管理。
