@@ -1,5 +1,5 @@
 <template>
-  <div v-if="activeTab === 'settings'" class="space-y-6">
+  <div v-if="activeTab === 'settings'" class="kui-settings-page space-y-6">
                   <template v-if="role === 'admin'">
                       <div class="bg-white/60 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-xl shadow-slate-200/40">
                           <h3 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">⚙️ KUI 代理系统参数</h3>

@@ -2,7 +2,9 @@ html { background: var(--kui-color-bg); }
 body { min-width: 320px; margin: 0; color: var(--kui-color-text); background: var(--kui-color-bg); }
 :root { --kui-control-height: 36px; }
 button, input, select, textarea { font: inherit; }
-button:not(.kui-control-size-exempt), input:not([type="checkbox"]):not([type="radio"]), select { height: var(--kui-control-height); min-height: var(--kui-control-height); box-sizing: border-box; }
+button:not(.kui-control-size-exempt) { display: inline-flex; height: var(--kui-control-height); min-height: var(--kui-control-height); align-items: center; justify-content: center; box-sizing: border-box; padding-top: 0 !important; padding-bottom: 0 !important; line-height: 1.2; text-align: center; }
+input:not([type="checkbox"]):not([type="radio"]), select { height: var(--kui-control-height); min-height: var(--kui-control-height); box-sizing: border-box; padding-top: 0 !important; padding-bottom: 0 !important; line-height: normal; text-align: center; }
+select { text-align-last: center; }
 button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 
 .kui-admin-shell { min-height: 100vh; display: flex; background: var(--kui-color-bg); }
@@ -15,12 +17,12 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-sidebar-brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 8px 18px; }
 .kui-brand-mark { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 11px; color: white; background: #111827; font-weight: 900; box-shadow: var(--kui-shadow-sm); }
 .kui-sidebar-nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 3px; overflow-y: auto; }
-.kui-sidebar-nav button { display: flex; min-height: 42px; align-items: center; gap: 10px; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; font-size: 13px; font-weight: 650; text-align: left; transition: .15s ease; }
+.kui-sidebar-nav button { display: flex; min-height: 42px; align-items: center; justify-content: flex-start; gap: 10px; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; font-size: 13px; font-weight: 650; text-align: left; transition: .15s ease; }
 .kui-sidebar-nav button:hover { color: var(--kui-color-text-soft); background: var(--kui-color-bg-soft); }
 .kui-sidebar-nav button.active { color: var(--kui-color-primary-hover); background: var(--kui-color-primary-soft); }
 .kui-nav-icon { display: grid; width: 22px; place-items: center; color: currentColor; font-size: 16px; }
 .kui-sidebar-secondary { margin: 8px 0 12px; border-top: 1px solid var(--kui-color-border); padding: 12px 0 0; }
-.kui-sidebar-secondary button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 10px; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; font-size: 13px; font-weight: 650; text-align: left; transition: .15s ease; }
+.kui-sidebar-secondary button { display: flex; width: 100%; min-height: 42px; align-items: center; justify-content: flex-start; gap: 10px; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; font-size: 13px; font-weight: 650; text-align: left; transition: .15s ease; }
 .kui-sidebar-secondary button:hover { color: var(--kui-color-text-soft); background: var(--kui-color-bg-soft); }
 .kui-sidebar-secondary button.active { color: var(--kui-color-primary-hover); background: var(--kui-color-primary-soft); }
 .kui-sidebar-theme-picker { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 10px; box-sizing: border-box; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; }
@@ -46,7 +48,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-action-menu summary { list-style: none; cursor: pointer; }
 .kui-action-menu summary::-webkit-details-marker { display: none; }
 .kui-action-menu-panel { position: absolute; top: calc(100% + 7px); right: 0; z-index: 80; width: 190px; overflow: hidden; border: 1px solid var(--kui-color-border); border-radius: 12px; padding: 5px; background: var(--kui-color-surface-solid); box-shadow: var(--kui-shadow-md); }
-.kui-action-menu-panel button { display: block; width: 100%; border: 0; border-radius: 8px; padding: 9px 10px; color: #475569; background: transparent; font-size: 12px; font-weight: 650; text-align: left; }
+.kui-action-menu-panel button { display: flex; width: 100%; justify-content: flex-start; border: 0; border-radius: 8px; padding: 0 10px; color: #475569; background: transparent; font-size: 12px; font-weight: 650; text-align: left; }
 .kui-action-menu-panel button:hover { color: #312e81; background: #eef2ff; }
 .kui-spin { display: inline-block; animation: kui-spin .8s linear infinite; }
 @keyframes kui-spin { to { transform: rotate(360deg); } }
@@ -194,7 +196,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-server-menu > summary::-webkit-details-marker { display: none; }
 .kui-server-menu-panel { position: absolute; top: calc(100% + 5px); right: 0; z-index: 30; width: 230px; border: 1px solid #d7dfeb; border-radius: 12px; padding: 5px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.14); }
 .kui-server-menu-label { padding: 6px 10px 3px; color: #94a3b8; font-size: 9px; font-weight: 850; letter-spacing: .08em; }
-.kui-server-menu-panel button { display: block; width: 100%; min-height: 36px; border: 0; border-radius: 8px; padding: 8px 10px; color: #475569; background: transparent; font-size: 12px; font-weight: 700; text-align: left; }
+.kui-server-menu-panel button { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: flex-start; border: 0; border-radius: 8px; padding: 0 10px; color: #475569; background: transparent; font-size: 12px; font-weight: 700; text-align: left; }
 .kui-server-menu-panel button:hover { color: #4338ca; background: #eef2ff; }
 .kui-server-command-menu { position: relative; margin-top: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px; }
 .kui-server-command-menu > summary { display: flex; min-height: 36px; align-items: center; justify-content: space-between; border-radius: 8px; padding: 8px 10px; color: #475569; cursor: pointer; list-style: none; font-size: 12px; font-weight: 800; }
@@ -230,6 +232,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .pc-page-intro p { margin: 3px 0 0; color: #64748b; font-size: 12px; }
 .pc-section-stack { display: grid; gap: 12px; }
 .pc-panel { margin: 0; }
+.pc-country-list { min-height: 150px; overflow: visible; }
 .pc-country-chip { min-height: 28px; border: 1px solid rgba(51,65,85,.8); border-radius: 7px; padding: 0 9px; color: #cbd5e1; background: rgba(30,41,59,.8); box-shadow: 0 1px 2px rgba(0,0,0,.18); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 800; cursor: pointer; transition: .15s ease; }
 .pc-country-chip:hover { border-color: #6366f1; color: #c7d2fe; background: rgba(79,70,229,.18); }
 .pc-node-matrix table { table-layout: auto; }
@@ -341,6 +344,25 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 :root[data-kui-theme="dark"] .kui-server-tools { border-color: var(--kui-color-border); background: var(--kui-color-bg-soft); }
 :root[data-kui-theme="dark"] .kui-server-tools > summary span { color: var(--kui-color-text-soft); }
 :root[data-kui-theme="dark"] .kui-settings-save { border-color: rgba(99,102,241,.35); color: #a5b4fc; background: rgba(30,27,75,.86); }
+:root[data-kui-theme="dark"] .kui-settings-page > div { border-color: var(--kui-color-border) !important; background: var(--kui-color-surface) !important; box-shadow: var(--kui-shadow-sm) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page .overflow-x-auto.bg-white { border-color: var(--kui-color-border) !important; background: var(--kui-color-surface-solid) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page table thead { border-color: var(--kui-color-border) !important; color: var(--kui-color-muted) !important; background: var(--kui-color-bg-soft) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page table tbody tr { border-color: var(--kui-color-border) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page table tbody tr:hover { background: var(--kui-color-bg-soft) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page .bg-blue-50 { background-color: rgba(37,99,235,.16) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page .text-blue-600 { color: #93c5fd !important; }
+:root[data-kui-theme="dark"] .kui-settings-page .border-amber-300 { border-color: rgba(245,158,11,.4) !important; }
+:root[data-kui-theme="dark"] .kui-settings-page input[type="checkbox"] { accent-color: var(--kui-color-primary); }
+:root[data-kui-theme="dark"] .kui-public-listener-hero,
+:root[data-kui-theme="dark"] .kui-public-listener-list { border-color: var(--kui-color-border) !important; background: var(--kui-color-surface) !important; box-shadow: var(--kui-shadow-sm) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-row { border-color: var(--kui-color-border) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-row:hover { background: var(--kui-color-bg-soft); }
+:root[data-kui-theme="dark"] .kui-public-listener-risk,
+:root[data-kui-theme="dark"] .kui-public-listener-warning { border-color: rgba(245,158,11,.3) !important; color: #fcd34d !important; background: rgba(180,83,9,.16) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-error { border-color: rgba(244,63,94,.28) !important; color: #fda4af !important; background: rgba(159,18,57,.18) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-status.is-open { color: #fda4af !important; background: rgba(159,18,57,.18) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-status.is-local { color: #6ee7b7 !important; background: rgba(5,150,105,.16) !important; }
+:root[data-kui-theme="dark"] .kui-public-listener-switch:not(.is-open) { border-color: var(--kui-color-border-strong) !important; background: var(--kui-color-bg-soft) !important; }
 :root[data-kui-theme="dark"] .kui-add-vps-dialog { border-color: var(--kui-color-border-strong); color: var(--kui-color-text); background: var(--kui-color-surface-solid); }
 :root[data-kui-theme="dark"] .kui-add-vps-header,
 :root[data-kui-theme="dark"] .kui-add-vps-actions { border-color: var(--kui-color-border); }

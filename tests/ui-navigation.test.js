@@ -14,6 +14,7 @@ const residentialProxyPage = read('../frontend/src/pages/ResidentialProxyPage.vu
 const legacyProxy = read('../frontend/src/proxy/legacyProxy.js');
 const state = read('../frontend/src/composables/useKuiState.js');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
+const settingsPage = read('../frontend/src/pages/SettingsPage.vue');
 const addVpsModal = read('../frontend/src/components/modals/AddVpsModal.vue');
 const qrModal = read('../frontend/src/components/modals/QrModal.vue');
 const probeEditModal = read('../frontend/src/components/modals/ProbeEditModal.vue');
@@ -227,6 +228,12 @@ test('residential proxy details are compact and readable in both color modes', (
     assert.match(appStyles, /\.pc-section-stack \{ display: grid; gap: 12px/);
 });
 
+test('residential country candidates expand without an internal scrollbar', () => {
+    assert.match(residentialProxyPage, /id="countries-list" class="pc-country-list/);
+    assert.doesNotMatch(residentialProxyPage, /id="countries-list"[^>]*(?:max-h-|overflow-y-auto)/);
+    assert.match(appStyles, /\.pc-country-list \{[^}]*min-height: 150px;[^}]*overflow: visible/);
+});
+
 test('residential country candidates sort by availability then country code', () => {
     assert.match(legacyProxy, /\.sort\(\(a, b\) => \{/);
     assert.match(legacyProxy, /const nodeDelta = \(b\.nodes \?\? -1\) - \(a\.nodes \?\? -1\)/);
@@ -291,4 +298,21 @@ test('regular form controls and action buttons share the egress mode height', ()
     assert.match(appStyles, /\.kui-egress-mode-button \{[^}]*height: var\(--kui-control-height\)/);
     assert.match(appStyles, /\.kui-admin-content button:not\(\.kui-control-size-exempt\)[^\{]*\{[^}]*height: var\(--kui-control-height\)/);
     assert.doesNotMatch(appStyles, /\.kui-admin-content button, \.kui-admin-content input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\), \.kui-admin-content select \{ min-height: 44px/);
+});
+
+test('global controls center their labels in both axes', () => {
+    assert.match(appStyles, /button:not\(\.kui-control-size-exempt\) \{[^}]*align-items: center;[^}]*justify-content: center/);
+    assert.match(appStyles, /input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\), select \{[^}]*text-align: center/);
+    assert.match(appStyles, /select \{ text-align-last: center/);
+});
+
+test('public listener and settings pages use explicit shared dark surfaces', () => {
+    assert.match(publicListenerPage, /kui-public-listener-page/);
+    assert.match(settingsPage, /kui-settings-page/);
+    for (const className of ['kui-public-listener-hero', 'kui-public-listener-list', 'kui-public-listener-warning', 'kui-public-listener-error', 'kui-public-listener-status']) {
+        assert.match(publicListenerPage, new RegExp(className));
+        assert.match(appStyles, new RegExp(`data-kui-theme="dark"[^}]*\\.${className}|data-kui-theme="dark"[\\s\\S]*\\.${className}`));
+    }
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page > div/);
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page table thead/);
 });

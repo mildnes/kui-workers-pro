@@ -15,7 +15,7 @@
                               <h2 class="text-lg font-bold text-slate-200">国家代码与候选节点</h2>
                           </div>
                               <p class="text-xs text-slate-500 mb-3 leading-relaxed">数量来自 VPN Gate 当前可见节点，仅代表可尝试的候选池，不等于已建立的住宅隧道。点击代码可填入目标地区。</p>
-                              <div id="countries-list" class="flex flex-wrap gap-1.5 max-h-[112px] overflow-y-auto pr-1">
+                              <div id="countries-list" class="pc-country-list flex flex-wrap content-start gap-1.5 pr-1">
                                   <span class="text-slate-600 text-sm animate-pulse">正在同步数据库...</span>
                               </div>
                           </div>
