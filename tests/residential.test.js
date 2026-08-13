@@ -109,6 +109,14 @@ test('residential SOCKS5 server supports UDP ASSOCIATE through the active tunnel
     assert.doesNotMatch(proxyServer, /if command != 1:[\s\S]{0,100}x05\\x07/);
 });
 
+test('residential tunnel routing cannot delete or flush cloud policy routes', () => {
+    assert.match(manager, /KUI_ROUTE_TABLES\s*=\s*\{"tun_main": 20101, "tun_backup": 20102\}/);
+    assert.doesNotMatch(manager, /\["ip", "rule", "del", "pref", str\(table_id\)\]/);
+    assert.doesNotMatch(manager, /\["ip", "route", "flush", "table", str\(table_id\)\]/);
+    assert.match(manager, /_cleanup_tunnel_routing\(tun_name, legacy_table/);
+    assert.match(manager, /"route", "replace", "default", "dev", tun_name/);
+});
+
 test('realtime egress results are persisted and acknowledged without HTTP', () => {
     assert.match(realtime, /persistEgressResult\(attachment\.ip, result\)/);
     assert.match(realtime, /UPDATE servers SET egress_applied_mode/);

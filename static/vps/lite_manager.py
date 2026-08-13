@@ -108,8 +108,13 @@ class Tunnel:
         self.connected_at = 0
         self.is_connecting = False
 
-tun_main = Tunnel("tun_main", 101)
-tun_backup = Tunnel("tun_backup", 102)
+# Use dedicated high-numbered tables. The old 101/102 tables and preferences
+# overlap with policy routing installed by several cloud images and could
+# remove the VPS public return route, immediately breaking SSH.
+KUI_ROUTE_TABLES = {"tun_main": 20101, "tun_backup": 20102}
+LEGACY_KUI_ROUTE_TABLES = {"tun_main": 101, "tun_backup": 102}
+tun_main = Tunnel("tun_main", KUI_ROUTE_TABLES["tun_main"])
+tun_backup = Tunnel("tun_backup", KUI_ROUTE_TABLES["tun_backup"])
 
 def penalize_node(ip: str, penalty: int):
     """
@@ -496,13 +501,32 @@ def vpngate_fetch_loop():
                     n["harvested_at"] = now
         time.sleep(300)
 
+def _delete_ip_rule(arguments):
+    # Delete only a complete rule selector. Never delete by preference alone:
+    # that preference may belong to cloud-init, DHCP or the hosting provider.
+    while subprocess.run(["ip", "rule", "del", *arguments], capture_output=True).returncode == 0:
+        pass
+
+def _cleanup_tunnel_routing(tun_name: str, table_id: int, oif_pref: int, iif_pref: int):
+    _delete_ip_rule(["pref", str(oif_pref), "oif", tun_name, "lookup", str(table_id)])
+    _delete_ip_rule(["pref", str(iif_pref), "iif", tun_name, "lookup", str(table_id)])
+    subprocess.run(["ip", "route", "del", "default", "dev", tun_name, "table", str(table_id)], capture_output=True)
+
 def setup_routing(tun_name: str, table_id: int):
-    subprocess.run(["ip", "rule", "del", "pref", str(table_id)], capture_output=True)
-    subprocess.run(["ip", "rule", "del", "pref", str(table_id + 1000)], capture_output=True)
-    subprocess.run(["ip", "route", "flush", "table", str(table_id)], capture_output=True)
-    subprocess.run(["ip", "route", "add", "default", "dev", tun_name, "table", str(table_id)], capture_output=True)
-    subprocess.run(["ip", "rule", "add", "oif", tun_name, "lookup", str(table_id), "pref", str(table_id)], capture_output=True)
-    subprocess.run(["ip", "rule", "add", "iif", tun_name, "lookup", str(table_id), "pref", str(table_id + 1000)], capture_output=True)
+    oif_pref, iif_pref = table_id + 10000, table_id + 11000
+    legacy_table = LEGACY_KUI_ROUTE_TABLES.get(tun_name)
+    if legacy_table:
+        # Remove only rules/routes that match the previous KUI installation.
+        # Do not flush the legacy table because it may contain system routes.
+        _cleanup_tunnel_routing(tun_name, legacy_table, legacy_table, legacy_table + 1000)
+    _cleanup_tunnel_routing(tun_name, table_id, oif_pref, iif_pref)
+    try:
+        subprocess.run(["ip", "route", "replace", "default", "dev", tun_name, "table", str(table_id)], capture_output=True, check=True)
+        subprocess.run(["ip", "rule", "add", "pref", str(oif_pref), "oif", tun_name, "lookup", str(table_id)], capture_output=True, check=True)
+        subprocess.run(["ip", "rule", "add", "pref", str(iif_pref), "iif", tun_name, "lookup", str(table_id)], capture_output=True, check=True)
+    except Exception:
+        _cleanup_tunnel_routing(tun_name, table_id, oif_pref, iif_pref)
+        raise
 
 def connect_node(tun: Tunnel, node: dict, generation: int):
     global dead_ips
