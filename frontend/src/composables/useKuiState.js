@@ -466,7 +466,7 @@ export function useKuiState() {
                           proxyPublicListenerManageable.value = data.proxyPublicListenerManageable !== false;
                           if (data.realtimeUrl && data.realtimeUrl !== realtimeUrl.value) { realtimeUrl.value = data.realtimeUrl; connectRealtime(); }
                           servers.value.forEach(s => { 
-                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', node_uuid: '', node_username: '', node_password: '', reality_private_key: '', reality_public_key: '', reality_short_id: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: '', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
+                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', node_uuid: '', node_username: '', node_password: '', reality_private_key: '', reality_public_key: '', reality_short_id: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: '', ss_network: 'tcp,udp', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                               if ((s.egress_mode === 'socks5' || s.socks5_addr) && s._socks5_addr === undefined) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = ''; s._socks5_clear_password = false; }
                           });
@@ -684,7 +684,7 @@ export function useKuiState() {
                           const method = p.ss_method || '2022-blake3-aes-256-gcm'; const password = optionalText(p.ss_password) || generateSs2022Password(method); const expectedBytes = method.includes('128') ? 16 : 32; let decoded;
                           try { decoded = atob(password); } catch (_) { alert('SS2022 密钥必须是有效的 Base64 原始密钥'); return null; }
                           if (decoded.length !== expectedBytes || btoa(decoded) !== password) { alert(`SS2022 密钥必须是 ${expectedBytes} 字节原始密钥的标准 Base64 值`); return null; }
-                          payload.uuid = method; payload.private_key = password; payload.network = 'tcp';
+                          payload.uuid = method; payload.private_key = password; payload.network = ['tcp', 'udp', 'tcp,udp'].includes(p.ss_network) ? p.ss_network : 'tcp,udp';
                       } else if (p.protocol === 'Trojan' || p.protocol === 'AnyTLS') {
                           payload.uuid = optionalText(p.node_uuid) || crypto.randomUUID(); payload.private_key = optionalText(p.node_password) || randomSecret();
                       } else if (p.protocol === 'Naive' || p.protocol === 'Socks5') {
@@ -711,7 +711,7 @@ export function useKuiState() {
                       reality_private_key: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.private_key || '' : '',
                       reality_public_key: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.public_key || '' : '',
                       reality_short_id: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.short_id || '' : '',
-                      ss_method: node.protocol === 'Shadowsocks2022' ? node.uuid : '2022-blake3-aes-256-gcm', ss_password: node.protocol === 'Shadowsocks2022' ? node.private_key || '' : '',
+                      ss_method: node.protocol === 'Shadowsocks2022' ? node.uuid : '2022-blake3-aes-256-gcm', ss_password: node.protocol === 'Shadowsocks2022' ? node.private_key || '' : '', ss_network: node.protocol === 'Shadowsocks2022' ? node.network || 'tcp,udp' : 'tcp,udp',
                       relay_type: node.relay_type || 'external', target_ip: node.target_ip || '', target_port: node.target_port || '', target_id: node.target_id || '',
                       traffic_limit_gb: node.traffic_limit > 0 ? Number((node.traffic_limit / 1073741824).toFixed(3)) : '', expire_date: node.expire_time > 0 ? formatDate(node.expire_time) : '',
                   });
@@ -732,7 +732,7 @@ export function useKuiState() {
                       const failures = [];
                       for (let item of protocolSequence) {
                           const payload = { id: Date.now().toString() + Math.floor(Math.random() * 10000), uuid: commonUUID, vps_ip: ip, protocol: item.protocol, port: startPort + item.offset, username: commonUser, traffic_limit: 0, expire_time: 0, sni: item.sni || '', network: item.protocol === 'H2-Reality' ? 'http' : (item.protocol === 'gRPC-Reality' ? 'grpc' : 'tcp') };
-                          if (item.type === 'reality') { const keys = generateRealityKeys(); payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } else if (item.protocol === 'Shadowsocks2022') { const key = new Uint8Array(32); crypto.getRandomValues(key); payload.uuid = item.method; payload.private_key = btoa(String.fromCharCode(...key)); payload.network = 'tcp'; } else if (item.protocol === 'Naive') { payload.uuid = commonUUID.replace(/-/g, '').substring(0, 16); payload.private_key = payload.uuid; } else { const array = new Uint8Array(16); crypto.getRandomValues(array); payload.private_key = btoa(String.fromCharCode.apply(null, array)); }
+                          if (item.type === 'reality') { const keys = generateRealityKeys(); payload.private_key = keys.privateKey; payload.public_key = keys.publicKey; payload.short_id = keys.shortId; } else if (item.protocol === 'Shadowsocks2022') { const key = new Uint8Array(32); crypto.getRandomValues(key); payload.uuid = item.method; payload.private_key = btoa(String.fromCharCode(...key)); payload.network = 'tcp,udp'; } else if (item.protocol === 'Naive') { payload.uuid = commonUUID.replace(/-/g, '').substring(0, 16); payload.private_key = payload.uuid; } else { const array = new Uint8Array(16); crypto.getRandomValues(array); payload.private_key = btoa(String.fromCharCode.apply(null, array)); }
                           try { await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); } catch(e) { failures.push(`${item.protocol}: ${e.message || '失败'}`); }
                       }
                       batchStartPort[ip] = ''; alert(failures.length ? `⚠️ 部分协议部署失败：\n${failures.join('\n')}` : "✅ 极速 9合1 全家桶部署指令已实时发送！"); refreshData();

@@ -522,6 +522,78 @@ def _deliver_egress_result(payload):
 
 EGRESS_MODES = {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}
 PROXY_CATEGORIES = {"youtube", "ai", "google", "streaming"}
+SELECTIVE_PROXY_RULE_SETS = {
+    "youtube": (
+        {
+            "tag": "kui-youtube",
+            "format": "binary",
+            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/YouTube/YouTube.srs",
+        },
+    ),
+    "ai": (
+        {
+            "tag": "kui-ai-domain",
+            "format": "source",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/ai.json",
+        },
+        {
+            "tag": "kui-ai-ip",
+            "format": "source",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/ai.json",
+        },
+    ),
+    "google": (
+        {
+            "tag": "kui-google",
+            "format": "binary",
+            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/Google/Google.srs",
+        },
+    ),
+    "streaming": (
+        {
+            "tag": "kui-stream-domain",
+            "format": "source",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/stream.json",
+        },
+        {
+            "tag": "kui-stream-ip",
+            "format": "source",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/stream.json",
+        },
+    ),
+}
+
+def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
+    selected = set(categories or [])
+    rule_sets = []
+    for category, definitions in SELECTIVE_PROXY_RULE_SETS.items():
+        if category not in selected:
+            continue
+        for definition in definitions:
+            rule_sets.append({
+                "type": "remote",
+                "tag": definition["tag"],
+                "format": definition["format"],
+                "url": definition["url"],
+                "download_detour": "direct-out",
+                "update_interval": "1d",
+            })
+    if not rule_sets:
+        raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
+
+    inbounds = sorted(set(proxy_inbounds or []))
+    if not inbounds:
+        return rule_sets, []
+    return rule_sets, [
+        {"inbound": inbounds, "action": "sniff", "timeout": "1s"},
+        {
+            "inbound": inbounds,
+            "rule_set": [rule_set["tag"] for rule_set in rule_sets],
+            "action": "route",
+            "outbound": outbound_tag,
+        },
+        {"inbound": inbounds, "ip_version": 6, "action": "reject"},
+    ]
 
 def _normalize_egress_config(value, fallback_mode="native", fallback=None):
     source = value if isinstance(value, dict) else (fallback if isinstance(fallback, dict) else {})
@@ -796,35 +868,41 @@ def _read_iptables_port_bytes(port, protocol):
     return total if found else None
 
 def get_port_traffic(port, protocol="tcp", node_id=None):
-    node_tag = f"in-{node_id}" if node_id else None
+    # Official sing-box release binaries do not include the optional V2Ray
+    # statistics API. Every managed node owns a unique port/transport pair,
+    # so the persistent firewall counters are the reliable cumulative source.
+    transports = ["tcp", "udp"] if protocol in {"both", "tcp,udp"} else [protocol]
+    totals = [_read_iptables_port_bytes(port, item) for item in transports]
+    available = [value for value in totals if value is not None]
+    return sum(available) if available else None
 
-    # 优先：sing-box HTTP API 获取单入站精确流量（cumulative bytes）
-    if node_tag:
-        try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:9090/stats/inbound/{node_tag}",
-                headers={"User-Agent": "KUI-Agent"}
-            )
-            with urllib.request.urlopen(req, timeout=2) as r:
-                raw = r.read().decode("utf-8")
-                data = json.loads(raw)
-                val = data.get("value")
-                if val is not None:
-                    return int(val)
-                # 部分版本把 bytes 装在 .bytes 字段
-                b = data.get("bytes")
-                if b is not None:
-                    return int(b)
-                # 部分版本返回数组 [up, down]
-                arr = data.get("traffic") or data.get("value_list")
-                if isinstance(arr, list) and len(arr) >= 2:
-                    return int(arr[0]) + int(arr[1])
-        except Exception:
-            pass
 
-    # Firewall counters include unauthenticated probes and are not reliable
-    # per-user billing data. Fail closed until sing-box stats are available.
-    return None
+def normalize_ss2022_network(value):
+    network = str(value or "tcp,udp").lower()
+    if network == "tcp": return ["tcp"]
+    if network == "udp": return ["udp"]
+    if network == "tcp,udp": return ["tcp", "udp"]
+    raise ValueError("invalid Shadowsocks2022 network")
+
+
+def node_transports(node):
+    if node.get("protocol") == "Shadowsocks2022":
+        return normalize_ss2022_network(node.get("network"))
+    return ["udp"] if node.get("protocol") in {"Hysteria2", "TUIC"} else ["tcp"]
+
+
+def tune_inbound(inbound, transports):
+    inbound["reuse_addr"] = True
+    if "tcp" in transports:
+        inbound.update({"tcp_fast_open": True, "tcp_keep_alive": "2m", "tcp_keep_alive_interval": "30s"})
+    if "udp" in transports:
+        inbound["udp_timeout"] = "5m"
+    return inbound
+
+
+def tune_outbound(outbound):
+    outbound.update({"connect_timeout": "10s", "tcp_fast_open": True, "tcp_keep_alive": "2m", "tcp_keep_alive_interval": "30s"})
+    return outbound
 
 def get_system_status(current_interval):
     global prev_cpu_total, prev_cpu_idle, prev_rx, prev_tx, loop_counter, last_pings
@@ -1003,19 +1081,19 @@ def build_chain_outbound(target, tag):
         outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     elif proto == "Shadowsocks2022":
         validate_ss2022_credentials(target.get("uuid", ""), target.get("password", ""))
-        outbound.update({"type": "shadowsocks", "method": target["uuid"], "password": target["password"], "network": "tcp"})
+        outbound.update({"type": "shadowsocks", "method": target["uuid"], "password": target["password"], "network": normalize_ss2022_network(target.get("network"))})
     elif proto == "AnyTLS":
         outbound.update({"type": "anytls", "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     else:
         return None
-    return outbound
+    return tune_outbound(outbound)
 
 def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_outbound=None, warp_mode="off", egress_check_host="127.0.0.1"):
     global proxy_port_conflict
     singbox_config = {
         "log": {"level": "warn"},
         "inbounds": [],
-        "outbounds": [{"type": "direct", "tag": "direct-out"}],
+        "outbounds": [tune_outbound({"type": "direct", "tag": "direct-out"})],
         "route": {"rules": []}
     }
     egress_check_host = normalize_check_host(egress_check_host)
@@ -1031,9 +1109,10 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", node_id): raise ValueError("invalid node id")
             in_tag, proto, port = f"in-{node_id}", node["protocol"], int(node["port"])
             if not 1 <= port <= 65535: raise ValueError("invalid port")
-            transport = "udp" if proto in {"Hysteria2", "TUIC"} else "tcp"
-            listener_key = (transport, port)
-            if listener_key in listener_keys: raise ValueError(f"duplicate {transport} listener port {port}")
+            transports = node_transports(node)
+            listener_keys_for_node = {(transport, port) for transport in transports}
+            conflict = next((transport for transport, key_port in listener_keys_for_node if (transport, key_port) in listener_keys), None)
+            if conflict: raise ValueError(f"duplicate {conflict} listener port {port}")
             supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Shadowsocks2022", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door"}
             if proto not in supported:
                 raise ValueError(f"unsupported protocol {proto}")
@@ -1084,7 +1163,9 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
         elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "Shadowsocks2022": singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": "::", "listen_port": port, "network": "tcp", "method": node["uuid"], "password": node["private_key"]})
+        elif proto == "Shadowsocks2022":
+            ss_networks = normalize_ss2022_network(node.get("network"))
+            singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": "::", "listen_port": port, "network": ss_networks, "method": node["uuid"], "password": node["private_key"]})
         elif proto == "Trojan": singbox_config["inbounds"].append({"type": "trojan", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "server_name": sni, "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "H2-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2", "http/1.1"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "http", "host": [sni], "path": "/"}})
         elif proto == "gRPC-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "grpc", "service_name": "grpc"}})
@@ -1103,9 +1184,9 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 else:
                     continue
             else:
-                singbox_config["outbounds"].append({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) })
+                singbox_config["outbounds"].append(tune_outbound({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) }))
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
-        listener_keys.add(listener_key)
+        listener_keys.update(listener_keys_for_node)
         valid_nodes.append(node)
 
     # --- 住宅IP代理出口 / SOCKS5 服务注入（如端口已被 proxy_server.py 占用则跳过，避免双进程抢端口炸 sing-box）---
@@ -1166,14 +1247,14 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 rr[0] += 1
                 out_tag = f"mesh-out-{nid}"
                 srv = peer.get("socks_ip") or peer.get("ip") or ""
-                singbox_config["outbounds"].append({
+                singbox_config["outbounds"].append(tune_outbound({
                     "type": "socks",
                     "tag": out_tag,
                     "server": srv,
                     "server_port": int(peer.get("port") or PROXY_PORT),
                     "username": str(peer.get("user") or PROXY_USER),
                     "password": str(peer.get("pass") or PROXY_PASS)
-                })
+                }))
                 in_tag = f"in-{nid}"
                 singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": out_tag})
         except Exception:
@@ -1186,7 +1267,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         if not s5_addr or not 1 <= s5_port <= 65535:
             raise RuntimeError("invalid SOCKS5 outbound address or port")
         s5_tag = "socks5-outbound"
-        s5_outbound = {"type": "socks", "tag": s5_tag, "server": s5_addr, "server_port": s5_port}
+        s5_outbound = tune_outbound({"type": "socks", "tag": s5_tag, "server": s5_addr, "server_port": s5_port})
         s5_user = socks5_outbound.get("user", "")
         s5_pass = socks5_outbound.get("pass", "")
         if s5_user:
@@ -1198,29 +1279,22 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "outbound": s5_tag})
         s5_mode = socks5_outbound.get("mode", "global")
         if s5_mode == "selective":
-            category_domains = {
-                "youtube": {"keywords": ["youtube", "youtu", "googlevideo", "ytimg"], "suffixes": [".youtube.com", ".youtu.be", ".googlevideo.com", ".ytimg.com"]},
-                "ai": {"keywords": ["openai", "chatgpt", "claude", "anthropic", "gemini", "bard", "copilot", "grok", "perplexity", "midjourney"], "suffixes": [".openai.com", ".anthropic.com", ".claude.ai", ".chatgpt.com", ".deepmind.com", ".cohere.com", ".huggingface.co", ".perplexity.ai", ".midjourney.com", ".ai.com"]},
-                "google": {"keywords": ["google"], "suffixes": [".google.com", ".googleapis.com", ".googleusercontent.com", ".googlesyndication.com", ".googleadservices.com", ".gstatic.com", ".google-analytics.com"]},
-                "streaming": {"keywords": ["netflix", "hulu", "disney", "hbo", "spotify", "tiktok", "twitch", "vimeo", "dailymotion", "bilibili", "crunchyroll", "peacock"], "suffixes": [".netflix.com", ".hulu.com", ".disneyplus.com", ".hbomax.com", ".spotify.com", ".tiktok.com", ".twitch.tv", ".vimeo.com", ".dailymotion.com", ".bilibili.com", ".crunchyroll.com", ".peacocktv.com"]},
-            }
             try:
                 selected = json.loads(socks5_outbound.get("domains", "{}") or "{}").get("categories", [])
             except Exception:
                 selected = []
-            all_keywords, all_suffixes = [], []
-            for category in selected:
-                entry = category_domains.get(category)
-                if entry:
-                    all_keywords.extend(entry["keywords"])
-                    all_suffixes.extend(entry["suffixes"])
-            if not all_keywords and not all_suffixes:
-                raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
             proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
-            if proxy_inbounds:
-                singbox_config["route"]["rules"].insert(0, {"inbound": proxy_inbounds, "action": "sniff", "timeout": "1s"})
-                singbox_config["route"]["rules"].append({"domain_keyword": all_keywords, "domain_suffix": all_suffixes, "outbound": s5_tag})
-                singbox_config["route"]["rules"].append({"inbound": proxy_inbounds, "ip_version": 6, "action": "reject"})
+            rule_sets, selective_rules = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
+            singbox_config["route"]["rule_set"] = rule_sets
+            singbox_config["route"]["rules"][0:0] = selective_rules[:1]
+            singbox_config["route"]["rules"].extend(selective_rules[1:])
+            singbox_config["experimental"] = {
+                "cache_file": {
+                    "enabled": True,
+                    "path": "/etc/sing-box/cache.db",
+                    "cache_id": "kui-selective-rules",
+                }
+            }
         else:
             # 全局出站：所有非转发节点流量走 SOCKS5
             existing_routed = {inbound for rule in singbox_config["route"]["rules"] for inbound in rule.get("inbound", [])}
@@ -1270,8 +1344,25 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         check_rule = {"inbound": ["egress-check-in"], "action": "route", "outbound": "warp-out"}
         singbox_config["route"]["rules"].append(check_rule)
 
+    for inbound in singbox_config["inbounds"]:
+        node = next((item for item in valid_nodes if f"in-{item['id']}" == inbound.get("tag")), None)
+        if node:
+            transports = node_transports(node)
+        elif inbound.get("type") in {"hysteria2", "tuic"}:
+            transports = ["udp"]
+        else:
+            inbound_network = inbound.get("network")
+            if inbound_network is None or inbound_network == "tcp,udp" or inbound_network == ["tcp", "udp"]:
+                transports = ["tcp", "udp"]
+            elif isinstance(inbound_network, list):
+                transports = inbound_network
+            else:
+                transports = [inbound_network]
+        tune_inbound(inbound, transports)
+
     for node in valid_nodes:
-        ensure_firewall_open(node["port"], "udp" if node.get("protocol") in {"Hysteria2", "TUIC"} else "tcp")
+        for node_transport in node_transports(node):
+            ensure_firewall_open(node["port"], node_transport)
     os.makedirs(os.path.dirname(SINGBOX_CONF_PATH), exist_ok=True)
     new_config_str = json.dumps(singbox_config, indent=2)
     old_config_str = ""
@@ -1345,7 +1436,7 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
     for node in current_nodes:
         nid, port = node["id"], node["port"]
         current_ids.add(nid)
-        proto = "udp" if node["protocol"] in ["Hysteria2", "TUIC"] else "tcp"
+        proto = "both" if node.get("protocol") == "Shadowsocks2022" and node.get("network", "tcp,udp") == "tcp,udp" else (node.get("network") if node.get("protocol") == "Shadowsocks2022" else ("udp" if node["protocol"] in ["Hysteria2", "TUIC"] else "tcp"))
         current_bytes = get_port_traffic(port, proto, nid)
         if current_bytes is None:
             continue

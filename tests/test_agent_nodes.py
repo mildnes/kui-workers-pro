@@ -13,7 +13,7 @@ class AgentNodeTests(unittest.TestCase):
         function = next(node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name == "build_singbox_config")
         source = ast.get_source_segment(SOURCE, function)
         validation = source.index('except (KeyError, TypeError, ValueError)')
-        reservation = source.index('listener_keys.add(listener_key)')
+        reservation = source.index('listener_keys.update(listener_keys_for_node)')
         self.assertGreater(reservation, validation)
 
     def test_missing_internal_relay_target_is_rejected_during_validation(self):

@@ -169,6 +169,15 @@ function nodeTransport(protocol) {
     return protocol === 'Hysteria2' || protocol === 'TUIC' ? 'udp' : 'tcp';
 }
 
+function nodeTransports(node = {}) {
+    if (node.protocol === 'Shadowsocks2022') {
+        const network = String(node.network || 'tcp,udp').toLowerCase();
+        if (network === 'tcp,udp') return ['tcp', 'udp'];
+        if (network === 'tcp' || network === 'udp') return [network];
+    }
+    return [nodeTransport(node.protocol)];
+}
+
 function normalizeNodeText(value, label, maxLength, required = true) {
     const text = String(value ?? '').trim();
     if ((required && !text) || text.length > maxLength || /[\x00-\x1f\x7f]/.test(text)) throw new Error(`Invalid node ${label}`);
@@ -203,7 +212,12 @@ function normalizeNodePayload(input) {
     node.port = Number(node.port);
     if (!Number.isInteger(node.port) || node.port < 1 || node.port > 65535) throw new Error('Invalid port');
     node.vps_ip = normalizeNodeText(node.vps_ip, 'VPS IP', 64);
-    node.network = node.protocol === 'H2-Reality' ? 'http' : (node.protocol === 'gRPC-Reality' ? 'grpc' : 'tcp');
+    if (node.protocol === 'Shadowsocks2022') {
+        node.network = String(node.network || 'tcp,udp').toLowerCase();
+        if (!['tcp', 'udp', 'tcp,udp'].includes(node.network)) throw new Error('Invalid Shadowsocks2022 network');
+    } else {
+        node.network = node.protocol === 'H2-Reality' ? 'http' : (node.protocol === 'gRPC-Reality' ? 'grpc' : 'tcp');
+    }
     node.traffic_limit = Number(node.traffic_limit || 0);
     node.expire_time = Number(node.expire_time || 0);
     if (!Number.isSafeInteger(node.traffic_limit) || node.traffic_limit < 0) throw new Error('Invalid node traffic limit');
@@ -242,7 +256,8 @@ function normalizeNodePayload(input) {
 }
 
 function nodeListenerConflicts(existing, candidate) {
-    return (existing || []).some(node => String(node.id) !== String(candidate.id) && Number(node.port) === Number(candidate.port) && nodeTransport(node.protocol) === nodeTransport(candidate.protocol));
+    const candidateTransports = new Set(nodeTransports(candidate));
+    return (existing || []).some(node => String(node.id) !== String(candidate.id) && Number(node.port) === Number(candidate.port) && nodeTransports(node).some(transport => candidateTransports.has(transport)));
 }
 
 function validateSs2022Credentials(method, password) {
@@ -1814,7 +1829,7 @@ export async function onRequest(context) {
                 } else if (node.protocol === "TUIC") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "Shadowsocks2022") {
-                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: ss\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    cipher: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: false`;
+                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: ss\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    cipher: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: ${node.network !== 'tcp'}`;
                 }
                 
                 if (cProxy) {
@@ -2268,7 +2283,7 @@ rules:
                 if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
                 if (await db.prepare('SELECT id FROM nodes WHERE id = ?').bind(n.id).first()) return Response.json({ error: 'Node already exists' }, { status: 409 });
                 const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(n.vps_ip, n.port).all();
-                if (nodeListenerConflicts(listeners, n)) return Response.json({ error: `${nodeTransport(n.protocol).toUpperCase()} port ${n.port} is already in use on this VPS` }, { status: 409 });
+                if (nodeListenerConflicts(listeners, n)) return Response.json({ error: `${nodeTransports(n).join('/').toUpperCase()} port ${n.port} is already in use on this VPS` }, { status: 409 });
                 let nodeUser = normalizeNodeText(n.username || currentUser, 'username', 64);
                 if (nodeUser === 'admin') nodeUser = currentUser;
                 if (n.expire_time && n.expire_time <= Date.now()) return Response.json({ error: 'Node expiry must be in the future' }, { status: 400 });
@@ -2293,7 +2308,7 @@ rules:
                     const existing = await db.prepare('SELECT enable FROM nodes WHERE id = ?').bind(id).first();
                     if (existing.enable === 1) {
                         const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, updated.port).all();
-                        if (nodeListenerConflicts(listeners, updated)) return Response.json({ error: `${nodeTransport(updated.protocol).toUpperCase()} port ${updated.port} is already in use on this VPS` }, { status: 409 });
+                        if (nodeListenerConflicts(listeners, updated)) return Response.json({ error: `${nodeTransports(updated).join('/').toUpperCase()} port ${updated.port} is already in use on this VPS` }, { status: 409 });
                     }
                     let nodeUser = normalizeNodeText(updated.username || currentUser, 'username', 64);
                     if (nodeUser === 'admin') nodeUser = currentUser;
@@ -2313,7 +2328,7 @@ rules:
                 if (enable === false && await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ? AND enable = 1").bind(id).first()) return Response.json({ error: 'Node is used by an enabled internal relay' }, { status: 409 });
                 if (enable === true) {
                     const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, node.port).all();
-                    if (nodeListenerConflicts(listeners, node)) return Response.json({ error: `${nodeTransport(node.protocol).toUpperCase()} port ${node.port} is already in use on this VPS` }, { status: 409 });
+                    if (nodeListenerConflicts(listeners, node)) return Response.json({ error: `${nodeTransports(node).join('/').toUpperCase()} port ${node.port} is already in use on this VPS` }, { status: 409 });
                     if (node.protocol === 'dokodemo-door' && node.relay_type === 'internal') {
                         const target = await db.prepare('SELECT protocol, enable FROM nodes WHERE id = ? AND vps_ip = ?').bind(node.target_id, node.vps_ip).first();
                         if (!target || target.enable !== 1 || !INTERNAL_RELAY_PROTOCOLS.has(target.protocol)) return Response.json({ error: 'Internal relay target is unavailable or unsupported' }, { status: 409 });

@@ -161,6 +161,9 @@ echo "[4.5/7] ⚙️ 正在应用网络内核调优（BBR / QUIC / conntrack）.
 if [ "$OS" = "alpine" ]; then
     modprobe -q xt_conntrack 2>/dev/null || true
     sysctl -w net.netfilter.nf_conntrack_max=1048576 >/dev/null 2>&1 || true
+    sysctl -w net.core.somaxconn=4096 >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_max_syn_backlog=8192 >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_fastopen=3 >/dev/null 2>&1 || true
 else
     cat > /etc/sysctl.d/99-kui-optimize.conf <<'SYSCTL'
 net.core.default_qdisc = fq
@@ -170,6 +173,9 @@ net.ipv4.tcp_wmem = 4096 65536 67108864
 net.core.rmem_max = 67108864
 net.core.wmem_max = 67108864
 net.core.netdev_max_backlog = 5000
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.tcp_fastopen = 3
 net.netfilter.nf_conntrack_max = 1048576
 net.netfilter.nf_conntrack_udp_timeout = 60
 net.netfilter.nf_conntrack_tcp_timeout_established = 7200
@@ -261,6 +267,7 @@ command_background="yes"
 pidfile="/run/sing-box.pid"
 output_log="/var/log/sing-box.log"
 error_log="/var/log/sing-box.log"
+rc_ulimit="-n 1048576"
 depend() { need net; after kui-agent; }
 EOF
     chmod +x /etc/init.d/kui-agent /etc/init.d/sing-box
@@ -279,6 +286,7 @@ ExecStart=/opt/kui/run-agent.sh
 Restart=always
 RestartSec=5
 User=root
+LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target

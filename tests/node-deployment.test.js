@@ -7,6 +7,7 @@ const frontend = fs.readFileSync(new URL('../frontend/src/composables/useKuiStat
 const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.vue', import.meta.url), 'utf8');
 const appStyles = fs.readFileSync(new URL('../frontend/src/styles/app.css', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
+const installer = fs.readFileSync(new URL('../static/vps/kui.sh', import.meta.url), 'utf8');
 
 const UUID = '11111111-1111-4111-8111-111111111111';
 const REALITY_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -24,6 +25,9 @@ test('single-node payloads normalize fields needed by sing-box', () => {
     assert.equal(reality.network, 'tcp');
     assert.equal(normalizeNodePayload(baseNode('H2-Reality', { private_key: REALITY_KEY, public_key: REALITY_KEY, short_id: 'aabbccdd' })).network, 'http');
     assert.equal(normalizeNodePayload(baseNode('gRPC-Reality', { private_key: REALITY_KEY, public_key: REALITY_KEY, short_id: 'aabbccdd' })).network, 'grpc');
+    const ssKey = Buffer.alloc(32, 7).toString('base64');
+    assert.equal(normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey, network: 'tcp,udp' })).network, 'tcp,udp');
+    assert.equal(normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey })).network, 'tcp,udp');
     assert.equal(normalizeNodePayload(baseNode('Trojan', { uuid: 'credential', private_key: 'secret' })).sni, 'addons.mozilla.org');
     assert.equal(normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 })).target_ip, 'relay.example.com');
 });
@@ -56,6 +60,7 @@ test('invalid credentials and incomplete relay records are rejected before stora
     assert.throws(() => normalizeNodePayload(baseNode('Socks5', { uuid: 'user', private_key: '' })), /password/i);
     assert.throws(() => normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'internal', target_id: '' })), /target ID/i);
     assert.throws(() => normalizeNodePayload(baseNode('Trojan', { uuid: 'credential', private_key: 'secret', traffic_limit: -1 })), /traffic limit/i);
+    assert.throws(() => normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: Buffer.alloc(32).toString('base64'), network: 'icmp' })), /network/i);
 });
 
 test('listener conflicts are scoped by VPS transport', () => {
@@ -64,6 +69,9 @@ test('listener conflicts are scoped by VPS transport', () => {
     assert.equal(nodeListenerConflicts(existing, { id: 'new', protocol: 'XTLS-Reality', port: 443 }), true);
     assert.equal(nodeListenerConflicts(existing, { id: 'new', protocol: 'Hysteria2', port: 443 }), false);
     assert.equal(nodeListenerConflicts(existing, { id: 'old', protocol: 'Trojan', port: 443 }), false);
+    assert.equal(nodeListenerConflicts(existing, { id: 'ss', protocol: 'Shadowsocks2022', port: 443, network: 'tcp,udp' }), true);
+    assert.equal(nodeListenerConflicts([{ id: 'hy2', protocol: 'Hysteria2', port: 8443 }], { id: 'ss', protocol: 'Shadowsocks2022', port: 8443, network: 'tcp' }), false);
+    assert.equal(nodeListenerConflicts([{ id: 'hy2', protocol: 'Hysteria2', port: 8443 }], { id: 'ss', protocol: 'Shadowsocks2022', port: 8443, network: 'tcp,udp' }), true);
 });
 
 test('the UI only offers enabled internal relay targets on the same VPS', () => {
@@ -92,7 +100,7 @@ test('single-node form exposes every credential used by supported protocols', ()
     for (const protocol of ['VLESS', 'XTLS-Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']) {
         assert.match(serversPage, new RegExp(`value="${protocol}"`));
     }
-    for (const model of ['node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password']) {
+    for (const model of ['node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password', 'ss_network']) {
         assert.match(serversPage, new RegExp(`newNodeParams\\[vps\\.ip\\]\\.${model}`));
     }
     assert.match(serversPage, /Reality 私钥/);
@@ -164,6 +172,25 @@ test('changing a TLS node SNI invalidates its cached certificate', () => {
     assert.match(agent, /if previous_sni != sni:/);
     assert.match(agent, /for stale_path in \(cert_path, key_path\):/);
     assert.match(agent, /with open\(sni_path, "w"\) as marker: marker\.write\(sni\)/);
+});
+
+test('sing-box node traffic and connection tuning are generated safely', () => {
+    assert.doesNotMatch(agent, /http:\/\/127\.0\.0\.1:9090\/stats\/inbound/);
+    assert.match(agent, /totals = \[_read_iptables_port_bytes\(port, item\) for item in transports\]/);
+    assert.match(agent, /"tcp_fast_open": True/);
+    assert.match(agent, /"tcp_keep_alive": "2m"/);
+    assert.match(agent, /"tcp_keep_alive_interval": "30s"/);
+    assert.match(agent, /inbound\["reuse_addr"\] = True/);
+    assert.match(agent, /"udp_timeout"\] = "5m"/);
+    assert.match(agent, /ss_networks = normalize_ss2022_network/);
+    assert.match(agent, /"network": ss_networks/);
+    assert.match(agent, /for node_transport in node_transports\(node\):/);
+    assert.match(agent, /"-days", "36500"/);
+    assert.match(agent, /"insecure": True/);
+    assert.match(installer, /net\.ipv4\.tcp_fastopen = 3/);
+    assert.match(installer, /net\.core\.somaxconn = 4096/);
+    assert.match(installer, /LimitNOFILE=1048576/);
+    assert.match(installer, /rc_ulimit="-n 1048576"/);
 });
 
 test('integrated Worker notifies the connected VPS agent directly', async () => {
