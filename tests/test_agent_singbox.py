@@ -12,7 +12,7 @@ FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound",
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
-    or (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "SELECTIVE_PROXY_RULE_SETS" for target in node.targets))
+    or (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in {"SELECTIVE_PROXY_RULE_SETS", "SELECTIVE_PROXY_EXCLUSIONS"} for target in node.targets))
 ]
 COUNTERS = {"tcp": 120, "udp": 80}
 NAMESPACE = {"_read_iptables_port_bytes": lambda _port, protocol: COUNTERS.get(protocol), "ipaddress": ipaddress, "re": re}
@@ -48,7 +48,7 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertNotIn("tcp_fast_open", udp)
 
     def test_selective_proxy_categories_use_versioned_remote_rule_sets(self):
-        rule_sets, rules, dns_tags = NAMESPACE["build_selective_proxy_rules"](
+        rule_sets, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
             ["youtube", "ai", "google", "streaming"],
             ["in-node-b", "in-node-a"],
             "socks5-outbound",
@@ -73,6 +73,39 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertEqual(route["outbound"], "socks5-outbound")
         self.assertEqual(reject_ipv6, {"inbound": ["in-node-a", "in-node-b"], "ip_version": 6, "action": "reject"})
         self.assertEqual(dns_tags, ["kui-youtube", "kui-ai-domain", "kui-google", "kui-stream-domain"])
+        self.assertEqual(direct_dns_tags, [])
+
+    def test_streaming_without_youtube_keeps_youtube_route_and_dns_direct(self):
+        rule_sets, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
+            ["streaming"], ["in-node"], "socks5-outbound"
+        )
+
+        self.assertEqual(
+            [item["tag"] for item in rule_sets],
+            ["kui-youtube", "kui-stream-domain", "kui-stream-ip"],
+        )
+        direct, proxy, reject_ipv6 = rules
+        self.assertEqual(direct, {
+            "inbound": ["in-node"],
+            "rule_set": ["kui-youtube"],
+            "action": "route",
+            "outbound": "direct-out",
+        })
+        self.assertEqual(proxy["rule_set"], ["kui-stream-domain", "kui-stream-ip"])
+        self.assertEqual(proxy["outbound"], "socks5-outbound")
+        self.assertEqual(reject_ipv6, {"inbound": ["in-node"], "ip_version": 6, "action": "reject"})
+        self.assertEqual(dns_tags, ["kui-stream-domain"])
+        self.assertEqual(direct_dns_tags, ["kui-youtube"])
+
+    def test_selecting_youtube_and_streaming_routes_both_through_proxy(self):
+        _, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
+            ["youtube", "streaming"], ["in-node"], "socks5-outbound"
+        )
+
+        self.assertEqual(len(rules), 2)
+        self.assertEqual(rules[0]["rule_set"], ["kui-youtube", "kui-stream-domain", "kui-stream-ip"])
+        self.assertEqual(dns_tags, ["kui-youtube", "kui-stream-domain"])
+        self.assertEqual(direct_dns_tags, [])
 
     def test_selective_proxy_rules_reject_empty_or_unknown_categories(self):
         for categories in ([], ["unknown"]):
@@ -112,6 +145,22 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertEqual(dns["rules"], [{"rule_set": ["kui-ai-domain"], "action": "route", "server": "proxy-dns", "strategy": "prefer_ipv4"}])
         self.assertFalse(any(rule.get("action") == "resolve" for rule in prefix))
         self.assertEqual(fallback, [])
+
+    def test_selective_proxy_dns_applies_specific_direct_exclusions_first(self):
+        dns, _, _ = NAMESPACE["build_egress_dns_policy"](
+            ["in-node"],
+            "proxy-selective",
+            outbound_tag="socks5-outbound",
+            dns_rule_tags=["kui-stream-domain"],
+            dns_direct_rule_tags=["kui-youtube"],
+        )
+        self.assertEqual(
+            dns["rules"],
+            [
+                {"rule_set": ["kui-youtube"], "action": "route", "server": "local-dns", "strategy": "prefer_ipv4"},
+                {"rule_set": ["kui-stream-domain"], "action": "route", "server": "proxy-dns", "strategy": "prefer_ipv4"},
+            ],
+        )
 
     def test_mesh_dns_queries_follow_the_same_landing_outbound(self):
         dns, prefix, fallback = NAMESPACE["build_egress_dns_policy"](

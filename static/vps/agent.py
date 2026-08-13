@@ -569,13 +569,31 @@ SELECTIVE_PROXY_RULE_SETS = {
     ),
 }
 
+# Specific services take precedence over broad collections. When a broad
+# category is selected without one of these specific categories, the specific
+# rule set is loaded as an explicit direct-route exclusion.
+SELECTIVE_PROXY_EXCLUSIONS = {
+    "google": ("youtube", "ai"),
+    "streaming": ("youtube",),
+}
+
 def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
-    selected = set(categories or [])
+    selected = {category for category in categories or [] if category in SELECTIVE_PROXY_RULE_SETS}
+    if not selected:
+        raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
+    excluded = {
+        specific
+        for broad in selected
+        for specific in SELECTIVE_PROXY_EXCLUSIONS.get(broad, ())
+        if specific not in selected
+    }
     rule_sets = []
     route_tags = []
     dns_tags = []
+    direct_route_tags = []
+    direct_dns_tags = []
     for category, definitions in SELECTIVE_PROXY_RULE_SETS.items():
-        if category not in selected:
+        if category not in selected and category not in excluded:
             continue
         for definition in definitions:
             rule_sets.append({
@@ -587,17 +605,29 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
                 "update_interval": "1d",
             })
             use = definition.get("use", "both")
-            if use in {"route", "both"}:
-                route_tags.append(definition["tag"])
-            if use in {"dns", "both"}:
-                dns_tags.append(definition["tag"])
-    if not rule_sets:
-        raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
+            if category in selected:
+                if use in {"route", "both"}:
+                    route_tags.append(definition["tag"])
+                if use in {"dns", "both"}:
+                    dns_tags.append(definition["tag"])
+            else:
+                if use in {"route", "both"}:
+                    direct_route_tags.append(definition["tag"])
+                if use in {"dns", "both"}:
+                    direct_dns_tags.append(definition["tag"])
 
     inbounds = sorted(set(proxy_inbounds or []))
     if not inbounds:
-        return rule_sets, [], dns_tags
-    return rule_sets, [
+        return rule_sets, [], dns_tags, direct_dns_tags
+    rules = []
+    if direct_route_tags:
+        rules.append({
+            "inbound": inbounds,
+            "rule_set": direct_route_tags,
+            "action": "route",
+            "outbound": "direct-out",
+        })
+    rules.extend([
         {
             "inbound": inbounds,
             "rule_set": route_tags,
@@ -605,10 +635,11 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
             "outbound": outbound_tag,
         },
         {"inbound": inbounds, "ip_version": 6, "action": "reject"},
-    ], dns_tags
+    ])
+    return rule_sets, rules, dns_tags, direct_dns_tags
 
 
-def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, strategy="prefer_ipv4", detoured_dns=None):
+def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, strategy="prefer_ipv4", detoured_dns=None):
     inbounds = sorted(set(proxy_inbounds or []))
     local_dns = {"type": "local", "tag": "local-dns"}
     servers = [local_dns]
@@ -638,6 +669,14 @@ def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags
             selected_dns_tags = list(dict.fromkeys(dns_rule_tags or []))
             if not selected_dns_tags:
                 raise RuntimeError("selective proxy DNS requires domain rule sets")
+            direct_dns_tags = list(dict.fromkeys(dns_direct_rule_tags or []))
+            if direct_dns_tags:
+                dns_rules.append({
+                    "rule_set": direct_dns_tags,
+                    "action": "route",
+                    "server": "local-dns",
+                    "strategy": strategy,
+                })
             dns_rules.append({
                 "rule_set": selected_dns_tags,
                 "action": "route",
@@ -1214,6 +1253,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
     dns_policy_mode = "native"
     dns_outbound_tag = ""
     dns_rule_tags = []
+    dns_direct_rule_tags = []
     dns_strategy = "prefer_ipv4"
     dns_final_rules = []
     landing_dns_detours = []
@@ -1404,7 +1444,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             except Exception:
                 selected = []
             proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
-            rule_sets, selective_rules, dns_rule_tags = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
+            rule_sets, selective_rules, dns_rule_tags, dns_direct_rule_tags = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
             singbox_config["route"]["rule_set"] = rule_sets
             singbox_config["route"]["rules"].extend(rule for rule in selective_rules if rule.get("action") != "reject")
             dns_final_rules.extend(rule for rule in selective_rules if rule.get("action") == "reject")
@@ -1468,6 +1508,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         dns_policy_mode,
         outbound_tag=dns_outbound_tag,
         dns_rule_tags=dns_rule_tags,
+        dns_direct_rule_tags=dns_direct_rule_tags,
         strategy=dns_strategy,
         detoured_dns=landing_dns_detours,
     )
