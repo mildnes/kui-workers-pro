@@ -347,4 +347,5 @@ test('settings page uses compact semantic sections and guarded actions', () => {
     assert.match(settingsPage, /siteTitleSaving/);
     assert.match(settingsPage, /minlength="12"/);
     assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-card/);
+    assert.match(settingsPage, /kui-settings-grid-three kui-settings-telegram-grid/);
 });

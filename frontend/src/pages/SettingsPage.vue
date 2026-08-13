@@ -105,7 +105,7 @@
             </div>
 
             <h4>Telegram 管理与告警</h4>
-            <div class="kui-settings-grid">
+            <div class="kui-settings-grid kui-settings-grid-three kui-settings-telegram-grid">
               <div class="kui-settings-field"><label for="tg-notify">告警状态</label><select id="tg-notify" v-model="probeSys.tg_notify"><option value="false">关闭告警</option><option value="true">开启掉线告警</option></select></div>
               <div class="kui-settings-field"><label for="tg-token">Bot Token</label><input id="tg-token" v-model.trim="probeSys.tg_bot_token" autocomplete="off" placeholder="用于机器人命令"></div>
               <div class="kui-settings-field"><label for="tg-chat">管理员 Chat ID</label><input id="tg-chat" v-model.trim="probeSys.tg_chat_id" autocomplete="off"></div>
