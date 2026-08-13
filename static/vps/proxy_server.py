@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import ipaddress
-import select, socket, threading, urllib.parse, time, base64, hmac
+import select, socket, threading, urllib.parse, time, base64, hmac, secrets, struct
 from typing import Any
 
 def env_secret(name: str) -> str:
@@ -63,18 +63,101 @@ def parse_addr_port(raw: str):
         return host, parse_int(port_text) or 443
     return raw, 443
 
+def _dns_name(packet: bytes, offset: int) -> tuple[str, int]:
+    labels = []
+    next_offset = offset
+    jumped = False
+    seen = set()
+    while True:
+        if offset >= len(packet): raise OSError("truncated DNS name")
+        length = packet[offset]
+        if length == 0:
+            if not jumped: next_offset = offset + 1
+            return ".".join(labels), next_offset
+        if length & 0xC0 == 0xC0:
+            if offset + 1 >= len(packet): raise OSError("truncated DNS pointer")
+            pointer = ((length & 0x3F) << 8) | packet[offset + 1]
+            if pointer in seen: raise OSError("recursive DNS pointer")
+            seen.add(pointer)
+            if not jumped: next_offset = offset + 2
+            offset = pointer
+            jumped = True
+            continue
+        if length & 0xC0 or offset + 1 + length > len(packet):
+            raise OSError("invalid DNS label")
+        labels.append(packet[offset + 1:offset + 1 + length].decode("ascii"))
+        offset += 1 + length
+        if not jumped: next_offset = offset
+
+def _dns_query(host: str, query_type: int, interface: str) -> list[str]:
+    labels = host.rstrip(".").encode("idna").split(b".")
+    if not labels or any(not label or len(label) > 63 for label in labels):
+        raise OSError("invalid DNS name")
+    query_id = secrets.randbelow(65536)
+    question = b"".join(bytes((len(label),)) + label for label in labels) + b"\x00" + struct.pack("!HH", query_type, 1)
+    request = struct.pack("!HHHHHH", query_id, 0x0100, 1, 0, 0, 0) + question
+    dns_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        dns_socket.settimeout(4)
+        dns_socket.setsockopt(socket.SOL_SOCKET, 25, interface.encode("utf-8"))
+        dns_socket.connect(("1.1.1.1", 53))
+        dns_socket.send(request)
+        response = dns_socket.recv(4096)
+    finally:
+        dns_socket.close()
+    if len(response) < 12: raise OSError("truncated DNS response")
+    response_id, flags, qd_count, answer_count, _, _ = struct.unpack("!HHHHHH", response[:12])
+    if response_id != query_id or not flags & 0x8000 or flags & 0x000F:
+        raise OSError("invalid DNS response")
+    offset = 12
+    for _ in range(qd_count):
+        _, offset = _dns_name(response, offset)
+        offset += 4
+        if offset > len(response): raise OSError("truncated DNS question")
+    addresses = []
+    for _ in range(answer_count):
+        _, offset = _dns_name(response, offset)
+        if offset + 10 > len(response): raise OSError("truncated DNS answer")
+        record_type, record_class, _, data_length = struct.unpack("!HHIH", response[offset:offset + 10])
+        offset += 10
+        if offset + data_length > len(response): raise OSError("truncated DNS data")
+        data = response[offset:offset + data_length]
+        offset += data_length
+        if record_class == 1 and record_type == 1 and len(data) == 4:
+            addresses.append(socket.inet_ntop(socket.AF_INET, data))
+        elif record_class == 1 and record_type == 28 and len(data) == 16:
+            addresses.append(socket.inet_ntop(socket.AF_INET6, data))
+    return addresses
+
+def resolve_on_landing(host: str, port: int, interface: str):
+    try:
+        parsed = ipaddress.ip_address(host)
+        family = socket.AF_INET6 if parsed.version == 6 else socket.AF_INET
+        sockaddr = (host, port, 0, 0) if family == socket.AF_INET6 else (host, port)
+        return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr)]
+    except ValueError:
+        pass
+    addresses = []
+    errors = []
+    for query_type in (1, 28):
+        try: addresses.extend(_dns_query(host, query_type, interface))
+        except OSError as error: errors.append(error)
+    if not addresses:
+        raise errors[-1] if errors else OSError("landing DNS returned no addresses")
+    results = []
+    for address in dict.fromkeys(addresses):
+        parsed = ipaddress.ip_address(address)
+        family = socket.AF_INET6 if parsed.version == 6 else socket.AF_INET
+        sockaddr = (address, port, 0, 0) if family == socket.AF_INET6 else (address, port)
+        results.append((family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr))
+    return results
+
 def create_connection(address: tuple[str, int], timeout: float = 20) -> socket.socket:
     global ACTIVE_BIND
     bind_interface = ACTIVE_BIND
     host, port = address
     err = None
-    if ':' in host:
-        try:
-            ipaddress.IPv6Address(host)
-            address = (host, port, 0, 0)
-        except (ipaddress.AddressValueError, ValueError):
-            pass
-    addrinfos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    addrinfos = resolve_on_landing(host, port, bind_interface)
     if not addrinfos:
         raise OSError("getaddrinfo empty")
 

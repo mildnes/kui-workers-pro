@@ -5,6 +5,7 @@ import { __test } from '../functions/api/[[path]].js';
 
 const manager = fs.readFileSync(new URL('../static/vps/lite_manager.py', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
+const proxyServer = fs.readFileSync(new URL('../static/vps/proxy_server.py', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const frontendState = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
@@ -88,6 +89,13 @@ test('residential data-plane verification follows the configured listener with s
     assert.match(agent, /residential_addr == "127\.0\.0\.1" and egress_check_host != "127\.0\.0\.1"/);
     assert.match(agent, /"addr": residential_addr, "check_addr": egress_check_host/);
     assert.match(agent, /residential proxy verification failed via/);
+});
+
+test('residential landing server resolves domains through its active tunnel', () => {
+    assert.match(proxyServer, /def resolve_on_landing\(host: str, port: int, interface: str\)/);
+    assert.match(proxyServer, /dns_socket\.setsockopt\(socket\.SOL_SOCKET, 25, interface\.encode\("utf-8"\)\)/);
+    assert.match(proxyServer, /addrinfos = resolve_on_landing\(host, port, bind_interface\)/);
+    assert.doesNotMatch(proxyServer, /socket\.getaddrinfo\(host, port/);
 });
 
 test('realtime egress results are persisted and acknowledged without HTTP', () => {

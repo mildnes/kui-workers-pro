@@ -426,7 +426,7 @@ def _verify_warp_exit(mode, check_host="127.0.0.1"):
     for family, url, extra_args in checks:
         verified = False
         for _ in range(4):
-            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5://{check_host}:39482", *extra_args, url], capture_output=True, text=True)
+            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5h://{check_host}:39482", *extra_args, url], capture_output=True, text=True)
             if result.returncode == 0 and "warp=on" in result.stdout.lower():
                 trace = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
                 ip = trace.get("ip", "")
@@ -480,7 +480,7 @@ def _verify_residential_exit(proxy):
 def _verify_socks5_exit(check_host="127.0.0.1"):
     check_host = normalize_check_host(check_host)
     for _ in range(4):
-        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
+        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5h://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
         ip = _verified_public_ip(result.stdout)
         if result.returncode == 0 and ip: return ip
         time.sleep(2)
@@ -528,6 +528,7 @@ SELECTIVE_PROXY_RULE_SETS = {
             "tag": "kui-youtube",
             "format": "binary",
             "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/YouTube/YouTube.srs",
+            "use": "both",
         },
     ),
     "ai": (
@@ -535,11 +536,13 @@ SELECTIVE_PROXY_RULE_SETS = {
             "tag": "kui-ai-domain",
             "format": "source",
             "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/ai.json",
+            "use": "both",
         },
         {
             "tag": "kui-ai-ip",
             "format": "source",
             "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/ai.json",
+            "use": "route",
         },
     ),
     "google": (
@@ -547,6 +550,7 @@ SELECTIVE_PROXY_RULE_SETS = {
             "tag": "kui-google",
             "format": "binary",
             "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/Google/Google.srs",
+            "use": "both",
         },
     ),
     "streaming": (
@@ -554,11 +558,13 @@ SELECTIVE_PROXY_RULE_SETS = {
             "tag": "kui-stream-domain",
             "format": "source",
             "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/stream.json",
+            "use": "both",
         },
         {
             "tag": "kui-stream-ip",
             "format": "source",
             "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/stream.json",
+            "use": "route",
         },
     ),
 }
@@ -566,6 +572,8 @@ SELECTIVE_PROXY_RULE_SETS = {
 def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
     selected = set(categories or [])
     rule_sets = []
+    route_tags = []
+    dns_tags = []
     for category, definitions in SELECTIVE_PROXY_RULE_SETS.items():
         if category not in selected:
             continue
@@ -578,22 +586,107 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
                 "download_detour": "direct-out",
                 "update_interval": "1d",
             })
+            use = definition.get("use", "both")
+            if use in {"route", "both"}:
+                route_tags.append(definition["tag"])
+            if use in {"dns", "both"}:
+                dns_tags.append(definition["tag"])
     if not rule_sets:
         raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
 
     inbounds = sorted(set(proxy_inbounds or []))
     if not inbounds:
-        return rule_sets, []
+        return rule_sets, [], dns_tags
     return rule_sets, [
-        {"inbound": inbounds, "action": "sniff", "timeout": "1s"},
         {
             "inbound": inbounds,
-            "rule_set": [rule_set["tag"] for rule_set in rule_sets],
+            "rule_set": route_tags,
             "action": "route",
             "outbound": outbound_tag,
         },
         {"inbound": inbounds, "ip_version": 6, "action": "reject"},
-    ]
+    ], dns_tags
+
+
+def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, strategy="prefer_ipv4", detoured_dns=None):
+    inbounds = sorted(set(proxy_inbounds or []))
+    local_dns = {"type": "local", "tag": "local-dns"}
+    servers = [local_dns]
+    dns_rules = []
+    prefix_rules = []
+    fallback_rules = []
+
+    if mode == "native":
+        dns_tag = "local-dns"
+        final_tag = dns_tag
+    elif mode in {"proxy-global", "proxy-selective", "warp"}:
+        if not outbound_tag:
+            raise RuntimeError(f"{mode} DNS requires an outbound")
+        dns_tag = "warp-dns" if mode == "warp" else "proxy-dns"
+        final_tag = "local-dns" if mode == "proxy-selective" else dns_tag
+        dns_address = "2606:4700:4700::1111" if strategy == "ipv6_only" else "1.1.1.1"
+        servers.append({
+            "type": "https",
+            "tag": dns_tag,
+            "server": dns_address,
+            "server_port": 443,
+            "path": "/dns-query",
+            "tls": {"enabled": True, "server_name": "cloudflare-dns.com"},
+            "detour": outbound_tag,
+        })
+        if mode == "proxy-selective":
+            selected_dns_tags = list(dict.fromkeys(dns_rule_tags or []))
+            if not selected_dns_tags:
+                raise RuntimeError("selective proxy DNS requires domain rule sets")
+            dns_rules.append({
+                "rule_set": selected_dns_tags,
+                "action": "route",
+                "server": dns_tag,
+                "strategy": strategy,
+            })
+    else:
+        raise RuntimeError(f"unsupported DNS policy mode: {mode}")
+
+    for index, (inbound, detour) in enumerate(sorted(set(detoured_dns or []))):
+        if not inbound or not detour:
+            continue
+        landing_dns_tag = f"landing-dns-{index}"
+        servers.append({
+            "type": "https",
+            "tag": landing_dns_tag,
+            "server": "1.1.1.1",
+            "server_port": 443,
+            "path": "/dns-query",
+            "tls": {"enabled": True, "server_name": "cloudflare-dns.com"},
+            "detour": detour,
+        })
+        dns_rules.append({
+            "inbound": [inbound],
+            "action": "route",
+            "server": landing_dns_tag,
+            "strategy": strategy,
+        })
+
+    if inbounds:
+        prefix_rules.extend([
+            {"inbound": inbounds, "action": "sniff", "timeout": "1s"},
+            {"inbound": inbounds, "protocol": "dns", "action": "hijack-dns"},
+        ])
+        # SOCKS5 receives the original domain and resolves it on the landing
+        # server. WARP is an IP tunnel, so its destinations are resolved here
+        # with DNS traffic forced through the WARP endpoint.
+        if mode == "warp":
+            prefix_rules.append({"inbound": inbounds, "action": "resolve", "server": dns_tag, "strategy": strategy})
+
+    return {
+        "servers": servers,
+        "rules": dns_rules,
+        "final": final_tag,
+        "strategy": strategy,
+        "independent_cache": True,
+        "cache_capacity": 4096,
+        "reverse_mapping": True,
+    }, prefix_rules, fallback_rules
 
 def _normalize_egress_config(value, fallback_mode="native", fallback=None):
     source = value if isinstance(value, dict) else (fallback if isinstance(fallback, dict) else {})
@@ -1100,6 +1193,12 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
     active_certs = []
     valid_nodes = []
     listener_keys = set()
+    dns_policy_mode = "native"
+    dns_outbound_tag = ""
+    dns_rule_tags = []
+    dns_strategy = "prefer_ipv4"
+    dns_final_rules = []
+    landing_dns_detours = []
     if warp_mode not in {"off", "ipv4", "ipv6", "dual"}:
         raise ValueError("invalid WARP mode")
 
@@ -1257,6 +1356,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 }))
                 in_tag = f"in-{nid}"
                 singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": out_tag})
+                landing_dns_detours.append((in_tag, out_tag))
         except Exception:
             pass
 
@@ -1278,16 +1378,18 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": egress_check_host, "listen_port": 39482})
         singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "outbound": s5_tag})
         s5_mode = socks5_outbound.get("mode", "global")
+        dns_policy_mode = "proxy-selective" if s5_mode == "selective" else "proxy-global"
+        dns_outbound_tag = s5_tag
         if s5_mode == "selective":
             try:
                 selected = json.loads(socks5_outbound.get("domains", "{}") or "{}").get("categories", [])
             except Exception:
                 selected = []
             proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
-            rule_sets, selective_rules = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
+            rule_sets, selective_rules, dns_rule_tags = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
             singbox_config["route"]["rule_set"] = rule_sets
-            singbox_config["route"]["rules"][0:0] = selective_rules[:1]
-            singbox_config["route"]["rules"].extend(selective_rules[1:])
+            singbox_config["route"]["rules"].extend(rule for rule in selective_rules if rule.get("action") != "reject")
+            dns_final_rules.extend(rule for rule in selective_rules if rule.get("action") == "reject")
             singbox_config["experimental"] = {
                 "cache_file": {
                     "enabled": True,
@@ -1330,11 +1432,9 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             }],
         }]
         strategy = "prefer_ipv4" if warp_mode != "ipv6" else "prefer_ipv6"
-        dns_server = "2606:4700:4700::1111" if warp_mode == "ipv6" else "1.1.1.1"
-        singbox_config["dns"] = {
-            "servers": [{"type": "udp", "tag": "warp-dns", "server": dns_server, "server_port": 53, "detour": "warp-out"}],
-            "final": "warp-dns", "strategy": strategy,
-        }
+        dns_policy_mode = "warp"
+        dns_outbound_tag = "warp-out"
+        dns_strategy = "ipv6_only" if warp_mode == "ipv6" else ("ipv4_only" if warp_mode == "ipv4" else strategy)
         warp_inbounds = [f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door"]
         if warp_inbounds:
             if warp_mode == "ipv4": singbox_config["route"]["rules"].append({"inbound": warp_inbounds, "ip_version": 6, "action": "reject"})
@@ -1343,6 +1443,19 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": egress_check_host, "listen_port": 39482})
         check_rule = {"inbound": ["egress-check-in"], "action": "route", "outbound": "warp-out"}
         singbox_config["route"]["rules"].append(check_rule)
+
+    proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
+    dns_config, dns_prefix_rules, dns_fallback_rules = build_egress_dns_policy(
+        proxy_inbounds,
+        dns_policy_mode,
+        outbound_tag=dns_outbound_tag,
+        dns_rule_tags=dns_rule_tags,
+        strategy=dns_strategy,
+        detoured_dns=landing_dns_detours,
+    )
+    singbox_config["dns"] = dns_config
+    singbox_config["route"]["default_domain_resolver"] = "local-dns"
+    singbox_config["route"]["rules"] = dns_prefix_rules + singbox_config["route"]["rules"] + dns_fallback_rules + dns_final_rules
 
     for inbound in singbox_config["inbounds"]:
         node = next((item for item in valid_nodes if f"in-{item['id']}" == inbound.get("tag")), None)

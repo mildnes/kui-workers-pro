@@ -79,6 +79,11 @@ test('all egress modes report the IP verified during application', () => {
     assert.match(agent, /"egress_ip": verified_egress_ip/);
 });
 
+test('WARP and SOCKS5 verification preserve domains for landing-side DNS', () => {
+    assert.match(agent, /--proxy", f"socks5h:\/\/\{check_host\}:39482"/);
+    assert.doesNotMatch(agent, /--proxy", f"socks5:\/\/\{check_host\}:39482"/);
+});
+
 test('WARP preparation is asynchronous and endpoint recovery keeps the identity profile', () => {
     assert.match(agent, /def _prepare_warp_profile_async/);
     assert.match(agent, /threading\.Thread\([^\n]+warp-profile/);
