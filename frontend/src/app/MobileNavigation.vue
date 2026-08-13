@@ -38,10 +38,10 @@ import { KUI_KEY } from './context.js';
 const primaryAdminItems = [
   { id: 'nodes', icon: '▣', label: '服务器' },
   { id: 'proxy', icon: '⌁', label: '住宅' },
-  { id: 'users', icon: '◎', label: '用户' },
+  { id: 'public-listener', icon: '◉', label: '公网监听' },
 ];
 const moreItems = [
-  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'add-vps', icon: '＋', label: '接入 VPS' }, { id: 'public-listener', icon: '◉', label: '公网监听' }, { id: 'settings', icon: '⚙', label: '设置' },
+  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'users', icon: '◎', label: '用户' }, { id: 'settings', icon: '⚙', label: '设置' },
 ];
 const moreItemsBeforeTheme = moreItems.filter(item => item.id !== 'settings');
 const moreItemsAfterTheme = moreItems.filter(item => item.id === 'settings');
@@ -56,7 +56,6 @@ export default {
     const moreOpen = ref(false);
     const go = id => {
       moreOpen.value = false;
-      if (id === 'add-vps') { state.addVpsModalOpen.value = true; return; }
       state.activeTab.value = id;
       if (id === 'probe') state.probeDetailId.value = null;
     };

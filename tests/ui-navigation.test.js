@@ -15,7 +15,6 @@ const legacyProxy = read('../frontend/src/proxy/legacyProxy.js');
 const state = read('../frontend/src/composables/useKuiState.js');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
 const settingsPage = read('../frontend/src/pages/SettingsPage.vue');
-const addVpsModal = read('../frontend/src/components/modals/AddVpsModal.vue');
 const qrModal = read('../frontend/src/components/modals/QrModal.vue');
 const probeEditModal = read('../frontend/src/components/modals/ProbeEditModal.vue');
 const app = read('../frontend/src/App.vue');
@@ -28,7 +27,7 @@ test('removed and hidden pages are absent from the active UI', () => {
 });
 
 test('desktop navigation keeps all operational entries in the requested upper order', () => {
-    const itemOrder = ['nodes', 'proxy', 'users', 'thirdparty', 'public-listener', 'add-vps'];
+    const itemOrder = ['nodes', 'proxy', 'public-listener', 'thirdparty', 'users'];
     const positions = itemOrder.map(id => desktopNavigation.indexOf(`id: '${id}'`));
     assert.ok(positions.every(position => position >= 0));
     assert.deepEqual([...positions].sort((a, b) => a - b), positions);
@@ -48,22 +47,20 @@ test('public listener control is placed before settings on desktop and mobile', 
     assert.match(publicListenerPage, /防火墙或云安全组/);
 });
 
-test('VPS onboarding opens a shared modal after public listener navigation', () => {
-    const desktopPublic = desktopNavigation.indexOf("id: 'public-listener'");
-    const desktopAdd = desktopNavigation.indexOf("id: 'add-vps'");
-    assert.ok(desktopPublic >= 0 && desktopPublic < desktopAdd);
-    const mobileAdd = mobileNavigation.indexOf("id: 'add-vps'");
-    const mobilePublic = mobileNavigation.indexOf("id: 'public-listener'");
-    assert.ok(mobileAdd >= 0 && mobileAdd < mobilePublic);
-    assert.match(mobileNavigation, /id === 'add-vps'[\s\S]*addVpsModalOpen\.value = true/);
-    assert.doesNotMatch(serversPage, /kui-add-server|添加服务器别名、公网 IP 与系统架构/);
-    assert.match(app, /<AddVpsModal \/>/);
-    assert.match(addVpsModal, /v-if="isLoggedIn && role === 'admin' && addVpsModalOpen"/);
-    assert.match(addVpsModal, /role="dialog"/);
-    assert.match(addVpsModal, /@submit\.prevent="submit"/);
-    assert.match(addVpsModal, /v-model\.trim="newVps\.name"/);
-    assert.match(appStyles, /\.kui-add-vps-backdrop/);
-    assert.match(appStyles, /\.kui-add-vps-dialog/);
+test('VPS onboarding is inline directly below the four status cards', () => {
+    assert.doesNotMatch(desktopNavigation, /id: 'add-vps'|接入 VPS/);
+    assert.doesNotMatch(mobileNavigation, /id: 'add-vps'|接入 VPS/);
+    assert.doesNotMatch(app, /AddVpsModal/);
+    const stats = serversPage.indexOf('class="kui-server-stats');
+    const onboarding = serversPage.indexOf('class="kui-vps-onboarding"');
+    const serverGrid = serversPage.indexOf('class="kui-server-grid');
+    assert.ok(stats >= 0 && stats < onboarding && onboarding < serverGrid);
+    assert.equal((serversPage.slice(stats, onboarding).match(/bg-white\/60/g) || []).length, 4);
+    assert.match(serversPage, /kui-vps-onboarding[\s\S]*>主机名 [\s\S]*>公网 IP [\s\S]*>系统架构 [\s\S]*确认接入/);
+    assert.match(serversPage, /@submit\.prevent="addVps"/);
+    assert.match(serversPage, /v-model\.trim="newVps\.name"/);
+    assert.match(appStyles, /\.kui-vps-onboarding \{/);
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-vps-onboarding/);
 });
 
 test('probe monitor is displayed before subscription exports and remains visible on mobile', () => {

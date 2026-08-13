@@ -7,6 +7,13 @@
                       <div class="bg-white/60 backdrop-blur-xl p-5 rounded-[2rem] border border-white shadow-lg shadow-indigo-100/30 text-center"><div class="text-[10px] text-slate-400 font-bold mb-1 tracking-widest">实时上传</div><div class="text-2xl font-black text-blue-500 truncate">↑ {{ formatBytes(globalSpeedOut) }}/s</div></div>
                   </div>
 
+                  <form class="kui-vps-onboarding" @submit.prevent="addVps">
+                      <label><span>主机名 <b class="kui-required">*</b></span><input v-model.trim="newVps.name" required placeholder="例如：日本软银 01"></label>
+                      <label><span>公网 IP <b class="kui-required">*</b></span><input v-model.trim="newVps.ip" required inputmode="decimal" placeholder="8.8.8.8"></label>
+                      <label><span>系统架构 <b class="kui-required">*</b></span><select v-model="newVps.os" required><option value="debian">Ubuntu / Debian</option><option value="alpine">Alpine Linux</option></select></label>
+                      <button type="submit" :disabled="addingVps"><span v-if="addingVps" class="kui-spin">↻</span>{{ addingVps ? '正在接入' : '确认接入' }}</button>
+                  </form>
+
                   <div class="kui-server-grid grid grid-cols-1 xl:grid-cols-2 gap-8">
                       <div v-for="vps in servers" :key="vps.ip" class="kui-server-card bg-white/70 backdrop-blur-xl rounded-[2rem] border border-white shadow-xl shadow-slate-200/40 flex flex-col overflow-hidden transition-all hover:shadow-2xl">
                           <div class="p-6 md:p-8 relative">

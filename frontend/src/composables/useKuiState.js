@@ -32,7 +32,7 @@ export function useKuiState() {
                   const servers = ref([]); const nodes = ref([]); const users = ref([]); const groups = ref([]); const securityWarnings = ref([]);
                   const trafficTotals = ref({}); const trafficSeries = ref({});
                   let trafficFetchPromise = null; let trafficStatsLastFetchedAt = 0;
-                  const addVpsModalOpen = ref(false); const addingVps = ref(false);
+                  const addingVps = ref(false);
                   const proxyCredentialsReady = ref(false); const proxyPublicListenerManageable = ref(true); const publicListenerSaving = reactive({});
                   const realtimeUrl = ref('');
                   const realtimeConnected = ref(false);
@@ -287,7 +287,7 @@ export function useKuiState() {
                       }
                   };
                   
-                  const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; trafficTotals.value = {}; trafficSeries.value = {}; trafficStatsLastFetchedAt = 0; addVpsModalOpen.value = false; addingVps.value = false; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
+                  const clearPrivateState = () => { servers.value = []; nodes.value = []; users.value = []; groups.value = []; trafficTotals.value = {}; trafficSeries.value = {}; trafficStatsLastFetchedAt = 0; addingVps.value = false; adminProbeServers.value = []; mySubToken.value = ''; probeDetailId.value = null; probeDetail.value = {}; window.kuiRealtimeProxySnapshots = {}; };
                   const logout = () => { const token = authKey.value; if (token) fetch('/api/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, keepalive: true }).catch(() => {}); authGeneration++; sessionStorage.removeItem('kui_auth_key'); sessionStorage.removeItem('kui_user'); sessionStorage.removeItem('kui_role'); isLoggedIn.value = false; currentUser.value = ''; authKey.value = ''; clearPrivateState(); activeTab.value = 'probe'; realtimeGeneration++; realtimeDisconnectedAt = 0; clearTimeout(realtimeFallbackTimer); clearTimeout(realtimeReconnectTimer); clearTimeout(realtimeConnectTimer); clearInterval(realtimePingTimer); const socket = realtimeSocket; realtimeSocket = null; socket?.close(); realtimeConnected.value = false; window.kuiRealtimeConnected = false; stopPolling(); startProbePolling();};
                   const sendUiPing = async () => { try { await fetchApi('/api/ui_ping', { method: 'POST' }); } catch(e) {} };
 
@@ -546,7 +546,7 @@ export function useKuiState() {
                   const deleteGroup = async group => { if (confirm(`确定删除用户组“${group.name}”？不会删除其中的用户或节点。`)) { await fetchApi(`/api/groups?id=${encodeURIComponent(group.id)}`, { method: 'DELETE' }); delete groupDrafts[group.id]; refreshData(); } };
                   const addVps = async () => {
                       if (addingVps.value) return false;
-                      if (!newVps.value.ip || !newVps.value.name) { alert('请输入服务器别名和公网 IP'); return false; }
+                      if (!newVps.value.ip || !newVps.value.name) { alert('请输入主机名和公网 IP'); return false; }
                       addingVps.value = true;
                       try {
                           deployOsMap[newVps.value.ip] = newVps.value.os; saveOsMap();
@@ -1046,7 +1046,7 @@ export function useKuiState() {
 
                   return { 
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, effectiveColorMode, refreshing, refreshPanel,
-                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addVpsModalOpen, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
+                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,

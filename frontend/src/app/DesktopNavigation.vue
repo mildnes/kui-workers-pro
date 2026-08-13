@@ -10,7 +10,7 @@
 
     <nav class="kui-sidebar-nav" aria-label="主导航">
       <template v-if="role === 'admin'">
-        <button v-for="item in adminItems" :key="item.id" @click="activateAdminItem(item.id)" :class="{ active: activeTab === item.id }">
+        <button v-for="item in adminItems" :key="item.id" @click="go(item.id)" :class="{ active: activeTab === item.id }">
           <span class="kui-nav-icon">{{ item.icon }}</span><span>{{ item.label }}</span>
         </button>
       </template>
@@ -50,10 +50,9 @@ import { KUI_KEY } from './context.js';
 const adminItems = [
   { id: 'nodes', icon: '▣', label: '服务器与节点' },
   { id: 'proxy', icon: '⌁', label: '住宅 IP 代理' },
-  { id: 'users', icon: '◎', label: '用户与授权' },
-  { id: 'thirdparty', icon: '↗', label: '第三方订阅' },
   { id: 'public-listener', icon: '◉', label: '公网监听' },
-  { id: 'add-vps', icon: '＋', label: '接入 VPS' },
+  { id: 'thirdparty', icon: '↗', label: '第三方订阅' },
+  { id: 'users', icon: '◎', label: '用户与授权' },
 ];
 const userItems = [
   { id: 'dashboard', icon: '⌂', label: '我的主页' },
@@ -64,9 +63,7 @@ export default {
   setup() {
     const state = inject(KUI_KEY);
     const go = id => { state.activeTab.value = id; if (id === 'probe') state.probeDetailId.value = null; };
-    const openAddVps = () => { state.addVpsModalOpen.value = true; };
-    const activateAdminItem = id => { if (id === 'add-vps') openAddVps(); else go(id); };
-    return { ...state, activateAdminItem, adminItems, userItems, go };
+    return { ...state, adminItems, userItems, go };
   },
 };
 </script>
