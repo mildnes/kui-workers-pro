@@ -41,6 +41,9 @@ export function useKuiState() {
                   let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeConnectTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
                   const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const nodeEditDrafts = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
                   const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
+                  const siteTitleDirty = ref(false); const probeSettingsDirty = ref(false);
+                  const siteTitleSaving = ref(false); const probeSettingsSaving = ref(false); const subscriptionProtectionSaving = ref(false);
+                  const subTokenResetting = ref(false); const passwordSaving = ref(false); const githubNodesPulling = ref(false);
                   const batchStartPort = reactive({}); const batchUser = reactive({}); 
                   const thirdPartySubscriptions = ref([]); const newThirdParty = reactive({ name: '', url: '' }); const loadingThirdParty = ref(false);
                   
@@ -351,13 +354,19 @@ export function useKuiState() {
 
                   // --- GitHub 动态拉取 ---
                   const pullGithubNodes = async () => {
+                      if (githubNodesPulling.value) return;
+                      githubNodesPulling.value = true;
                       try {
                           const res = await fetchApi('/api/probe/admin/pull_github', { method: 'POST' });
                           if (res.ok) {
                               alert('✅ 云端主题与测速节点数据拉取成功！');
-                              refreshData(); fetchProbeData();
+                              await loadAdminProbeServers();
                           }
-                      } catch(e) { alert('拉取失败: ' + e); }
+                      } catch(e) {
+                          console.error('[settings] failed to pull probe presets', e);
+                      } finally {
+                          githubNodesPulling.value = false;
+                      }
                   };
 
                   let isFirstLoad = true;
@@ -429,7 +438,7 @@ export function useKuiState() {
                           const probeRes = await fetchApi('/api/probe/admin/data');
                           if (!probeRes.ok) throw new Error(`Probe data request failed: ${probeRes.status}`);
                           const probeData = await probeRes.json();
-                          Object.assign(probeSys, probeData.settings || {});
+                          if (!probeSettingsDirty.value) Object.assign(probeSys, probeData.settings || {});
                           if (probeData.settings?.cached_nodes_data) parseCachedNodes(probeData.settings.cached_nodes_data);
                           adminProbeServers.value = probeData.servers || [];
                       } catch (error) {
@@ -450,7 +459,7 @@ export function useKuiState() {
                               if (previous) for (const field of draftFields) if (previous[field] !== undefined) merged[field] = previous[field];
                               return merged;
                           }); nodes.value = data.nodes || []; users.value = data.users || []; groups.value = (data.groups || []).map(group => { let members = []; let resources = []; try { members = JSON.parse(group.members || '[]'); } catch (e) {} try { resources = JSON.parse(group.resources || '[]'); } catch (e) {} if (!groupDrafts[group.id]) groupDrafts[group.id] = { members: Array.isArray(members) ? members : [], resources: Array.isArray(resources) ? resources.map(resource => `${resource.type}:${resource.id}`) : [] }; return group; });
-                          if (data.siteTitle) { siteTitle.value = data.siteTitle; siteTitleInput.value = data.siteTitle; }
+                          if (data.siteTitle) { siteTitle.value = data.siteTitle; if (!siteTitleDirty.value) siteTitleInput.value = data.siteTitle; }
                           if (data.mySubToken) mySubToken.value = data.mySubToken;
                           securityWarnings.value = data.securityWarnings || [];
                           proxyCredentialsReady.value = data.proxyCredentialsReady === true;
@@ -742,9 +751,48 @@ export function useKuiState() {
                   const copyUninstallCommand = (vps) => { if (!confirm(`⚠️ 将生成 ${vps.name || vps.ip} 的 Agent 卸载命令。执行后会删除 KUI Agent 与 KUI sing-box，但保留 proxy-lite、OpenVPN 和面板记录。是否继续复制？`)) return; copyCommand(generateUninstallCmd(vps.ip), '✅ Agent 卸载命令已复制！请在对应 VPS 的 root 终端执行。'); };
                   const copyPurgeCommand = (vps) => { if (!confirm(`🧨 高危操作：将生成 ${vps.name || vps.ip} 的全量清理命令。执行后会删除 Agent、sing-box、proxy-lite、OpenVPN 配置，并在清理成功后自动删除面板中的 VPS、节点和探针记录。是否继续复制？`)) return; copyCommand(generatePurgeCmd(vps.ip), '✅ 全量清理命令已复制！请在对应 VPS 的 root 终端执行。'); };
 
-                  const saveSiteTitle = async () => { if(!siteTitleInput.value) return alert('名称不能为空！'); await fetchApi('/api/settings', { method: 'POST', body: JSON.stringify({ site_title: siteTitleInput.value }) }); siteTitle.value = siteTitleInput.value; alert('✅ KUI 聚合面板名称保存成功！'); };
-                  const updateUserPassword = async () => { if(!userNewPassword.value) return alert('请输入新密码'); await fetchApi('/api/user/password', { method: 'PUT', body: JSON.stringify({ password: userNewPassword.value }) }); alert('✅ 密码修改成功！请使用新密码重新登录。'); logout(); };
-                  const resetMySubLink = async () => { if(confirm('🚨 危险操作！重置后系统将为您签发全新的 UUID 订阅令牌，原链接将【立即作废】！确定要继续重置吗？')) { await fetchApi('/api/user/sub_token', { method: 'PUT' }); alert('✅ 订阅令牌已刷新！'); refreshData(); } };
+                  const markSiteTitleDirty = () => { siteTitleDirty.value = true; };
+                  const markProbeSettingsDirty = () => { probeSettingsDirty.value = true; };
+                  const saveSiteTitle = async () => {
+                      const title = siteTitleInput.value.trim();
+                      if (!title) return alert('名称不能为空！');
+                      if (title.length > 100) return alert('名称不能超过 100 个字符！');
+                      if (siteTitleSaving.value) return;
+                      siteTitleSaving.value = true;
+                      try {
+                          await fetchApi('/api/settings', { method: 'POST', body: JSON.stringify({ site_title: title }) });
+                          siteTitle.value = title; siteTitleInput.value = title; siteTitleDirty.value = false;
+                          alert('✅ KUI 聚合面板名称保存成功！');
+                      } catch (error) {
+                          console.error('[settings] failed to save site title', error);
+                      } finally { siteTitleSaving.value = false; }
+                  };
+                  const updateUserPassword = async () => {
+                      if (userNewPassword.value.length < 12) return alert('新密码至少需要 12 位！');
+                      if (userNewPassword.value.length > 128) return alert('新密码不能超过 128 位！');
+                      if (passwordSaving.value) return;
+                      passwordSaving.value = true;
+                      try {
+                          await fetchApi('/api/user/password', { method: 'PUT', body: JSON.stringify({ password: userNewPassword.value }) });
+                          userNewPassword.value = '';
+                          alert('✅ 密码修改成功！请使用新密码重新登录。');
+                          logout();
+                      } catch (error) {
+                          console.error('[settings] failed to update password', error);
+                      } finally { passwordSaving.value = false; }
+                  };
+                  const resetMySubLink = async () => {
+                      if (subTokenResetting.value || !confirm('🚨 危险操作！重置后旧订阅链接将立即作废，确定继续吗？')) return;
+                      subTokenResetting.value = true;
+                      try {
+                          const response = await fetchApi('/api/user/sub_token', { method: 'PUT' });
+                          const data = await response.json();
+                          if (data.token) mySubToken.value = data.token;
+                          alert('✅ 订阅令牌已刷新！');
+                      } catch (error) {
+                          console.error('[settings] failed to reset subscription token', error);
+                      } finally { subTokenResetting.value = false; }
+                  };
                   
                   const generateSubLink = (ip='', format='', nodeId='') => {
                       const tokenToUse = mySubToken.value || authKey.value; 
@@ -787,15 +835,39 @@ export function useKuiState() {
                       } catch (err) { alert('生成二维码失败！请检查链接长度或浏览器控制台。'); }
                   };
 
-                  const saveProbeSettings = async () => { await fetchApi('/api/probe/admin/settings', { method: 'POST', body: JSON.stringify({settings: probeSys}) }); if (realtimeUrl.value) { try { const headers = await window.kuiAdminAuthHeader(); await fetch(`${realtimeUrl.value}/public-policy`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ public: probeSys.is_public === 'true' }) }); } catch(e) {} } alert('✅ 探针大盘配置已生效！如果配置了TG参数已自动绑定Webhook。'); refreshData(); fetchProbeData(); };
+                  const saveProbeSettings = async () => {
+                      const adminInterval = Number(probeSys.realtime_admin_interval);
+                      const publicInterval = Number(probeSys.realtime_public_interval);
+                      const idleInterval = Number(probeSys.realtime_idle_interval);
+                      const reportInterval = Number(probeSys.report_interval);
+                      if (![adminInterval, publicInterval, idleInterval, reportInterval].every(Number.isInteger)) return alert('所有频率必须填写整数！');
+                      if (adminInterval < 5 || adminInterval > 60 || publicInterval < 10 || publicInterval > 120 || idleInterval < 30 || idleInterval > 600) return alert('Realtime 频率超出允许范围！');
+                      if (publicInterval < adminInterval || idleInterval < publicInterval) return alert('公开探针不得快于管理员后台，空闲频率不得快于公开探针！');
+                      if (reportInterval < 1 || reportInterval > 3600) return alert('客户端上报间隔必须在 1–3600 秒之间！');
+                      if (!String(probeSys.site_title || '').trim()) return alert('大盘展示标题不能为空！');
+                      if (String(probeSys.site_title).trim().length > 100) return alert('大盘展示标题不能超过 100 个字符！');
+                      if (probeSettingsSaving.value) return;
+                      probeSettingsSaving.value = true;
+                      try {
+                          const editableProbeSettingKeys = ['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval'];
+                          const settings = Object.fromEntries(editableProbeSettingKeys.filter(key => probeSys[key] !== undefined).map(key => [key, probeSys[key]]));
+                          await fetchApi('/api/probe/admin/settings', { method: 'POST', body: JSON.stringify({ settings }) });
+                          probeSettingsDirty.value = false;
+                          alert('✅ 探针大盘配置已生效！');
+                          await Promise.allSettled([refreshData(), fetchProbeData()]);
+                      } catch (error) {
+                          console.error('[settings] failed to save probe settings', error);
+                      } finally { probeSettingsSaving.value = false; }
+                  };
                   const saveSubscriptionProtection = async () => {
+                      if (subscriptionProtectionSaving.value) return;
                       const value = probeSys.subscription_protection;
+                      subscriptionProtectionSaving.value = true;
                       try {
                           await fetchApi('/api/probe/admin/settings', { method: 'POST', body: JSON.stringify({ settings: { subscription_protection: value } }) });
                       } catch (error) {
                           probeSys.subscription_protection = value === 'true' ? 'false' : 'true';
-                          alert('订阅保护设置保存失败，请重试。');
-                      }
+                      } finally { subscriptionProtectionSaving.value = false; }
                   };
                   const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; if(!editingProbeNode.value.reset_day) editingProbeNode.value.reset_day = '1'; probeEditModalOpen.value = true; };
                   const saveProbeEdit = async () => { await fetchApi('/api/probe/admin/server', { method: 'PUT', body: JSON.stringify(editingProbeNode.value) }); probeEditModalOpen.value = false; refreshData(); fetchProbeData(); };
@@ -1049,13 +1121,13 @@ export function useKuiState() {
                       servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
-                      globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
+                      globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, siteTitleDirty, markSiteTitleDirty, saveSiteTitle, siteTitleSaving, userNewPassword, updateUserPassword, passwordSaving, resetMySubLink, subTokenResetting, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                       probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
-                      saveProbeSettings, saveSubscriptionProtection, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
+                      probeSettingsDirty, markProbeSettingsDirty, probeSettingsSaving, saveProbeSettings, subscriptionProtectionSaving, saveSubscriptionProtection, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,
                       thirdPartySubscriptions, newThirdParty, loadingThirdParty, loadThirdPartySubscriptions, addThirdPartySubscription, toggleThirdPartySubscription, deleteThirdPartySubscription,
                       qrModalOpen, qrCodeImage, showQrCode, 
                       showWelcomePopup, closePopup,
-                      availableThemes, pingNodes, pullGithubNodes, hasCustomCssFlag,
+                      availableThemes, pingNodes, pullGithubNodes, githubNodesPulling, hasCustomCssFlag,
                       proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, refreshVpsEgressIp, egressIpRefreshing, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, setProxyMode, applyProxyCategories, onEgressModeChange,
                   };
 }

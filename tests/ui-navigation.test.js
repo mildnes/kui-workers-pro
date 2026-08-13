@@ -312,8 +312,8 @@ test('public listener and settings pages use explicit shared dark surfaces', () 
         assert.match(publicListenerPage, new RegExp(className));
         assert.match(appStyles, new RegExp(`data-kui-theme="dark"[^}]*\\.${className}|data-kui-theme="dark"[\\s\\S]*\\.${className}`));
     }
-    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page > div/);
-    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page table thead/);
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-card/);
+    assert.match(appStyles, /\.kui-settings-table th/);
 });
 
 test('users and authorization page uses compact responsive controls and safe actions', () => {
@@ -333,6 +333,18 @@ test('users and authorization page uses compact responsive controls and safe act
 test('settings places probe server management before dashboard appearance settings', () => {
     const realtime = settingsPage.indexOf('Realtime 状态频率策略');
     const servers = settingsPage.indexOf('kui-probe-server-settings');
-    const dashboard = settingsPage.indexOf('📊 探针大盘外观与设置');
+    const dashboard = settingsPage.indexOf('探针大盘外观与设置');
     assert.ok(realtime >= 0 && realtime < servers && servers < dashboard);
+});
+
+test('settings page uses compact semantic sections and guarded actions', () => {
+    for (const className of ['kui-settings-card', 'kui-settings-heading', 'kui-settings-grid', 'kui-settings-field', 'kui-settings-switch', 'kui-settings-table']) {
+        assert.match(settingsPage, new RegExp(className));
+        assert.match(appStyles, new RegExp(`\\.${className}`));
+    }
+    assert.match(settingsPage, /@input="markProbeSettingsDirty"/);
+    assert.match(settingsPage, /probeSettingsSaving/);
+    assert.match(settingsPage, /siteTitleSaving/);
+    assert.match(settingsPage, /minlength="12"/);
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-card/);
 });

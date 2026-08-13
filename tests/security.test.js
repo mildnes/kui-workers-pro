@@ -126,6 +126,17 @@ test('user creation matches backend password policy and preserves unsaved group 
     assert.match(frontend, /encodeURIComponent\(username\)/);
 });
 
+test('settings validate values and preserve unsaved probe drafts', () => {
+    assert.match(frontend, /const probeSettingsDirty = ref\(false\)/);
+    assert.match(frontend, /if \(!probeSettingsDirty\.value\) Object\.assign\(probeSys/);
+    assert.match(frontend, /userNewPassword\.value\.length < 12/);
+    assert.match(frontend, /publicInterval < adminInterval \|\| idleInterval < publicInterval/);
+    assert.match(frontend, /const probeSettingsSaving = ref\(false\)/);
+    assert.match(frontend, /const editableProbeSettingKeys = \[/);
+    assert.match(api, /site_title\.trim\(\)\.length > 100/);
+    assert.match(api, /const allowedSettings = new Set/);
+});
+
 test('realtime patches invalidate the snapshot cache', () => {
     const routeStart = realtime.indexOf('url.pathname === "/update"');
     const updateRoute = realtime.slice(routeStart, realtime.indexOf('url.pathname === "/snapshot"', routeStart));

@@ -1078,6 +1078,13 @@ async function handleProbeAPI(request, env, context, pathArray) {
     if (method === 'POST' && subPath === 'admin/settings') {
         const { settings } = await readJsonBody(request, 64 * 1024);
         if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.keys(settings).length > 80) return Response.json({ error: 'Invalid settings' }, { status: 400 });
+        const allowedSettings = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'subscription_protection', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval']);
+        if (Object.keys(settings).some(key => !allowedSettings.has(key))) return Response.json({ error: 'Unsupported setting' }, { status: 400 });
+        if (Object.prototype.hasOwnProperty.call(settings, 'site_title') && (typeof settings.site_title !== 'string' || !settings.site_title.trim() || settings.site_title.trim().length > 100)) return Response.json({ error: 'Invalid site title' }, { status: 400 });
+        if (Object.prototype.hasOwnProperty.call(settings, 'report_interval')) {
+            const reportInterval = Number(settings.report_interval);
+            if (!Number.isInteger(reportInterval) || reportInterval < 1 || reportInterval > 3600) return Response.json({ error: 'Invalid report interval' }, { status: 400 });
+        }
         const frequencyKeys = ['realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval'];
         let frequencySettings = settings;
         if (frequencyKeys.some(key => Object.prototype.hasOwnProperty.call(settings, key))) {
@@ -2120,6 +2127,7 @@ rules:
         if (action === "settings" && method === "POST" && isAdmin) {
             const { site_title, realtime_url } = await request.json();
             const statements = [];
+            if (typeof site_title === 'string' && site_title.trim().length > 100) return Response.json({ error: 'site_title must not exceed 100 characters' }, { status: 400 });
             if (typeof site_title === 'string' && site_title.trim()) statements.push(db.prepare("INSERT OR REPLACE INTO sys_config (key, val, ts) VALUES ('site_title', ?, ?)").bind(site_title.trim(), Date.now()));
             if (typeof realtime_url === 'string') {
                 const normalized = realtime_url.trim().replace(/\/$/, '');
