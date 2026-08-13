@@ -129,6 +129,7 @@ test('theme controls live above desktop settings and left of mobile settings', (
     const mobileSettings = mobileNavigation.indexOf("id: 'settings'", mobileTheme);
     assert.ok(mobileTheme >= 0 && mobileTheme < mobileSettings);
     assert.match(appStyles, /\.kui-sidebar-theme-picker/);
+    assert.match(appStyles, /\.kui-sidebar-theme-picker select \{[^}]*text-align: left;[^}]*text-align-last: left/);
     assert.match(appStyles, /\.kui-mobile-theme-picker/);
 });
 

@@ -27,7 +27,7 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-sidebar-secondary button.active { color: var(--kui-color-primary-hover); background: var(--kui-color-primary-soft); }
 .kui-sidebar-theme-picker { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 10px; box-sizing: border-box; border: 0; border-radius: 11px; padding: 0 12px; color: var(--kui-color-muted); background: transparent; }
 .kui-sidebar-theme-picker:hover { color: var(--kui-color-text-soft); background: var(--kui-color-bg-soft); }
-.kui-sidebar-theme-picker select { min-width: 0; flex: 1; border: 0; padding: 0; color: inherit; background: transparent; outline: none; font-size: 13px; font-weight: 650; cursor: pointer; }
+.kui-sidebar-theme-picker select { min-width: 0; flex: 1; border: 0; padding: 0; color: inherit; background: transparent; outline: none; font-size: 13px; font-weight: 650; text-align: left; text-align-last: left; cursor: pointer; }
 .kui-sidebar-footer { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--kui-color-border); padding: 14px 6px 0; }
 .kui-user-avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: var(--kui-color-primary-hover); background: var(--kui-color-primary-soft); font-size: 13px; font-weight: 800; }
 

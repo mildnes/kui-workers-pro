@@ -101,6 +101,19 @@ test('single-node form exposes every credential used by supported protocols', ()
     assert.match(serversPage, /公网域名由 VPS 建立 Argo 隧道后自动回传/);
 });
 
+test('single-node protocols are alphabetized before fixed special entries', () => {
+    const formStart = serversPage.indexOf('v-model="newNodeParams[vps.ip].protocol"');
+    const formEnd = serversPage.indexOf('</select>', formStart);
+    const options = serversPage.slice(formStart, formEnd);
+    const labels = ['AnyTLS', 'gRPC + Reality', 'H2 + Reality', 'Hysteria2', 'Naive', 'Shadowsocks 2022', 'SOCKS5', 'Trojan', 'TUIC v5', 'VLESS', 'XTLS + Reality', '──────────', 'VLESS Argo', 'Dokodemo'];
+    let previous = -1;
+    for (const label of labels) {
+        const current = options.indexOf(`>${label}<`);
+        assert.ok(current > previous, `${label} should follow the previous protocol`);
+        previous = current;
+    }
+});
+
 test('blank optional credentials receive protocol-safe random defaults', () => {
     const addNodeSource = frontend.slice(frontend.indexOf('const buildNodePayload'), frontend.indexOf('const deployAllProtocols'));
     assert.match(addNodeSource, /optionalText\(p\.node_uuid\) \|\| crypto\.randomUUID\(\)/);
