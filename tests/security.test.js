@@ -171,6 +171,10 @@ test('long-lived Agent tokens stay off the browser data plane', () => {
     assert.match(api, /const assetSha256 =/);
     assert.doesNotMatch(api, /const sha256 = Array\.from\(new Uint8Array\(digest\)\)/);
     assert.match(frontend, /requestAgentBootstrapToken/);
+    assert.match(frontend, /const payload = await response\.json/);
+    assert.match(frontend, /requireBootstrapToken\(payload\?\.token\)/);
+    assert.match(frontend, /\^\[A-Za-z0-9_-\]\{32,128\}\$/);
+    assert.doesNotMatch(frontend, /await fetchApi\('\/api\/agent_bootstrap'[\s\S]{0,160}\)\)\.token/);
     assert.doesNotMatch(frontend, /servers\.value\.find\(s => s\.ip === ip\)\?\.agent_token/);
 });
 
