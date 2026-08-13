@@ -119,6 +119,13 @@ test('SFC frontend preserves residential controller integration points', () => {
     }
 });
 
+test('user creation matches backend password policy and preserves unsaved group drafts', () => {
+    assert.match(api, /action === "users"[\s\S]*String\(password \|\| ''\)\.length < 12/);
+    assert.match(frontend, /newUser\.password\.length < 12/);
+    assert.match(frontend, /if \(!groupDrafts\[group\.id\]\) groupDrafts\[group\.id\] =/);
+    assert.match(frontend, /encodeURIComponent\(username\)/);
+});
+
 test('realtime patches invalidate the snapshot cache', () => {
     const routeStart = realtime.indexOf('url.pathname === "/update"');
     const updateRoute = realtime.slice(routeStart, realtime.indexOf('url.pathname === "/snapshot"', routeStart));

@@ -86,6 +86,58 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 .kui-vps-onboarding button { min-width: 108px; gap: 6px; border: 0; border-radius: 9px; padding: 0 15px; color: #fff; background: #4f46e5; font-size: 11px; font-weight: 850; white-space: nowrap; }
 .kui-vps-onboarding button:hover { background: #4338ca; }
 .kui-vps-onboarding button:disabled { cursor: wait; opacity: .55; }
+.kui-users-page { display: grid; gap: 12px; }
+.kui-users-panel { border: 1px solid #cbd5e1; border-radius: 16px; padding: 15px; background: rgba(255,255,255,.82); box-shadow: 0 2px 8px rgba(15,23,42,.06); }
+.kui-users-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.kui-users-heading h2 { margin: 0; color: #334155; font-size: 14px; font-weight: 850; }
+.kui-users-heading p { margin: 2px 0 0; color: #94a3b8; font-size: 10px; font-weight: 650; }
+.kui-users-heading > span { border-radius: 999px; padding: 4px 8px; color: #4f46e5; background: #eef2ff; font-size: 9px; font-weight: 850; white-space: nowrap; }
+.kui-user-create { display: grid; grid-template-columns: minmax(140px,1fr) minmax(190px,1.25fr) minmax(115px,.65fr) minmax(145px,.8fr) auto; align-items: end; gap: 8px; }
+.kui-user-create label, .kui-group-create label, .kui-group-grid label { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.kui-user-create label > span, .kui-group-create label > span, .kui-group-grid label > span { color: #64748b; font-size: 10px; font-weight: 800; }
+.kui-user-create label em { color: #94a3b8; font-style: normal; font-weight: 650; }
+.kui-user-create input, .kui-group-create input { width: 100%; border: 1px solid #d7dfeb; border-radius: 9px; padding: 0 10px; color: #334155; background: #fff; outline: none; font-size: 12px; font-weight: 650; }
+.kui-user-create input:focus, .kui-group-create input:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
+.kui-user-password { position: relative; min-width: 0; }
+.kui-user-password input { padding-right: 39px; }
+.kui-user-password button { position: absolute; top: 0; right: 0; width: 36px; border: 0; color: #6366f1; background: transparent; font-size: 15px; }
+.kui-users-primary { gap: 6px; border: 0; border-radius: 9px; padding: 0 15px; color: #fff; background: #4f46e5; font-size: 11px; font-weight: 850; white-space: nowrap; }
+.kui-users-primary:hover { background: #4338ca; }
+.kui-users-primary:disabled { cursor: wait; opacity: .55; }
+.kui-user-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.kui-user-card { border: 1px solid #d7dfeb; border-radius: 15px; padding: 14px; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+.kui-user-card.is-disabled { border-color: #fecdd3; }
+.kui-user-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.kui-user-name { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.kui-user-name strong { overflow: hidden; color: #334155; font-size: 14px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.kui-user-name span { border-radius: 999px; padding: 3px 6px; font-size: 8px; font-weight: 850; white-space: nowrap; }
+.kui-user-name span.is-active { color: #047857; background: #d1fae5; }
+.kui-user-name span.is-blocked { color: #be123c; background: #ffe4e6; }
+.kui-user-card header p { margin: 3px 0 0; color: #94a3b8; font-size: 9px; font-weight: 650; }
+.kui-user-actions { display: flex; gap: 5px; }
+.kui-user-actions button, .kui-group-card header > button { border: 1px solid #d7dfeb; border-radius: 8px; padding: 0 9px; color: #475569; background: #f8fafc; font-size: 9px; font-weight: 800; }
+.kui-user-actions button.is-danger, .kui-group-card header > button.is-danger { border-color: #fecdd3; color: #e11d48; background: #fff1f2; }
+.kui-user-traffic { margin-top: 14px; }
+.kui-user-traffic > div:first-child { display: flex; justify-content: space-between; gap: 8px; color: #64748b; font-size: 9px; font-weight: 750; }
+.kui-user-progress { height: 7px; overflow: hidden; margin-top: 7px; border-radius: 999px; background: #e2e8f0; }
+.kui-user-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#60a5fa,#6366f1); }
+.kui-user-progress i.is-over { background: #f43f5e; }
+.kui-user-card footer { display: flex; min-height: 26px; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 5px; color: #94a3b8; font-size: 8px; font-weight: 700; }
+.kui-user-card footer button { height: 26px !important; min-height: 26px !important; border: 0; padding: 0; color: #4f46e5; background: transparent; font-size: 9px; font-weight: 800; }
+.kui-groups-section { display: grid; gap: 10px; }
+.kui-groups-section .kui-users-heading { margin-bottom: 0; }
+.kui-groups-note { border: 1px solid #c7d2fe; border-radius: 10px; padding: 9px 11px; color: #4f46e5; background: #eef2ff; font-size: 9px; font-weight: 700; }
+.kui-group-create { display: grid; grid-template-columns: minmax(180px,1fr) auto; align-items: end; gap: 8px; }
+.kui-group-card { border: 1px solid #d7dfeb; border-radius: 13px; padding: 13px; background: #fff; }
+.kui-group-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.kui-group-card h3 { margin: 0; color: #334155; font-size: 13px; font-weight: 850; }
+.kui-group-card header p { margin: 2px 0 0; color: #94a3b8; font-size: 9px; font-weight: 650; }
+.kui-group-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 11px; }
+.kui-group-grid select[multiple] { height: 144px; min-height: 144px; border: 1px solid #d7dfeb; border-radius: 10px; padding: 7px; color: #334155; background: #f8fafc; outline: none; font-size: 11px; font-weight: 650; line-height: 1.5; text-align: left; text-align-last: left; }
+.kui-group-grid select[multiple]:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
+.kui-group-grid small { color: #94a3b8; font-size: 9px; font-weight: 650; }
+.kui-group-card footer { display: flex; justify-content: flex-end; margin-top: 10px; }
+.kui-users-empty { grid-column: 1 / -1; border: 1px dashed #cbd5e1; border-radius: 13px; padding: 28px 15px; color: #94a3b8; background: rgba(248,250,252,.65); text-align: center; font-size: 11px; font-weight: 700; }
 .kui-servers-page .gap-4 { gap: .75rem; }
 .kui-servers-page .gap-3 { gap: .625rem; }
 .kui-servers-page .mb-6 { margin-bottom: .875rem; }
@@ -304,6 +356,28 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 :root[data-kui-theme="dark"] .kui-vps-onboarding label > span { color: var(--kui-color-muted); }
 :root[data-kui-theme="dark"] .kui-vps-onboarding input,
 :root[data-kui-theme="dark"] .kui-vps-onboarding select { border-color: var(--kui-color-border-strong); color: var(--kui-color-text); background: var(--kui-color-surface-solid); }
+:root[data-kui-theme="dark"] .kui-users-panel,
+:root[data-kui-theme="dark"] .kui-user-card,
+:root[data-kui-theme="dark"] .kui-group-card { border-color: var(--kui-color-border-strong); background: var(--kui-color-surface); box-shadow: var(--kui-shadow-sm); }
+:root[data-kui-theme="dark"] .kui-users-heading h2,
+:root[data-kui-theme="dark"] .kui-user-name strong,
+:root[data-kui-theme="dark"] .kui-group-card h3 { color: var(--kui-color-text); }
+:root[data-kui-theme="dark"] .kui-users-heading p,
+:root[data-kui-theme="dark"] .kui-user-card header p,
+:root[data-kui-theme="dark"] .kui-group-card header p { color: var(--kui-color-subtle); }
+:root[data-kui-theme="dark"] .kui-users-heading > span,
+:root[data-kui-theme="dark"] .kui-groups-note { border-color: rgba(99,102,241,.35); color: #a5b4fc; background: var(--kui-color-primary-soft); }
+:root[data-kui-theme="dark"] .kui-user-create label > span,
+:root[data-kui-theme="dark"] .kui-group-create label > span,
+:root[data-kui-theme="dark"] .kui-group-grid label > span,
+:root[data-kui-theme="dark"] .kui-user-traffic > div:first-child { color: var(--kui-color-muted); }
+:root[data-kui-theme="dark"] .kui-user-create input,
+:root[data-kui-theme="dark"] .kui-group-create input,
+:root[data-kui-theme="dark"] .kui-group-grid select[multiple] { border-color: var(--kui-color-border-strong); color: var(--kui-color-text); background: var(--kui-color-surface-solid); }
+:root[data-kui-theme="dark"] .kui-user-actions button,
+:root[data-kui-theme="dark"] .kui-group-card header > button { border-color: var(--kui-color-border-strong); color: var(--kui-color-text-soft); background: var(--kui-color-bg-soft); }
+:root[data-kui-theme="dark"] .kui-user-progress { background: var(--kui-color-border); }
+:root[data-kui-theme="dark"] .kui-users-empty { border-color: var(--kui-color-border-strong); color: var(--kui-color-subtle); background: var(--kui-color-bg-soft); }
 :root[data-kui-theme="dark"] .kui-server-card > * + * { border-top-color: var(--kui-color-border) !important; }
 :root[data-kui-theme="dark"] .kui-server-metric,
 :root[data-kui-theme="dark"] .kui-server-chart,
@@ -454,6 +528,9 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
 
 @media (max-width: 1023px) {
   .kui-admin-content { padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .kui-user-create { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .kui-user-create > button { grid-column: 1 / -1; }
+  .kui-user-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 
 @media (max-width: 640px) {
@@ -493,6 +570,12 @@ button, [role="button"] { -webkit-tap-highlight-color: transparent; }
   .kui-node-protocol-fields > label:only-child { grid-column: auto; }
   .kui-vps-onboarding { grid-template-columns: 1fr; }
   .kui-vps-onboarding button { width: 100%; }
+  .kui-user-create, .kui-user-list, .kui-group-create, .kui-group-grid { grid-template-columns: 1fr; }
+  .kui-user-create > button { grid-column: auto; width: 100%; }
+  .kui-users-heading { align-items: flex-start; }
+  .kui-user-card header { flex-direction: column; }
+  .kui-user-actions { width: 100%; }
+  .kui-user-actions button { flex: 1; }
   .kui-node-summary { min-height: 64px; grid-template-columns: minmax(0, 1fr) auto 18px; gap: 7px 10px; padding: 9px 12px; }
   .kui-node-summary-protocol { grid-column: 1; grid-row: 1; }
   .kui-node-summary-user { grid-column: 1; grid-row: 2; }

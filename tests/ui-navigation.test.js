@@ -15,6 +15,7 @@ const legacyProxy = read('../frontend/src/proxy/legacyProxy.js');
 const state = read('../frontend/src/composables/useKuiState.js');
 const publicListenerPage = read('../frontend/src/pages/PublicListenerPage.vue');
 const settingsPage = read('../frontend/src/pages/SettingsPage.vue');
+const usersPage = read('../frontend/src/pages/UsersPage.vue');
 const qrModal = read('../frontend/src/components/modals/QrModal.vue');
 const probeEditModal = read('../frontend/src/components/modals/ProbeEditModal.vue');
 const app = read('../frontend/src/App.vue');
@@ -313,4 +314,25 @@ test('public listener and settings pages use explicit shared dark surfaces', () 
     }
     assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page > div/);
     assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-page table thead/);
+});
+
+test('users and authorization page uses compact responsive controls and safe actions', () => {
+    for (const className of ['kui-users-page', 'kui-users-panel', 'kui-user-create', 'kui-user-card', 'kui-group-card', 'kui-group-grid']) {
+        assert.match(usersPage, new RegExp(className));
+        assert.match(appStyles, new RegExp(`\\.${className}`));
+    }
+    assert.match(usersPage, /minlength="12"/);
+    assert.match(usersPage, /@submit\.prevent="submitUser"/);
+    assert.match(usersPage, /@submit\.prevent="submitGroup"/);
+    assert.match(usersPage, /userActionPending/);
+    assert.match(usersPage, /groupActionPending/);
+    assert.match(appStyles, /\.kui-group-grid select\[multiple\] \{[^}]*height: 144px;[^}]*min-height: 144px/);
+    assert.match(appStyles, /data-kui-theme="dark"\] \.kui-users-panel/);
+});
+
+test('settings places probe server management before dashboard appearance settings', () => {
+    const realtime = settingsPage.indexOf('Realtime 状态频率策略');
+    const servers = settingsPage.indexOf('kui-probe-server-settings');
+    const dashboard = settingsPage.indexOf('📊 探针大盘外观与设置');
+    assert.ok(realtime >= 0 && realtime < servers && servers < dashboard);
 });
