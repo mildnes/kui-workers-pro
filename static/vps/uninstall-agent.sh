@@ -6,6 +6,7 @@ CONFIRMED=0
 EXPECTED_IP=""
 API_URL=""
 TOKEN=""
+BOOTSTRAP=""
 PURGE_ALL=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -13,6 +14,7 @@ while [ "$#" -gt 0 ]; do
         --ip) [ "$#" -ge 2 ] || { echo "--ip 缺少参数"; exit 1; }; EXPECTED_IP="$2"; shift ;;
         --api) [ "$#" -ge 2 ] || { echo "--api 缺少参数"; exit 1; }; API_URL="$2"; shift ;;
         --token) [ "$#" -ge 2 ] || { echo "--token 缺少参数"; exit 1; }; TOKEN="$2"; shift ;;
+        --bootstrap) [ "$#" -ge 2 ] || { echo "--bootstrap 缺少参数"; exit 1; }; BOOTSTRAP="$2"; shift ;;
         --all) PURGE_ALL=1 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
@@ -37,7 +39,15 @@ fi
 if [ "$PURGE_ALL" -eq 1 ]; then
     case "$API_URL" in https://*) ;; *) echo "❌ --all 模式要求 --api 使用 https://"; exit 1 ;; esac
     case "$API_URL" in *'@'*|*'#'*) echo "❌ --api 不能包含用户信息或 fragment"; exit 1 ;; esac
-    [ -n "$TOKEN" ] || { echo "❌ --all 模式缺少 --token"; exit 1; }
+    if [ -z "$TOKEN" ] && [ -n "$BOOTSTRAP" ]; then
+        BOOTSTRAP_HEADERS=$(mktemp /tmp/kui-purge-bootstrap.XXXXXX)
+        trap 'rm -f "$BOOTSTRAP_HEADERS"' EXIT INT TERM
+        curl -fsSL --retry 3 -D "$BOOTSTRAP_HEADERS" -H "Authorization: Bootstrap ${BOOTSTRAP}" "${API_URL}/api/agent_update?ip=${EXPECTED_IP}&component=uninstaller&exchange=1" -o /dev/null
+        TOKEN=$(tr -d '\r' < "$BOOTSTRAP_HEADERS" | awk '/^[Xx]-[Aa]gent-[Tt]oken:/ {print $2}' | tail -n 1)
+        rm -f "$BOOTSTRAP_HEADERS"
+        trap - EXIT INT TERM
+    fi
+    [ -n "$TOKEN" ] || { echo "❌ --all 模式缺少有效的认证令牌"; exit 1; }
 fi
 
 if [ ! -f /opt/kui/config.json ] && [ "$PURGE_ALL" -ne 1 ]; then

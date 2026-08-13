@@ -38,6 +38,7 @@
 | `TG_WEBHOOK_SECRET` | 校验 Telegram Webhook 请求 |
 | `CRON_SECRET` | 保护外部调用的 `/api/cron_check`；内置 Cron 不需要 |
 | `REALTIME_URL` | 对接旧版分离实时服务；集成部署不需要 |
+| `REALTIME_AUTH_SECRET` | 旧版分离实时服务的专用认证 Secret，Worker 与 Realtime 两端保持一致且至少 32 字符 |
 | `PROXY_CTRL_URL` / `PROXY_CTRL_USER` / `PROXY_CTRL_PASS` / `PROXY_CTRL_TOKEN` | 对接外部住宅代理控制器；内置控制器不需要 |
 
 ### 系统内置资源

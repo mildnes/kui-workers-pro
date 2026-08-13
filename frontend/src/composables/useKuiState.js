@@ -64,7 +64,7 @@ export function useKuiState() {
                   ]);
                   const pingNodes = reactive({ ct: [], cu: [], cm: [] });
 
-                  const probeSys = reactive({ theme: 'theme1', is_public: 'true', site_title: 'Server Monitor Pro', custom_bg: '', custom_css: '', custom_head: '', custom_script: '', report_interval: '5', realtime_admin_interval: '5', realtime_public_interval: '10', realtime_idle_interval: '30', visits_total: '0', visits_today: '0', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default', enable_popup: 'false', popup_content: '', tg_notify: 'false', tg_bot_token: '', tg_chat_id: '' });
+                  const probeSys = reactive({ theme: 'theme1', is_public: 'true', site_title: 'Server Monitor Pro', custom_bg: '', custom_css: '', report_interval: '5', realtime_admin_interval: '5', realtime_public_interval: '10', realtime_idle_interval: '30', visits_total: '0', visits_today: '0', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default', enable_popup: 'false', popup_content: '', tg_notify: 'false', tg_bot_token: '', tg_chat_id: '' });
                   const FALLBACK_DATA_INTERVAL = 15000;
                   const FALLBACK_PROBE_INTERVAL = 30000;
                   const FALLBACK_UI_PING_INTERVAL = 60000;
@@ -82,7 +82,7 @@ export function useKuiState() {
                   
                   const showWelcomePopup = ref(false);
 
-                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') { updateCustomStyles(); updateCustomScript(probeSys.custom_script); } else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); document.getElementById('kui-custom-head')?.remove(); updateCustomScript(''); } });
+                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') updateCustomStyles(); else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); } });
                   watch(colorMode, (val) => localStorage.setItem('kui_color_mode', val));
                   watch(effectiveColorMode, applyColorMode);
                   watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
@@ -172,34 +172,11 @@ export function useKuiState() {
                       if (probeSys.custom_bg) css += `body { background: url('${probeSys.custom_bg}') no-repeat center center fixed !important; background-size: cover !important; } .probe-vps-card, .probe-global-stats, .probe-header-card, .probe-chart-card, .probe-custom-table, .probe-filter-tag, .probe-view-controls { background: rgba(255, 255, 255, 0.4) !important; backdrop-filter: blur(12px) !important; -webkit-backdrop-filter: blur(12px) !important; border: 1px solid rgba(255, 255, 255, 0.6) !important; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1) !important; color: #111 !important; } .probe-vps-card:hover { background: rgba(255, 255, 255, 0.6) !important; transform: translateY(-3px); } .probe-group-header { color: #fff !important; text-shadow: 0 2px 5px rgba(0,0,0,0.6) !important; border-left-color: #fff !important; } .probe-g-val, .probe-card-title { color: #000 !important; font-weight: 800 !important; } .probe-g-label, .probe-g-sub, .probe-card-meta { color: #333 !important; font-weight: 600 !important; } .probe-stat-bar-full { background: rgba(0,0,0,0.1) !important; }`;
                       styleTag.innerHTML = css;
 
-                      let headWrapper = document.getElementById('kui-custom-head');
-                      if (probeSys.custom_head) {
-                          if (!headWrapper) { headWrapper = document.createElement('div'); headWrapper.id = 'kui-custom-head'; document.head.appendChild(headWrapper); }
-                          headWrapper.innerHTML = probeSys.custom_head;
-                      } else if (headWrapper) headWrapper.remove();
-                  };
-
-                  const updateCustomScript = (newVal) => {
-                      document.querySelectorAll('[data-kui-custom-script]').forEach(node => node.remove());
-                      let wrapper = document.getElementById('kui-custom-html-wrapper');
-                      if (wrapper) wrapper.remove();
-                      if (isLoggedIn.value && activeTab.value !== 'probe') return;
-                      if (!newVal) return;
-                      wrapper = document.createElement('div'); wrapper.id = 'kui-custom-html-wrapper'; wrapper.innerHTML = newVal; 
-                      const scripts = wrapper.getElementsByTagName('script');
-                      for (let i = 0; i < scripts.length; i++) {
-                          const newScript = document.createElement('script');
-                          newScript.dataset.kuiCustomScript = 'true';
-                          if (scripts[i].src) newScript.src = scripts[i].src; else newScript.textContent = scripts[i].textContent;
-                          document.body.appendChild(newScript);
-                      }
-                      document.body.appendChild(wrapper);
                   };
 
                   watch(() => probeSys.theme, updateCustomStyles);
                   watch(() => probeSys.custom_css, updateCustomStyles);
                   watch(() => probeSys.custom_bg, updateCustomStyles);
-                  watch(() => probeSys.custom_script, updateCustomScript);
 
                   const isOnline = (lastReport, realtimeState = '') => realtimeState ? realtimeState === 'online' : !!lastReport && (Date.now() - lastReport) < 1200000;
                   const formatBytes = (bytes) => { const b = parseInt(bytes); if (isNaN(b) || b === 0) return '0 B'; const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(b) / Math.log(k)); return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; };
@@ -413,7 +390,6 @@ export function useKuiState() {
                               if (isLoggedIn.value && role.value === 'admin' && realtimeUrl.value) queueMicrotask(connectRealtime);
                               else if (!isLoggedIn.value && data.settings.is_public === 'true') queueMicrotask(connectPublicRealtime);
                               updateCustomStyles();
-                              if ((!isLoggedIn.value || activeTab.value === 'probe') && probeSys.custom_script && !document.getElementById('kui-custom-html-wrapper')) updateCustomScript(probeSys.custom_script);
                               if (probeView.value === 'map') drawMarkers();
                               if (probeSys.is_public !== 'true' && !isLoggedIn.value) showLoginModal.value = true;
                               
@@ -745,11 +721,12 @@ export function useKuiState() {
                   const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
                   
                   const saveOsMap = () => { localStorage.setItem('kui_deploy_os', JSON.stringify(deployOsMap)); };
-                  const generateCmd = (ip) => { const osType = deployOsMap[ip] || 'debian'; const token = servers.value.find(s => s.ip === ip)?.agent_token || ''; if (!token) return '请先刷新页面以签发独立 Agent Token'; const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=full-installer`; if (osType === 'alpine') return `apk update && apk add curl && curl -fsSL -H "Authorization: ${token}" "${scriptUrl}" | sh -s -- --api "${currentDomain}" --ip "${ip}" --token "${token}"`; else return `apt-get update -y && apt-get install -y curl && bash <(curl -fsSL -H "Authorization: ${token}" "${scriptUrl}") --api "${currentDomain}" --ip "${ip}" --token "${token}"`; };
-                  const generateUninstallCmd = (ip) => { const token = servers.value.find(s => s.ip === ip)?.agent_token || ''; if (!token) return '请先刷新页面以签发独立 Agent Token'; const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=uninstaller`; return `( tmp=$(mktemp /tmp/kui-uninstall.XXXXXX) && curl -fsSL -H "Authorization: ${token}" "${scriptUrl}" -o "$tmp" && chmod 700 "$tmp" && sh "$tmp" --yes --ip "${ip}"; status=$?; rm -f "\${tmp:-}"; exit $status )`; };
-                  const generatePurgeCmd = (ip) => { const token = servers.value.find(s => s.ip === ip)?.agent_token || ''; if (!token) return '请先刷新页面以签发独立 Agent Token'; const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=uninstaller`; return `( tmp=$(mktemp /tmp/kui-uninstall.XXXXXX) && curl -fsSL -H "Authorization: ${token}" "${scriptUrl}" -o "$tmp" && chmod 700 "$tmp" && sh "$tmp" --yes --all --ip "${ip}" --api "${currentDomain}" --token "${token}"; status=$?; rm -f "\${tmp:-}"; exit $status )`; };
-                  const copyUninstallCommand = (vps) => { if (!confirm(`⚠️ 将生成 ${vps.name || vps.ip} 的 Agent 卸载命令。执行后会删除 KUI Agent 与 KUI sing-box，但保留 proxy-lite、OpenVPN 和面板记录。是否继续复制？`)) return; copyCommand(generateUninstallCmd(vps.ip), '✅ Agent 卸载命令已复制！请在对应 VPS 的 root 终端执行。'); };
-                  const copyPurgeCommand = (vps) => { if (!confirm(`🧨 高危操作：将生成 ${vps.name || vps.ip} 的全量清理命令。执行后会删除 Agent、sing-box、proxy-lite、OpenVPN 配置，并在清理成功后自动删除面板中的 VPS、节点和探针记录。是否继续复制？`)) return; copyCommand(generatePurgeCmd(vps.ip), '✅ 全量清理命令已复制！请在对应 VPS 的 root 终端执行。'); };
+                  const requestAgentBootstrapToken = async (ip, component) => (await fetchApi('/api/agent_bootstrap', { method: 'POST', body: JSON.stringify({ ip, component }) })).token;
+                  const generateCmd = (ip, token) => { const osType = deployOsMap[ip] || 'debian'; const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=full-installer`; if (osType === 'alpine') return `apk update && apk add curl && curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}" | sh -s -- --api "${currentDomain}" --ip "${ip}" --bootstrap "${token}"`; return `apt-get update -y && apt-get install -y curl && bash <(curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}") --api "${currentDomain}" --ip "${ip}" --bootstrap "${token}"`; };
+                  const generateUninstallCmd = (ip, token, purge = false) => { const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=uninstaller`; return `( tmp=$(mktemp /tmp/kui-uninstall.XXXXXX) && curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}" -o "$tmp" && chmod 700 "$tmp" && sh "$tmp" --yes ${purge ? '--all ' : ''}--ip "${ip}"${purge ? ` --api "${currentDomain}" --bootstrap "${token}"` : ''}; status=$?; rm -f "\${tmp:-}"; exit $status )`; };
+                  const copyDeployCommand = async vps => { try { const token = await requestAgentBootstrapToken(vps.ip, 'full-installer'); copyCommand(generateCmd(vps.ip, token), '部署指令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成部署命令失败：${error.message || error}`); } };
+                  const copyUninstallCommand = async (vps) => { if (!confirm(`⚠️ 将生成 ${vps.name || vps.ip} 的 Agent 卸载命令。执行后会删除 KUI Agent 与 KUI sing-box，但保留 proxy-lite、OpenVPN 和面板记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); copyCommand(generateUninstallCmd(vps.ip, token), '✅ Agent 卸载命令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成卸载命令失败：${error.message || error}`); } };
+                  const copyPurgeCommand = async (vps) => { if (!confirm(`🧨 高危操作：将生成 ${vps.name || vps.ip} 的全量清理命令。执行后会删除 Agent、sing-box、proxy-lite、OpenVPN 配置，并在清理成功后自动删除面板中的 VPS、节点和探针记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); copyCommand(generateUninstallCmd(vps.ip, token, true), '✅ 全量清理命令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成完整卸载命令失败：${error.message || error}`); } };
 
                   const markSiteTitleDirty = () => { siteTitleDirty.value = true; };
                   const markProbeSettingsDirty = () => { probeSettingsDirty.value = true; };
@@ -849,7 +826,7 @@ export function useKuiState() {
                       if (probeSettingsSaving.value) return;
                       probeSettingsSaving.value = true;
                       try {
-                          const editableProbeSettingKeys = ['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval'];
+                          const editableProbeSettingKeys = ['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'report_interval', 'enable_popup', 'popup_content', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval'];
                           const settings = Object.fromEntries(editableProbeSettingKeys.filter(key => probeSys[key] !== undefined).map(key => [key, probeSys[key]]));
                           await fetchApi('/api/probe/admin/settings', { method: 'POST', body: JSON.stringify({ settings }) });
                           probeSettingsDirty.value = false;
@@ -1120,7 +1097,7 @@ export function useKuiState() {
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, effectiveColorMode, refreshing, refreshPanel,
                       servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
-                      getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyUninstallCommand, generatePurgeCmd, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
+                      getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyDeployCommand, copyUninstallCommand, copyPurgeCommand, requestAgentBootstrapToken, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, siteTitleDirty, markSiteTitleDirty, saveSiteTitle, siteTitleSaving, userNewPassword, updateUserPassword, passwordSaving, resetMySubLink, subTokenResetting, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                       probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                       probeSettingsDirty, markProbeSettingsDirty, probeSettingsSaving, saveProbeSettings, subscriptionProtectionSaving, saveSubscriptionProtection, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,

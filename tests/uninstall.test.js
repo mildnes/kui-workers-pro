@@ -29,7 +29,7 @@ test('Worker exposes the authenticated uninstaller asset', () => {
 test('full purge removes all components and reports panel cleanup', () => {
     assert.match(script, /--all\) PURGE_ALL=1/);
     assert.match(script, /--api\).*API_URL/);
-    assert.match(script, /--token\).*TOKEN/);
+    assert.match(script, /--bootstrap\).*BOOTSTRAP/);
     assert.match(script, /\$API_URL\/api\/vps_purge/);
     assert.match(script, /KUI Agent、KUI sing-box、proxy-lite、OpenVPN/);
     assert.match(api, /action === "vps_purge" && method === "POST"/);

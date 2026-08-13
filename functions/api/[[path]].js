@@ -59,6 +59,13 @@ async function readJsonBody(request, maxBytes) {
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
 function safeProxyAddress(value) { const address = String(value || '').trim(); return validIp(address) ? address : ''; }
 
+function normalizePingTarget(value) {
+    const target = String(value || '').trim().toLowerCase();
+    if (target === 'default') return target;
+    try { return normalizeSocks5Address(target); }
+    catch { throw new Error('Invalid ping target'); }
+}
+
 const EGRESS_MODES = new Set(['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5']);
 const PROXY_CATEGORIES = new Set(['youtube', 'ai', 'google', 'streaming']);
 
@@ -314,16 +321,8 @@ function validateProxyReport(data) {
 }
 
 async function realtimeAdminHeader(env) {
-    if (!env.ADMIN_PASSWORD) return null;
-    const username = env.ADMIN_USERNAME || 'admin';
-    const timestamp = Date.now().toString();
-    const keyHex = await sha256(env.ADMIN_PASSWORD);
-    const keyBytes = new Uint8Array(keyHex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
-    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const nonce = crypto.randomUUID();
-    const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${username}\n${timestamp}\n${nonce}\nPOST\n/api/realtime_auth`));
-    const signatureHex = Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, '0')).join('');
-    return `${btoa(username)}.${timestamp}.${nonce}.${signatureHex}`;
+    const secret = String(env.REALTIME_AUTH_SECRET || '');
+    return secret.length >= 32 ? `Realtime ${secret}` : null;
 }
 
 async function notifyRealtimePublicPolicy(env, db, enabled, pagesOrigin = '') {
@@ -438,7 +437,14 @@ function escapeHtml(value) {
 function isPrivateSubscriptionHost(hostname) {
     const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
     if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
-    if (host === '::1' || host === '::' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb')) return true;
+    if (host === '::1' || host === '::' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb') || host.startsWith('ff')) return true;
+    const mappedIpv4 = host.match(/^(?:::ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedIpv4 && host.startsWith('::ffff:')) {
+        const high = Number.parseInt(mappedIpv4[1], 16);
+        const low = Number.parseInt(mappedIpv4[2], 16);
+        return isPrivateSubscriptionHost(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+    }
+    if (host.startsWith('::ffff:') && /^::ffff:\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return isPrivateSubscriptionHost(host.slice(7));
     const parts = host.split('.');
     if (parts.length !== 4 || parts.some(part => !/^\d+$/.test(part) || Number(part) > 255)) return false;
     const [a, b] = parts.map(Number);
@@ -449,6 +455,26 @@ function validateSubscriptionUrl(value) {
     const url = new URL(value);
     if (url.protocol !== 'https:' || url.username || url.password || url.hash || (url.port && url.port !== '443') || isPrivateSubscriptionHost(url.hostname)) throw new Error('订阅地址不安全');
     return url;
+}
+
+async function assertPublicSubscriptionResolution(url) {
+    if (url.hostname.includes(':') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(url.hostname)) return;
+    let publicAnswers = 0;
+    for (const type of ['A', 'AAAA']) {
+        const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(url.hostname)}&type=${type}`, {
+            headers: { Accept: 'application/dns-json' },
+            signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) throw new Error('订阅域名解析验证失败');
+        const data = await response.json();
+        if (Number(data.Status) !== 0 && Number(data.Status) !== 3) throw new Error('订阅域名解析失败');
+        for (const answer of Array.isArray(data.Answer) ? data.Answer : []) {
+            if (answer.type !== 1 && answer.type !== 28) continue;
+            if (isPrivateSubscriptionHost(answer.data)) throw new Error('订阅域名解析到私网地址');
+            publicAnswers++;
+        }
+    }
+    if (!publicAnswers) throw new Error('订阅域名没有可用的公网解析记录');
 }
 
 async function readBoundedText(response) {
@@ -463,6 +489,7 @@ async function readBoundedText(response) {
 async function fetchPublicSubscription(initialUrl) {
     let current = validateSubscriptionUrl(initialUrl);
     for (let redirects = 0; redirects <= 3; redirects++) {
+        await assertPublicSubscriptionResolution(current);
         const response = await fetch(current.toString(), { redirect: 'manual', headers: { 'User-Agent': 'v2rayN/6.44', 'Accept': '*/*' }, signal: AbortSignal.timeout(15000) });
         if (response.status >= 300 && response.status < 400) {
             const location = response.headers.get('Location');
@@ -798,6 +825,7 @@ async function initializeDbSchema(db) {
         `CREATE TABLE IF NOT EXISTS auth_replays (nonce TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS login_throttles (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, window_started_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0)`,
         `CREATE TABLE IF NOT EXISTS auth_sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
+        `CREATE TABLE IF NOT EXISTS agent_bootstrap_tokens (token_hash TEXT PRIMARY KEY, vps_ip TEXT NOT NULL, component TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER NOT NULL DEFAULT 0)`,
         `CREATE TABLE IF NOT EXISTS user_groups (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)`,
         `CREATE TABLE IF NOT EXISTS user_group_members (group_id TEXT NOT NULL, username TEXT NOT NULL, PRIMARY KEY(group_id, username), FOREIGN KEY(group_id) REFERENCES user_groups(id) ON DELETE CASCADE, FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE)`,
         `CREATE TABLE IF NOT EXISTS user_group_resources (group_id TEXT NOT NULL, resource_type TEXT NOT NULL CHECK(resource_type IN ('vps', 'node')), resource_id TEXT NOT NULL, PRIMARY KEY(group_id, resource_type, resource_id), FOREIGN KEY(group_id) REFERENCES user_groups(id) ON DELETE CASCADE)`,
@@ -1029,8 +1057,16 @@ async function handleProbeAPI(request, env, context, pathArray) {
             if (message) {
                 const cmdParts = text.trim().split(/\s+/); const cmd = cmdParts[0].toLowerCase();
                 if (cmd === '/start' || cmd === '/menu') await tgSend(chatId, mainMenuText, mainMenuKb);
-                else if (cmd === '/set_interval' && cmdParts[1]) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('report_interval', cmdParts[1]).run(); await tgSend(chatId, `✅ 上报间隔设为 ${cmdParts[1]} 秒`); }
-                else if (cmd === '/set_sitetitle') { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('site_title', text.replace(cmdParts[0], '').trim()).run(); await tgSend(chatId, '✅ 大盘标题已更新'); }
+                else if (cmd === '/set_interval' && cmdParts[1]) {
+                    const interval = Number(cmdParts[1]);
+                    if (Number.isInteger(interval) && interval >= 1 && interval <= 3600) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('report_interval', String(interval)).run(); await tgSend(chatId, `✅ 上报间隔设为 ${interval} 秒`); }
+                    else await tgSend(chatId, '❌ 上报间隔必须是 1–3600 的整数');
+                }
+                else if (cmd === '/set_sitetitle') {
+                    const title = text.replace(cmdParts[0], '').trim();
+                    if (title && title.length <= 100) { await db.prepare('INSERT INTO probe_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind('site_title', title).run(); await tgSend(chatId, '✅ 大盘标题已更新'); }
+                    else await tgSend(chatId, '❌ 大盘标题必须为 1–100 个字符');
+                }
             }
             return new Response('OK', { status: 200 });
         } catch(e) { return new Response('Webhook Error', {status:200}); }
@@ -1046,10 +1082,10 @@ async function handleProbeAPI(request, env, context, pathArray) {
             const cached = await caches.default.match(cacheKey);
             if (cached) return cached;
         }
-        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', custom_head: '', custom_script: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
+        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
         const servers = (await db.prepare('SELECT p.id, p.name, p.cpu, p.ram, p.disk, p.load_avg, p.uptime, p.last_updated, p.net_in_speed, p.net_out_speed, p.os, p.arch, p.virt, p.tcp_conn, p.udp_conn, p.country, p.ip_v4, p.ip_v6, p.server_group, p.price, p.expire_date, p.bandwidth, p.traffic_limit, p.ping_ct, p.ping_cu, p.ping_cm, p.ping_bd, p.monthly_rx, p.monthly_tx, p.net_rx, p.net_tx, p.cpu_info, p.ram_used, p.ram_total, p.disk_used, p.disk_total FROM probe_servers p INNER JOIN servers s ON s.ip = p.id WHERE p.is_hidden != "true"').all()).results;
-        const publicKeys = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'visits_total', 'visits_today', 'visits_date']);
+        const publicKeys = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'visits_total', 'visits_today', 'visits_date']);
         for (const key of Object.keys(settings)) if (!publicKeys.has(key)) delete settings[key];
         const realtime = env.REALTIME_URL ? null : await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
         const response = Response.json({ settings, servers, realtime_url: env.REALTIME_URL || realtime?.val || '' }, { headers: { 'Cache-Control': 'public, max-age=15, s-maxage=15' } });
@@ -1093,12 +1129,18 @@ async function handleProbeAPI(request, env, context, pathArray) {
     if (method === 'POST' && subPath === 'admin/settings') {
         const { settings } = await readJsonBody(request, 64 * 1024);
         if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.keys(settings).length > 80) return Response.json({ error: 'Invalid settings' }, { status: 400 });
-        const allowedSettings = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'custom_head', 'custom_script', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'subscription_protection', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval']);
+        const allowedSettings = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'subscription_protection', 'realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval']);
         if (Object.keys(settings).some(key => !allowedSettings.has(key))) return Response.json({ error: 'Unsupported setting' }, { status: 400 });
         if (Object.prototype.hasOwnProperty.call(settings, 'site_title') && (typeof settings.site_title !== 'string' || !settings.site_title.trim() || settings.site_title.trim().length > 100)) return Response.json({ error: 'Invalid site title' }, { status: 400 });
         if (Object.prototype.hasOwnProperty.call(settings, 'report_interval')) {
             const reportInterval = Number(settings.report_interval);
             if (!Number.isInteger(reportInterval) || reportInterval < 1 || reportInterval > 3600) return Response.json({ error: 'Invalid report interval' }, { status: 400 });
+        }
+        for (const key of ['ping_node_ct', 'ping_node_cu', 'ping_node_cm']) {
+            if (Object.prototype.hasOwnProperty.call(settings, key)) {
+                try { settings[key] = normalizePingTarget(settings[key]); }
+                catch { return Response.json({ error: 'Invalid ping target' }, { status: 400 }); }
+            }
         }
         const frequencyKeys = ['realtime_admin_interval', 'realtime_public_interval', 'realtime_idle_interval'];
         let frequencySettings = settings;
@@ -1408,10 +1450,21 @@ export async function onRequest(context) {
     }
 
     if (action === "agent_update" && method === "GET") {
-        const ip = new URL(request.url).searchParams.get('ip');
-        if (!(await verifyAgent(request.headers.get('Authorization'), ip, db, env))) return new Response('Unauthorized', { status: 401 });
+        await ensureDbSchema(db);
+        const updateUrl = new URL(request.url);
+        const ip = updateUrl.searchParams.get('ip');
+        const component = updateUrl.searchParams.get('component') || 'agent';
+        const exchangeBootstrap = updateUrl.searchParams.get('exchange') === '1';
+        const authHeader = request.headers.get('Authorization') || '';
+        const agentAuthenticated = await verifyAgent(authHeader, ip, db, env);
+        let bootstrapToken = '';
+        if (!agentAuthenticated) {
+            const match = /^Bootstrap ([A-Za-z0-9_-]{32,128})$/.exec(authHeader);
+            bootstrapToken = match?.[1] || '';
+            const bootstrap = bootstrapToken ? await db.prepare('SELECT vps_ip FROM agent_bootstrap_tokens WHERE token_hash = ? AND vps_ip = ? AND component = ? AND expires_at > ? AND used_at = 0').bind(await sha256(bootstrapToken), ip, component, Date.now()).first() : null;
+            if (!bootstrap) return new Response('Unauthorized', { status: 401 });
+        }
         if (!env.ASSETS) return Response.json({ error: 'ASSETS binding is unavailable' }, { status: 503 });
-        const component = new URL(request.url).searchParams.get('component') || 'agent';
         const assets = { agent: '/vps/agent.py', 'realtime-client': '/vps/realtime_client.py', 'proxy-manager': '/vps/lite_manager.py', 'proxy-server': '/vps/proxy_server.py', 'proxy-installer': '/vps/residential-proxy.sh', 'full-installer': '/vps/kui.sh', uninstaller: '/vps/uninstall-agent.sh' };
         if (!assets[component]) return Response.json({ error: 'Unknown agent component' }, { status: 400 });
         const assetUrl = new URL(assets[component], request.url);
@@ -1419,13 +1472,17 @@ export async function onRequest(context) {
         if (!asset.ok) return new Response('Agent asset not found', { status: 404 });
         const source = await asset.arrayBuffer();
         const digest = await crypto.subtle.digest('SHA-256', source);
-        const sha256 = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+        const assetSha256 = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
         const server = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(ip).first();
         if (!server?.agent_token) return new Response('Agent token unavailable', { status: 503 });
-        const manifest = updateManifest(component, sha256, source.byteLength);
+        const manifest = updateManifest(component, assetSha256, source.byteLength);
         const mac = await hmacHex(server.agent_token, manifest);
         const contentType = component.endsWith('installer') ? 'text/x-shellscript; charset=utf-8' : 'text/x-python; charset=utf-8';
-        return new Response(source, { headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Agent-SHA256': sha256, 'X-Agent-Manifest-Version': '1', 'X-Agent-Length': String(source.byteLength), 'X-Agent-MAC': mac, 'X-Proxy-Controller-Mode': env.PROXY_CTRL_URL ? 'external' : 'builtin' } });
+        if (bootstrapToken && exchangeBootstrap) {
+            const used = await db.prepare('UPDATE agent_bootstrap_tokens SET used_at = ? WHERE token_hash = ? AND used_at = 0').bind(Date.now(), await sha256(bootstrapToken)).run();
+            if (Number(used.meta?.changes || 0) !== 1) return new Response('Bootstrap token already used', { status: 401 });
+        }
+        return new Response(source, { headers: { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Agent-SHA256': assetSha256, 'X-Agent-Manifest-Version': '1', 'X-Agent-Length': String(source.byteLength), 'X-Agent-MAC': mac, ...(bootstrapToken && exchangeBootstrap ? { 'X-Agent-Token': server.agent_token } : {}), 'X-Proxy-Controller-Mode': env.PROXY_CTRL_URL ? 'external' : 'builtin' } });
     }
 
     // 🌟 Agent 统一探针与管理上报接口 (融入全新的 Reset Day 计算和动态云端测速节点)
@@ -2072,10 +2129,23 @@ rules:
     if (!currentUser) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     try {
+        if (action === "agent_bootstrap" && method === "POST" && isAdmin) {
+            await ensureDbSchema(db);
+            const { ip, component } = await readJsonBody(request, 4 * 1024);
+            if (!validIp(ip) || !(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
+            if (!['full-installer', 'uninstaller'].includes(component)) return Response.json({ error: 'Invalid bootstrap component' }, { status: 400 });
+            const existingToken = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(ip).first();
+            if (!existingToken?.agent_token) await db.prepare('UPDATE servers SET agent_token = ? WHERE ip = ? AND (agent_token IS NULL OR agent_token = ?)').bind(crypto.randomUUID(), ip, '').run();
+            const token = await sessionToken();
+            const expiresAt = Date.now() + 5 * 60 * 1000;
+            await db.prepare('INSERT INTO agent_bootstrap_tokens (token_hash, vps_ip, component, expires_at, used_at) VALUES (?, ?, ?, ?, 0)').bind(await sha256(token), ip, component, expiresAt).run();
+            context.waitUntil(db.prepare('DELETE FROM agent_bootstrap_tokens WHERE expires_at < ? OR used_at > 0').bind(Date.now()).run().catch(() => {}));
+            return Response.json({ token, expires_at: expiresAt }, { headers: { 'Cache-Control': 'no-store' } });
+        }
         if (action === "data") {
             const servers = isAdmin
                 ? (await db.prepare(`SELECT ip, name, cpu, mem, last_report, alert_sent, disk, load, uptime,
-                    net_in_speed, net_out_speed, tcp_conn, udp_conn, agent_token,
+                    net_in_speed, net_out_speed, tcp_conn, udp_conn,
                     egress_mode, egress_applied_mode, egress_revision, egress_applied_revision,
                     egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, egress_ip,
                     socks5_addr, socks5_port, socks5_user,
@@ -2087,10 +2157,6 @@ rules:
                 const { results: proxyStates } = await db.prepare('SELECT ip, details, last_seen FROM proxy_ctrl_servers').all();
                 const proxyStateByIp = new Map((proxyStates || []).map(row => [row.ip, row]));
                 for (const server of servers) {
-                    if (!server.agent_token) {
-                        server.agent_token = crypto.randomUUID();
-                        await db.prepare("UPDATE servers SET agent_token = ? WHERE ip = ? AND agent_token IS NULL").bind(server.agent_token, server.ip).run();
-                    }
                     const state = proxyStateByIp.get(server.ip);
                     const slotConfig = await getProxySlotConfig(db, server.ip);
                     server.proxy_public_listener = proxyPublicListenerEnabled(slotConfig, env);
@@ -2422,4 +2488,5 @@ export const __test = {
     normalizeNodePayload,
     nodeListenerConflicts,
     notifyRealtimeVps,
+    normalizePingTarget,
 };

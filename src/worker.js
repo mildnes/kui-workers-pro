@@ -25,9 +25,13 @@ function isRealtimeRoute(pathname) {
         || pathname === '/frequency-policy';
 }
 
+function escapeErrorHtml(value) {
+    return String(value || 'Unknown error').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+
 function hardenedResponse(response) {
     const headers = new Headers(response.headers);
-    headers.set('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
+    headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
     headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     headers.set('Referrer-Policy', 'same-origin');
     headers.set('X-Content-Type-Options', 'nosniff');
@@ -71,7 +75,7 @@ export default {
             return hardenedResponse(await env.ASSETS.fetch(request));
         } catch (e) {
             return hardenedResponse(new Response(
-                `<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>⛔ 服务未就绪</h1><p>${e.message}</p><p>请检查 Cloudflare Dashboard 中的绑定配置。</p></body></html>`,
+                `<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>⛔ 服务未就绪</h1><p>${escapeErrorHtml(e.message)}</p><p>请检查 Cloudflare Dashboard 中的绑定配置。</p></body></html>`,
                 { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
             ));
         }

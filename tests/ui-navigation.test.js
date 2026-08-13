@@ -144,7 +144,7 @@ test('server card header and deployment actions use the compact explicit layout'
     const ip = serversPage.indexOf('kui-server-ip');
     assert.ok(status >= 0 && status < ip);
     assert.doesNotMatch(serversPage, /UP:|LOAD:|vps\.uptime|vps\.load/);
-    assert.match(serversPage, /<button @click="copyCommand\(generateCmd\(vps\.ip\)[\s\S]{0,180}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
+    assert.match(serversPage, /<button @click="copyDeployCommand\(vps\)"[\s\S]{0,80}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
     assert.match(appStyles, /\.kui-copy-deploy-button \{ display: flex; width: 100%;/);
     assert.match(serversPage, /class="kui-server-name truncate">\{\{ vps\.name \}\}/);
     assert.match(appStyles, /\.kui-server-name \{ font-size: 28px;/);
@@ -169,7 +169,7 @@ test('deployment commands live in the server overflow flyout with all three copy
     assert.ok(start >= 0);
     assert.doesNotMatch(deployPanel.match(/<details[^>]*>/)?.[0] || '', /\sopen(?:\s|>)/);
     assert.equal((deployPanel.match(/<button\b/g) || []).length, 3);
-    assert.match(deployPanel, /copyCommand\(generateCmd\(vps\.ip\)/);
+    assert.match(deployPanel, /copyDeployCommand\(vps\)/);
     assert.match(deployPanel, /copyUninstallCommand\(vps\)/);
     assert.match(deployPanel, /copyPurgeCommand\(vps\)/);
     assert.doesNotMatch(serversPage, /kui-server-delivery-section|kui-deploy-panel/);

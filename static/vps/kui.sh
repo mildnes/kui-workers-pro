@@ -7,22 +7,33 @@ set -eu
 # 支持: Ubuntu 18-24 / Debian 10-13 / Alpine Linux
 # ==========================================
 
-API_URL=""; VPS_IP=""; TOKEN=""; PROXY_API_URL=""
+API_URL=""; VPS_IP=""; TOKEN=""; PROXY_API_URL=""; BOOTSTRAP=""
 
 while [ "$#" -gt 0 ]; do
     case $1 in
         --api) [ "$#" -ge 2 ] || { echo "--api 缺少参数"; exit 1; }; API_URL="$2"; shift ;;
         --ip) [ "$#" -ge 2 ] || { echo "--ip 缺少参数"; exit 1; }; VPS_IP="$2"; shift ;;
         --token) [ "$#" -ge 2 ] || { echo "--token 缺少参数"; exit 1; }; TOKEN="$2"; shift ;;
+        --bootstrap) [ "$#" -ge 2 ] || { echo "--bootstrap 缺少参数"; exit 1; }; BOOTSTRAP="$2"; shift ;;
         --proxy-api) [ "$#" -ge 2 ] || { echo "--proxy-api 缺少参数"; exit 1; }; PROXY_API_URL="$2"; shift ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
     shift
 done
 
-if [ -z "$API_URL" ] || [ -z "$VPS_IP" ] || [ -z "$TOKEN" ]; then
+if [ -z "$API_URL" ] || [ -z "$VPS_IP" ] || { [ -z "$TOKEN" ] && [ -z "$BOOTSTRAP" ]; }; then
     echo "❌ 错误: 缺少必要参数！"
     exit 1
+fi
+
+if [ -n "$BOOTSTRAP" ]; then
+    BOOTSTRAP_HEADERS=$(mktemp /tmp/kui-bootstrap.XXXXXX)
+    trap 'rm -f "$BOOTSTRAP_HEADERS"' EXIT INT TERM
+    curl -fsSL --retry 3 -D "$BOOTSTRAP_HEADERS" -H "Authorization: Bootstrap ${BOOTSTRAP}" "${API_URL}/api/agent_update?ip=${VPS_IP}&component=full-installer&exchange=1" -o /dev/null
+    TOKEN=$(tr -d '\r' < "$BOOTSTRAP_HEADERS" | awk '/^[Xx]-[Aa]gent-[Tt]oken:/ {print $2}' | tail -n 1)
+    rm -f "$BOOTSTRAP_HEADERS"
+    trap - EXIT INT TERM
+    [ -n "$TOKEN" ] || { echo "❌ 一次性引导令牌无效或已过期"; exit 1; }
 fi
 
 case "$API_URL" in https://*) ;; *) echo "❌ --api 必须使用 https://"; exit 1 ;; esac

@@ -137,6 +137,75 @@ test('settings validate values and preserve unsaved probe drafts', () => {
     assert.match(api, /const allowedSettings = new Set/);
 });
 
+test('probe ping targets are validated before storage and never reach a shell', () => {
+    assert.match(api, /normalizePingTarget/);
+    assert.match(api, /ping_node_ct/);
+    assert.match(api, /Invalid ping target/);
+    const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
+    const pingStart = agent.indexOf('def get_http_ping');
+    const pingEnd = agent.indexOf('\ndef ', pingStart + 5);
+    const pingFunction = agent.slice(pingStart, pingEnd);
+    assert.match(pingFunction, /subprocess\.(?:run|check_output)\(\s*\[/);
+    assert.doesNotMatch(pingFunction, /shell=True/);
+});
+
+test('standalone realtime trusts only explicitly configured Pages origins', () => {
+    const originCheck = realtime.slice(realtime.indexOf('function isAllowedPagesOrigin'), realtime.indexOf('function requestPagesOrigin'));
+    assert.match(originCheck, /configured\.includes\(origin\)/);
+    assert.doesNotMatch(originCheck, /pages\.dev|workers\.dev/);
+});
+
+test('public probe content never executes stored administrator markup', () => {
+    assert.doesNotMatch(frontend, /v-html="probeSys\.popup_content"/);
+    assert.doesNotMatch(frontend, /headWrapper\.innerHTML|kui-custom-script|wrapper\.innerHTML\s*=\s*newVal/);
+    assert.doesNotMatch(api, /publicKeys[^\n]+custom_(?:head|script)/);
+    assert.doesNotMatch(api, /allowedSettings[^\n]+custom_(?:head|script)/);
+    assert.match(worker, /script-src 'self'/);
+});
+
+test('long-lived Agent tokens stay off the browser data plane', () => {
+    const dataRoute = api.slice(api.indexOf('if (action === "data")'), api.indexOf('if (action === "settings"'));
+    assert.doesNotMatch(dataRoute, /agent_token/);
+    assert.match(api, /agent_bootstrap_tokens/);
+    assert.match(api, /action === "agent_bootstrap"/);
+    assert.match(api, /const assetSha256 =/);
+    assert.doesNotMatch(api, /const sha256 = Array\.from\(new Uint8Array\(digest\)\)/);
+    assert.match(frontend, /requestAgentBootstrapToken/);
+    assert.doesNotMatch(frontend, /servers\.value\.find\(s => s\.ip === ip\)\?\.agent_token/);
+});
+
+test('standalone realtime authentication uses a dedicated secret', () => {
+    const headerFunction = api.slice(api.indexOf('async function realtimeAdminHeader'), api.indexOf('async function notifyRealtimePublicPolicy'));
+    assert.match(headerFunction, /REALTIME_AUTH_SECRET/);
+    assert.doesNotMatch(headerFunction, /ADMIN_PASSWORD/);
+    assert.match(realtime, /X-KUI-Realtime-Secret/);
+    assert.match(realtime, /difference \|= suppliedBytes\[index\] \^ configuredBytes\[index\]/);
+    assert.match(readme, /`REALTIME_AUTH_SECRET`/);
+});
+
+test('subscription SSRF checks cover every redirect and special IP encodings', () => {
+    assert.match(api, /redirect: 'manual'/);
+    assert.match(api, /await assertPublicSubscriptionResolution\(current\)/);
+    assert.match(api, /host\.startsWith\('::ffff:'\)/);
+    assert.match(api, /host\.startsWith\('ff'\)/);
+    assert.match(api, /if \(!publicAnswers\) throw new Error/);
+});
+
+test('subscription fetches validate resolved addresses and Telegram commands reuse settings limits', () => {
+    assert.match(api, /assertPublicSubscriptionResolution/);
+    assert.match(api, /cloudflare-dns\.com\/dns-query/);
+    assert.match(api, /await assertPublicSubscriptionResolution\(current\)/);
+    assert.match(api, /const interval = Number\(cmdParts\[1\]\)/);
+    assert.match(api, /interval >= 1 && interval <= 3600/);
+    assert.match(api, /title\.length <= 100/);
+});
+
+test('diagnostic errors are never interpolated into executable markup', () => {
+    assert.doesNotMatch(frontend, /innerHTML\s*=\s*`[^`]*\$\{e\.message\}/);
+    assert.match(frontend, /errorMessage\.textContent\s*=\s*String\(e\.message/);
+    assert.match(worker, /escapeErrorHtml\(e\.message\)/);
+});
+
 test('realtime patches invalidate the snapshot cache', () => {
     const routeStart = realtime.indexOf('url.pathname === "/update"');
     const updateRoute = realtime.slice(routeStart, realtime.indexOf('url.pathname === "/snapshot"', routeStart));

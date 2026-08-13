@@ -1,23 +1,32 @@
 import ast
+import ipaddress
 import pathlib
+import re
 import unittest
 
 
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound", "tune_outbound", "get_port_traffic", "build_selective_proxy_rules", "build_egress_dns_policy"}
+FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound", "tune_outbound", "get_port_traffic", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
     or (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "SELECTIVE_PROXY_RULE_SETS" for target in node.targets))
 ]
 COUNTERS = {"tcp": 120, "udp": 80}
-NAMESPACE = {"_read_iptables_port_bytes": lambda _port, protocol: COUNTERS.get(protocol)}
+NAMESPACE = {"_read_iptables_port_bytes": lambda _port, protocol: COUNTERS.get(protocol), "ipaddress": ipaddress, "re": re}
 exec(compile(ast.Module(body=SELECTED, type_ignores=[]), str(SOURCE_PATH), "exec"), NAMESPACE)
 
 
 class AgentSingBoxTests(unittest.TestCase):
+    def test_ping_targets_reject_shell_metacharacters(self):
+        self.assertEqual(NAMESPACE["normalize_ping_target"]("probe.example.com"), "probe.example.com")
+        self.assertEqual(NAMESPACE["normalize_ping_target"]("203.0.113.8"), "203.0.113.8")
+        for value in ("example.com;id", "$(id)", "https://example.com", "example.com/path", ""):
+            with self.assertRaises(ValueError):
+                NAMESPACE["normalize_ping_target"](value)
+
     def test_ss2022_network_defaults_to_tcp_and_udp(self):
         self.assertEqual(NAMESPACE["normalize_ss2022_network"](""), ["tcp", "udp"])
         self.assertEqual(NAMESPACE["normalize_ss2022_network"]("tcp"), ["tcp"])
@@ -54,6 +63,7 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertTrue(all(item["type"] == "remote" for item in rule_sets))
         self.assertTrue(all(item["download_detour"] == "direct-out" for item in rule_sets))
         self.assertTrue(all(item["update_interval"] == "1d" for item in rule_sets))
+        self.assertTrue(all("/refs/heads/" not in item["url"] for item in rule_sets))
         self.assertTrue(all(item["url"].startswith("https://raw.githubusercontent.com/") for item in rule_sets))
 
         route, reject_ipv6 = rules

@@ -14,7 +14,7 @@
 
               <div v-if="showWelcomePopup && probeSys.enable_popup === 'true'" class="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
                   <div class="bg-white rounded-[2rem] p-6 sm:p-8 shadow-2xl w-full max-w-lg relative text-center">
-                      <div class="text-left leading-relaxed text-[15px] max-h-[60vh] overflow-y-auto text-slate-700" v-html="probeSys.popup_content"></div>
+                      <div class="text-left leading-relaxed text-[15px] whitespace-pre-wrap max-h-[60vh] overflow-y-auto text-slate-700">{{ probeSys.popup_content }}</div>
                       <button @click="closePopup" class="mt-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:scale-105 active:scale-95 transition-all">我已知晓</button>
                   </div>
               </div>

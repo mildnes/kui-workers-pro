@@ -66,6 +66,8 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 
 集成部署已内置实时服务和住宅代理控制器，正常使用时不要设置 `REALTIME_URL`、`PROXY_CTRL_URL`、`PROXY_CTRL_USER`、`PROXY_CTRL_PASS` 或 `PROXY_CTRL_TOKEN`。只有对接旧版分离服务或外部控制器时才需要这些变量。
 
+旧版分离 Realtime 部署还必须在两端配置相同的 `REALTIME_AUTH_SECRET` Secret（至少 32 个随机字符），不得复用管理员密码。集成部署不需要设置。
+
 Telegram 通知建议登录后在面板中设置。`TG_BOT_TOKEN`、`TG_CHAT_ID` 和 `TG_WEBHOOK_SECRET` 仅用于环境变量回退或 Webhook 加固；`CRON_SECRET` 仅在外部调用 `/api/cron_check` 时需要，内置 Cron 无需设置。
 
 需要命令行部署、更新现有实例或排查资源绑定时，请参阅[部署与故障排查](docs/deployment.md)。

@@ -36,17 +36,9 @@ function pagesOrigins(env) {
   return String(env.PAGES_ORIGIN || "").split(",").map(origin => origin.trim().replace(/\/$/, "")).filter(origin => /^https:\/\//.test(origin));
 }
 
-function isPagesDevOrigin(origin) {
-  try { return new URL(origin).protocol === "https:" && /^[a-z0-9-]+\.pages\.dev$/i.test(new URL(origin).hostname); } catch { return false; }
-}
-
-function isWorkersDevOrigin(origin) {
-  try { return new URL(origin).protocol === "https:" && /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/i.test(new URL(origin).hostname); } catch { return false; }
-}
-
 function isAllowedPagesOrigin(origin, env) {
   const configured = pagesOrigins(env);
-  return configured.length ? configured.includes(origin) : (isPagesDevOrigin(origin) || isWorkersDevOrigin(origin));
+  return configured.length > 0 && configured.includes(origin);
 }
 
 function requestPagesOrigin(request, env) {
@@ -100,6 +92,21 @@ function compactRoleState(role, data) {
 async function verifyAdmin(header, request, env) {
   try {
     if (!header) return false;
+    if (header.startsWith("Realtime ")) {
+      const encoder = new TextEncoder();
+      const supplied = encoder.encode(header.slice(9));
+      const configured = encoder.encode(String(env.REALTIME_AUTH_SECRET || ""));
+      if (configured.length < 32 || supplied.length > 1024) return false;
+      const [suppliedHash, configuredHash] = await Promise.all([
+        crypto.subtle.digest("SHA-256", supplied),
+        crypto.subtle.digest("SHA-256", configured),
+      ]);
+      const suppliedBytes = new Uint8Array(suppliedHash);
+      const configuredBytes = new Uint8Array(configuredHash);
+      let difference = 0;
+      for (let index = 0; index < configuredBytes.length; index++) difference |= suppliedBytes[index] ^ configuredBytes[index];
+      return difference === 0;
+    }
     if (header.startsWith("Bearer ")) {
       const token = header.slice(7);
       if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return false;
@@ -116,7 +123,7 @@ async function verifyAdmin(header, request, env) {
     for (const origin of origins) {
       const response = await fetch(`${origin}/api/realtime_auth`, {
         method: "POST",
-        headers: { Authorization: header, "Content-Type": "application/json" },
+        headers: { Authorization: header, "Content-Type": "application/json", "X-KUI-Realtime-Secret": env.REALTIME_AUTH_SECRET || "" },
         body: "{}",
         signal: AbortSignal.timeout(10000),
       });

@@ -76,11 +76,6 @@
             <div class="kui-settings-field"><label for="probe-theme">前端主题风格</label><select id="probe-theme" v-model="probeSys.theme"><option v-for="t in availableThemes" :key="t.id" :value="t.id">{{ t.name }}</option></select></div>
             <div v-if="probeSys.theme === 'theme6' || hasCustomCssFlag" class="kui-settings-field"><label for="probe-css">自定义 CSS</label><textarea id="probe-css" v-model="probeSys.custom_css" rows="4" spellcheck="false"></textarea></div>
             <div class="kui-settings-field"><label for="probe-bg">背景图片 URL</label><input id="probe-bg" v-model.trim="probeSys.custom_bg" type="url" placeholder="清空后恢复纯色"></div>
-            <details class="kui-settings-advanced">
-              <summary>高级代码注入</summary>
-              <div class="kui-settings-field"><label for="probe-head">自定义 &lt;head&gt;</label><textarea id="probe-head" v-model="probeSys.custom_head" rows="3" spellcheck="false"></textarea></div>
-              <div class="kui-settings-field"><label for="probe-script">底部 Script</label><textarea id="probe-script" v-model="probeSys.custom_script" rows="3" spellcheck="false"></textarea></div>
-            </details>
             <div class="kui-settings-field"><label for="probe-report">客户端上报间隔（秒）</label><input id="probe-report" v-model.number="probeSys.report_interval" type="number" min="1" max="3600" step="1"><small>允许范围 1–3600 秒</small></div>
           </div>
 
@@ -94,8 +89,8 @@
               <label class="kui-settings-toggle"><input v-model="probeSys.show_bw" type="checkbox" true-value="true" false-value="false"><span><b>带宽徽章</b></span></label>
               <label class="kui-settings-toggle"><input v-model="probeSys.show_tf" type="checkbox" true-value="true" false-value="false"><span><b>流量配额</b></span></label>
             </div>
-            <label class="kui-settings-toggle kui-settings-toggle-wide"><input v-model="probeSys.enable_popup" type="checkbox" true-value="true" false-value="false"><span><b>首页公告弹窗</b><small>支持 HTML 内容</small></span></label>
-            <div v-if="probeSys.enable_popup === 'true'" class="kui-settings-field"><label for="probe-popup">公告内容</label><textarea id="probe-popup" v-model="probeSys.popup_content" rows="4" placeholder="<h3>公告</h3><p>内容...</p>"></textarea></div>
+            <label class="kui-settings-toggle kui-settings-toggle-wide"><input v-model="probeSys.enable_popup" type="checkbox" true-value="true" false-value="false"><span><b>首页公告弹窗</b><small>按纯文本安全显示</small></span></label>
+            <div v-if="probeSys.enable_popup === 'true'" class="kui-settings-field"><label for="probe-popup">公告内容</label><textarea id="probe-popup" v-model="probeSys.popup_content" rows="4" placeholder="请输入公告内容"></textarea></div>
 
             <h4>三网测速节点</h4>
             <div class="kui-settings-grid kui-settings-grid-three">

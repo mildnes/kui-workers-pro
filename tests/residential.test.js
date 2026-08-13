@@ -93,9 +93,20 @@ test('residential data-plane verification follows the configured listener with s
 
 test('residential landing server resolves domains through its active tunnel', () => {
     assert.match(proxyServer, /def resolve_on_landing\(host: str, port: int, interface: str\)/);
-    assert.match(proxyServer, /dns_socket\.setsockopt\(socket\.SOL_SOCKET, 25, interface\.encode\("utf-8"\)\)/);
+    assert.match(proxyServer, /dns_socket\.setsockopt\(socket\.SOL_SOCKET, SO_BINDTODEVICE, interface\.encode\("utf-8"\)\)/);
     assert.match(proxyServer, /addrinfos = resolve_on_landing\(host, port, bind_interface\)/);
     assert.doesNotMatch(proxyServer, /socket\.getaddrinfo\(host, port/);
+    assert.match(proxyServer, /flags & 0x0200/);
+    assert.match(proxyServer, /socket\.SOCK_STREAM/);
+    assert.match(proxyServer, /recv_exact\(dns_socket, 2\)/);
+});
+
+test('residential SOCKS5 server supports UDP ASSOCIATE through the active tunnel', () => {
+    assert.match(proxyServer, /command == 3/);
+    assert.match(proxyServer, /def relay_socks5_udp/);
+    assert.match(proxyServer, /SO_BINDTODEVICE/);
+    assert.match(proxyServer, /if fragment != 0/);
+    assert.doesNotMatch(proxyServer, /if command != 1:[\s\S]{0,100}x05\\x07/);
 });
 
 test('realtime egress results are persisted and acknowledged without HTTP', () => {

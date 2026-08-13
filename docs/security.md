@@ -7,6 +7,7 @@
 | `ADMIN_PASSWORD` | 必需 | 项目没有默认管理员密码，请使用独立强密码 |
 | `PROXY_USER` / `PROXY_PASS` | 使用住宅代理时 | 两项同时设置，不要与管理员凭据相同 |
 | `TG_WEBHOOK_SECRET` | 启用 Telegram Webhook 加固时 | 使用随机值并妥善保存 |
+| `REALTIME_AUTH_SECRET` | 仅旧版分离 Realtime 部署 | 至少 32 个随机字符，两端一致且不得复用管理员密码 |
 
 一键部署后只需先设置 `ADMIN_PASSWORD`；其他项按功能需要添加。敏感信息必须在 Cloudflare 中选择 **Secret** 类型，不要提交密码、代理凭据、D1 ID、Telegram Token 或其他部署私密信息。
 

@@ -220,7 +220,10 @@
                     </div>
                 `;
             } catch (e) {
-                container.innerHTML = `<div class="col-span-full text-left p-6 text-rose-400 bg-rose-500/10 rounded-xl border border-rose-500/20">${e.message}</div>`;
+                const errorMessage = document.createElement('div');
+                errorMessage.className = 'col-span-full text-left whitespace-pre-wrap p-6 text-rose-400 bg-rose-500/10 rounded-xl border border-rose-500/20';
+                errorMessage.textContent = String(e.message || '质检请求失败');
+                container.replaceChildren(errorMessage);
             }
         }
 

@@ -527,7 +527,7 @@ SELECTIVE_PROXY_RULE_SETS = {
         {
             "tag": "kui-youtube",
             "format": "binary",
-            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/YouTube/YouTube.srs",
+            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/41de0cb37f35b83a2b934774c6501c5451f242c4/rule/YouTube/YouTube.srs",
             "use": "both",
         },
     ),
@@ -535,13 +535,13 @@ SELECTIVE_PROXY_RULE_SETS = {
         {
             "tag": "kui-ai-domain",
             "format": "source",
-            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/ai.json",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/e667f45fdf3fa308a3e0e9dcb5528428712efb52/sing-box/non_ip/ai.json",
             "use": "both",
         },
         {
             "tag": "kui-ai-ip",
             "format": "source",
-            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/ai.json",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/e667f45fdf3fa308a3e0e9dcb5528428712efb52/sing-box/ip/ai.json",
             "use": "route",
         },
     ),
@@ -549,7 +549,7 @@ SELECTIVE_PROXY_RULE_SETS = {
         {
             "tag": "kui-google",
             "format": "binary",
-            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/refs/heads/main/rule/Google/Google.srs",
+            "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/41de0cb37f35b83a2b934774c6501c5451f242c4/rule/Google/Google.srs",
             "use": "both",
         },
     ),
@@ -557,13 +557,13 @@ SELECTIVE_PROXY_RULE_SETS = {
         {
             "tag": "kui-stream-domain",
             "format": "source",
-            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/non_ip/stream.json",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/e667f45fdf3fa308a3e0e9dcb5528428712efb52/sing-box/non_ip/stream.json",
             "use": "both",
         },
         {
             "tag": "kui-stream-ip",
             "format": "source",
-            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/refs/heads/master/sing-box/ip/stream.json",
+            "url": "https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/e667f45fdf3fa308a3e0e9dcb5528428712efb52/sing-box/ip/stream.json",
             "use": "route",
         },
     ),
@@ -881,9 +881,27 @@ def get_static_sysinfo():
 
 def get_http_ping(url):
     try:
-        out = subprocess.check_output(f'curl -o /dev/null -s -m 2 -w "%{{time_total}}" "http://{url}"', shell=True).decode().strip()
-        return str(int(float(out) * 1000))
+        target = normalize_ping_target(url)
+        host = f"[{target}]" if ":" in target else target
+        result = subprocess.run(
+            ["curl", "-o", "/dev/null", "-s", "-m", "2", "-w", "%{time_total}", f"http://{host}"],
+            capture_output=True, text=True, timeout=4, check=True,
+        )
+        return str(int(float(result.stdout.strip()) * 1000))
     except: return "0"
+
+def normalize_ping_target(value):
+    target = str(value or "").strip().lower()
+    if not target or len(target) > 253 or re.search(r"[\x00-\x20\x7f/?#@]", target) or "://" in target:
+        raise ValueError("invalid ping target")
+    try:
+        ipaddress.ip_address(target)
+        return target
+    except ValueError:
+        pass
+    if not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", target):
+        raise ValueError("invalid ping target")
+    return target
 
 def get_net_dev_bytes():
     try:

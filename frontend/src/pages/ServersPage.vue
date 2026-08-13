@@ -42,7 +42,7 @@
                                                           <label><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="alpine"> Alpine</label>
                                                       </div>
                                                   </div>
-                                                  <button @click="copyCommand(generateCmd(vps.ip), '部署指令已复制！')" class="kui-copy-deploy-button">复制完整部署命令</button>
+                                                  <button @click="copyDeployCommand(vps)" class="kui-copy-deploy-button">复制完整部署命令</button>
                                                   <button @click="copyUninstallCommand(vps)" class="kui-copy-agent-uninstall-button">复制 Agent 卸载命令（保留住宅代理）</button>
                                                   <button @click="copyPurgeCommand(vps)" class="kui-copy-purge-button" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
                                               </div>
