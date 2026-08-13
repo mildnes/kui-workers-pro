@@ -1,6 +1,6 @@
 # 住宅代理与 Docker 接入
 
-## 必需配置
+## 用户需要配置的 Secrets
 
 在 Worker 的 **Settings → Variables and Secrets** 中设置：
 
@@ -11,11 +11,13 @@ PROXY_PASS=使用独立强密码
 
 缺少任一项时，住宅代理接口不会下发凭据。修改后需要重新部署 Worker。
 
+集成版已内置住宅代理控制器，不需要设置 `PROXY_CTRL_URL`、`PROXY_CTRL_USER`、`PROXY_CTRL_PASS` 或 `PROXY_CTRL_TOKEN`。这些变量仅用于兼容独立的外部控制器。
+
 ## 监听范围
 
 住宅 SOCKS 默认只监听 VPS 本机 `127.0.0.1`，供 KUI Agent 链式出口使用。除非确实需要从公网直连，否则不要开启公网监听。
 
-如需将新接入 VPS 默认设为公网监听，可设置：
+`PROXY_PUBLIC_LISTENER` 是用户可调的普通变量。如需将新接入 VPS 默认设为公网监听，可设置：
 
 ```text
 PROXY_PUBLIC_LISTENER=true

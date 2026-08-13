@@ -1,19 +1,62 @@
 # 部署与故障排查
 
-## 一键部署
+## 推荐：Cloudflare 一键部署
+
+新用户应优先使用一键部署，无需克隆仓库、安装 Wrangler 或手动创建 Cloudflare 资源。
 
 1. 在 [README](../README.md) 中点击 **Deploy to Cloudflare Workers**。
-2. 登录 Cloudflare，选择账户并确认 Worker 名称。
-3. 确认部署流程创建了以下 bindings：
-   - D1：`DB`
-   - Durable Object：`VPS_PRESENCE` → `VpsPresence`
-   - Durable Object：`DASHBOARD_HUB` → `DashboardHub`
-4. 在 **Settings → Variables and Secrets** 中设置 `ADMIN_PASSWORD`。
-5. 重新部署，打开 Worker 地址并使用用户名 `admin` 登录。
+2. 登录 Cloudflare，选择账户并确认部署。
+3. 部署完成后，在 Worker 的 **Settings → Variables and Secrets** 中添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
+4. 打开 Worker 地址，使用用户名 `admin` 和刚设置的密码登录。
 
-管理员和住宅代理应使用不同的独立强密码。修改 Variables、Secrets 或 Bindings 后必须重新部署。
+如需住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。管理员和代理凭据应使用不同的独立强密码。
 
-## 手动部署
+## 变量与内置配置
+
+### 用户需要设置的 Secrets
+
+| 配置 | 何时需要 | 说明 |
+| --- | --- | --- |
+| `ADMIN_PASSWORD` | 必需 | 管理员登录密码，无默认值 |
+| `PROXY_USER` | 使用住宅代理时 | SOCKS5 用户名，需与 `PROXY_PASS` 同时设置 |
+| `PROXY_PASS` | 使用住宅代理时 | SOCKS5 密码，需与 `PROXY_USER` 同时设置 |
+
+### 用户可调变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ADMIN_USERNAME` | `admin` | 管理员用户名 |
+| `PROXY_PUBLIC_LISTENER` | `false` | 新 VPS 的公网监听默认值，面板中的单 VPS 设置优先 |
+
+这些变量已有安全默认值，一键部署后通常无需修改。`PROXY_PUBLIC_LISTENER` 建议保持 `false`。
+
+### 高级兼容变量
+
+| 变量 | 使用场景 |
+| --- | --- |
+| `TG_BOT_TOKEN` / `TG_CHAT_ID` | Telegram 通知的环境变量回退配置，通常直接在面板设置 |
+| `TG_WEBHOOK_SECRET` | 校验 Telegram Webhook 请求 |
+| `CRON_SECRET` | 保护外部调用的 `/api/cron_check`；内置 Cron 不需要 |
+| `REALTIME_URL` | 对接旧版分离实时服务；集成部署不需要 |
+| `PROXY_CTRL_URL` / `PROXY_CTRL_USER` / `PROXY_CTRL_PASS` / `PROXY_CTRL_TOKEN` | 对接外部住宅代理控制器；内置控制器不需要 |
+
+### 系统内置资源
+
+以下内容由 `wrangler.jsonc` 定义，一键部署时自动处理，不是在 **Variables and Secrets** 中填写的环境变量。
+
+| 名称 | 类型 | 用途 |
+| --- | --- | --- |
+| `DB` | D1 Binding | 业务数据库 |
+| `ASSETS` | Worker Assets Binding | 静态前端和 VPS 安装文件 |
+| `VPS_PRESENCE` | Durable Object Binding | VPS 实时状态 |
+| `DASHBOARD_HUB` | Durable Object Binding | 面板实时推送 |
+| `*/5 * * * *` | Cron Trigger | 每 5 分钟检查离线状态 |
+
+这些 binding 名称属于代码接口，使用已有资源时也不要改名。只有部署异常时才需要到 **Settings → Bindings** 核对它们。
+
+## 开发者手动部署
+
+仅在需要本地开发、命令行管理或自定义仓库时使用本节。普通用户请使用一键部署。
 
 ### 1. 准备环境
 
@@ -66,7 +109,14 @@ npx wrangler deploy --name my-kui-worker
 curl -fsS https://你的-worker-域名/health
 ```
 
-后续更新执行 `git pull` 和 `npx wrangler deploy`。手动部署不会自动创建或修改 GitHub 仓库。
+后续更新执行 `git pull` 和 `npx wrangler deploy`。仓库已启用 `keep_vars: true`，更新同一个 Worker 时会保留 Dashboard 中未写入配置文件的变量。手动部署不会自动创建或修改 GitHub 仓库。
+
+## 更新现有部署
+
+- 通过 Cloudflare 连接 Git 仓库部署：在 Cloudflare Dashboard 中触发最新提交的构建。
+- 通过命令行部署：拉取最新代码后运行 `npm ci` 和 `npx wrangler deploy`。
+- 更新前确认目标 Worker 名称与原实例一致，避免意外创建第二个实例。
+- 常规更新不会删除已保存的 Secrets；不要把真实凭据写入 `wrangler.jsonc`。
 
 ## 自定义域名
 

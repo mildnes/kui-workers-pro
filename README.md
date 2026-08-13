@@ -4,7 +4,18 @@
 
 KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探针面板。Worker Assets 托管前端和 VPS 安装组件，D1 保存业务数据，Durable Objects 提供实时 WebSocket，无需单独部署面板服务器或 Realtime Worker。
 
+## 推荐：Cloudflare 一键部署
+
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yuanlam/kui-workers-pro)
+
+无需购买服务器、克隆仓库、安装 Wrangler，也无需手动创建 D1 或 Durable Objects。点击按钮后，Cloudflare 会根据仓库配置创建 Worker 及其所需资源。
+
+1. 点击上方 **Deploy to Cloudflare Workers**。
+2. 登录 Cloudflare，选择账户并确认部署。
+3. 部署完成后，进入 Worker 的 **Settings → Variables and Secrets**，添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
+4. 打开 Worker 地址，使用用户名 `admin` 和刚设置的密码登录。
+
+如需使用住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。项目不内置任何默认密码。
 
 ## 核心能力
 
@@ -15,31 +26,49 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 - 原生、WARP、住宅代理和手动 SOCKS5 出口。
 - 实时状态同步、公开探针、Telegram 告警和定时离线检查。
 
-## 快速部署
+## 配置说明
 
-1. 点击上方 **Deploy to Cloudflare Workers**。
-2. 登录 Cloudflare，选择账户并确认 Worker 名称。
-3. 确认部署流程创建了 `DB`、`VPS_PRESENCE` 和 `DASHBOARD_HUB` bindings。
-4. 在 Worker 的 **Settings → Variables and Secrets** 中设置 `ADMIN_PASSWORD`。
-5. 重新部署并使用用户名 `admin` 登录。
+### 首次部署需要设置
 
-住宅代理还需要设置 `PROXY_USER` 和 `PROXY_PASS`。项目不内置任何默认密码。
+以下敏感信息由用户在 Cloudflare Dashboard 中设置，不要写入代码或提交到仓库。
 
-| 配置 | 类型 | 必需 | 用途 |
+| 配置 | 类型 | 何时需要 | 用途 |
 | --- | --- | --- | --- |
-| `DB` | D1 Binding | 是 | 业务数据库 |
-| `VPS_PRESENCE` | Durable Object Binding | 是 | VPS 实时状态 |
-| `DASHBOARD_HUB` | Durable Object Binding | 是 | 面板实时推送 |
-| `ADMIN_PASSWORD` | Secret | 是 | 管理员登录密码 |
-| `PROXY_USER` / `PROXY_PASS` | Secret | 住宅代理需要 | SOCKS5 认证凭据 |
-| `ADMIN_USERNAME` | 普通变量 | 否 | 管理员用户名，默认 `admin` |
-| `PROXY_PUBLIC_LISTENER` | 普通变量 | 否 | 新 VPS 公网监听的默认值，默认 `false`；可在面板按 VPS 覆盖 |
+| `ADMIN_PASSWORD` | Secret | 必需 | 管理员登录密码，请使用独立强密码 |
+| `PROXY_USER` / `PROXY_PASS` | Secret | 使用住宅代理时 | SOCKS5 认证凭据，两项必须同时设置 |
 
-密码和代理凭据必须在 Cloudflare 中选择 **Secret** 类型，不能写入仓库。非敏感配置使用普通变量，D1 与 Durable Objects 则在 **Bindings** 中配置。仓库已启用 `keep_vars: true`，部署到同一个 Worker 时会保留 Dashboard 中未写入 `wrangler.jsonc` 的普通变量；Secrets 本身也不会被常规部署删除。Deploy 按钮仅用于首次安装，后续应通过 Git 自动部署或 `wrangler deploy` 更新同一个 Worker。
+### 用户可调变量
 
-实时服务已集成到主 Worker，不需要配置 `REALTIME_URL`、`PAGES_ORIGIN` 或单独的 Realtime Worker。
+这些普通变量均有默认值，一键部署后通常无需修改。
 
-管理员可在面板的 **公网监听** 页面按 VPS 开启或关闭住宅代理公网入口。`PROXY_PUBLIC_LISTENER` 仅作为尚未单独设置 VPS 时的默认值；面板中的独立开关优先级更高。
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `ADMIN_USERNAME` | `admin` | 管理员登录用户名 |
+| `PROXY_PUBLIC_LISTENER` | `false` | 新接入 VPS 的住宅代理公网监听默认值；面板中的单 VPS 设置优先 |
+
+`PROXY_PUBLIC_LISTENER` 建议保持 `false`，确需公网访问时再通过面板的 **公网监听** 页面按 VPS 开启。
+
+### 系统内置资源（无需填写）
+
+以下配置由 `wrangler.jsonc` 管理，一键部署时自动创建或绑定。它们不是用户变量，请勿修改 binding 名称。
+
+| 内置配置 | 类型 | 用途 |
+| --- | --- | --- |
+| `DB` | D1 Binding | 业务数据库 |
+| `ASSETS` | Worker Assets Binding | 前端和 VPS 安装文件 |
+| `VPS_PRESENCE` | Durable Object Binding | VPS 实时状态 |
+| `DASHBOARD_HUB` | Durable Object Binding | 面板实时推送 |
+| `*/5 * * * *` | Cron Trigger | 每 5 分钟执行离线检查 |
+
+仓库已启用 `keep_vars: true`，更新同一个 Worker 时会保留 Dashboard 中未写入 `wrangler.jsonc` 的变量，Secrets 也不会被常规部署删除。
+
+### 高级兼容配置
+
+集成部署已内置实时服务和住宅代理控制器，正常使用时不要设置 `REALTIME_URL`、`PROXY_CTRL_URL`、`PROXY_CTRL_USER`、`PROXY_CTRL_PASS` 或 `PROXY_CTRL_TOKEN`。只有对接旧版分离服务或外部控制器时才需要这些变量。
+
+Telegram 通知建议登录后在面板中设置。`TG_BOT_TOKEN`、`TG_CHAT_ID` 和 `TG_WEBHOOK_SECRET` 仅用于环境变量回退或 Webhook 加固；`CRON_SECRET` 仅在外部调用 `/api/cron_check` 时需要，内置 Cron 无需设置。
+
+需要命令行部署、更新现有实例或排查资源绑定时，请参阅[部署与故障排查](docs/deployment.md)。
 
 ## VPS 接入
 
