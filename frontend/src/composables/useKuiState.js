@@ -4,7 +4,7 @@ import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
 import { countryCoords, iso2To3 } from './useProbe.js';
 import { nextRealtimeRetryDelay, normalizeRealtimeKey } from './useRealtime.js';
-import { applyEgressRealtimeResult } from '../utils/egressState.js';
+import { applyEgressRealtimeResult, shouldSuggestWarpOptimization } from '../utils/egressState.js';
 
 
 export function useKuiState() {
@@ -1069,13 +1069,28 @@ export function useKuiState() {
                   };
                   const updateWarpPolicy = policy => sendWarpOptimizerCommand('policy', { policy });
 
+                  const suggestWarpOptimization = (resultServer, result) => {
+                      if (!resultServer || !shouldSuggestWarpOptimization(result)) return;
+                      const marker = `${result.deployment_id || ''}:${result.revision}:${result.applied_at}`;
+                      const storageKey = `kui_warp_optimizer_suggest:${resultServer.ip}`;
+                      try {
+                          if (localStorage.getItem(storageKey) === marker) return;
+                          localStorage.setItem(storageKey, marker);
+                      } catch {}
+                      if (activeTab.value === 'warp') return;
+                      if (confirm('WARP 出口已生效。建议前往「WARP 隧道」页面检测并应用更优 Endpoint。现在前往？')) {
+                          warpTargetIp.value = resultServer.ip;
+                          activeTab.value = 'warp';
+                      }
+                  };
+
                   let dataTimer = null; let pingTimer = null; let probeTimer = null;
                   const applyRealtimeSnapshot = (snapshot) => {
                       if (!snapshot?.ip) return;
                       const key = normalizeRealtimeKey(snapshot.ip);
                       const resultServer = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
                       const egressResult = snapshot.core_egress_result || snapshot.core_config_result;
-                      applyEgressRealtimeResult(resultServer, egressResult);
+                      if (applyEgressRealtimeResult(resultServer, egressResult)) suggestWarpOptimization(resultServer, egressResult);
                       const egressProbe = snapshot.core_egress_probe_result;
                       if (resultServer && egressProbe?.request_id && egressProbe.request_id === egressRefreshRequests[resultServer.ip]) {
                           clearTimeout(egressRefreshTimers.get(resultServer.ip)); egressRefreshTimers.delete(resultServer.ip);
@@ -1096,6 +1111,7 @@ export function useKuiState() {
                           if (normalizeRealtimeKey(probeDetail.value?.id) === key && timestamp >= Number(probeDetail.value?._realtime_ts || probeDetail.value?.last_updated || 0)) { Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp }); updateProbeDetailCharts(probeDetail.value); }
                       }
                       if (resultServer && snapshot.core_warp_result?.warp) resultServer.warp = snapshot.core_warp_result.warp;
+                      if (resultServer && snapshot.core_warp_result?.egress_ip) resultServer.egress_ip = snapshot.core_warp_result.egress_ip;
                       if (resultServer && Array.isArray(snapshot.proxy?.details)) {
                           const details = snapshot.proxy.details;
                           const active = details.find(item => item?.active && (item.exit_ip || item.node_ip));

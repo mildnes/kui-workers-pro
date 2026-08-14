@@ -457,8 +457,14 @@ export class VpsPresence extends DurableObject {
       if (role !== "core") return;
       const warp = compactWarpState(envelope.data);
       if (!warp) return;
+      const warpResult = { request_id: String(envelope.data?.request_id || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), egress_ip: safeProxyAddress(envelope.data?.egress_ip), warp, updated_at: Date.now() };
+      if (warp.optimizer.status === "success" && warp.active_mode.startsWith("warp_") && warpResult.egress_ip) {
+        await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ?").bind(warpResult.egress_ip, attachment.ip).run();
+      } else {
+        warpResult.egress_ip = "";
+      }
       this.snapshot.core = { ...(this.snapshot.core || {}), warp };
-      this.snapshot.core_warp_result = { request_id: String(envelope.data?.request_id || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), warp, updated_at: Date.now() };
+      this.snapshot.core_warp_result = warpResult;
       this.snapshot.core_warp_result_at = Date.now();
       ws.serializeAttachment(attachment);
       await this.persistAndBroadcast();

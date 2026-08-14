@@ -532,12 +532,12 @@ _warp_optimizer_lock = threading.Lock()
 _warp_optimizer_thread = None
 _warp_optimizer_cancel = threading.Event()
 
-def _emit_warp_optimizer_state(state=None, request_id=""):
+def _emit_warp_optimizer_state(state=None, request_id="", egress_ip=""):
     public = _public_warp_optimizer_state()
     try: heartbeat_wakeup.set()
     except Exception: pass
     if realtime_channel and realtime_channel.connected:
-        realtime_channel.send({"request_id": request_id, **public}, "warp.optimize.result")
+        realtime_channel.send({"request_id": request_id, "egress_ip": egress_ip, **public}, "warp.optimize.result")
     return public
 
 def _load_or_create_warp_benchmark_profile():
@@ -571,6 +571,7 @@ def _apply_warp_endpoint(address, port, request_id="", allow_previous=False, rea
         state.update({"status": "applying", "stage": "正在验证并切换", "progress": 95, "error": ""}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
         profile["peer_address"] = address; profile["peer_port"] = port
         applied_mode = _load_egress_state().get("applied_mode", "native")
+        verified_egress_ip = ""
         if applied_mode.startswith("warp_"):
             with open(SINGBOX_CONF_PATH, "r", encoding="utf-8") as config_file: config = json.load(config_file)
             old_config = json.dumps(config, indent=2)
@@ -586,7 +587,7 @@ def _apply_warp_endpoint(address, port, request_id="", allow_previous=False, rea
             _write_json_state(WARP_CONF_PATH, profile)
             os.replace(temp_path, SINGBOX_CONF_PATH)
             if not _restart_singbox(): raise RuntimeError("sing-box failed to restart with optimized Endpoint")
-            _verify_warp_exit(applied_mode[5:], _current_egress_check_host())
+            verified_egress_ip = _verify_warp_exit(applied_mode[5:], _current_egress_check_host())
         else:
             verified = _test_warp_candidate(profile, {"address": address, "port": port}, attempts=1, mode="dual", timeout=6)
             if not verified.get("success"): raise RuntimeError(verified.get("error") or "optimized WARP Endpoint verification failed")
@@ -595,7 +596,7 @@ def _apply_warp_endpoint(address, port, request_id="", allow_previous=False, rea
         history = [{"at": now, "from_address": old_profile["peer_address"], "from_port": int(old_profile["peer_port"]), "to_address": address, "to_port": port, "reason": "restore" if allow_previous else str(reason or "manual")[:32], "success": True}] + state.get("history", [])
         candidates = [dict(item, current=item.get("address") == address and int(item.get("port", 0)) == port) for item in state.get("candidates", [])]
         state.update({"status": "success", "stage": "端点已应用", "progress": 100, "previous": {"address": old_profile["peer_address"], "port": int(old_profile["peer_port"])}, "recommended": None, "candidates": candidates, "history": history[:12], "consecutive_failures": 0, "error": ""})
-        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id, egress_ip=verified_egress_ip)
         return state
     except Exception as error:
         _write_json_state(WARP_CONF_PATH, old_profile)

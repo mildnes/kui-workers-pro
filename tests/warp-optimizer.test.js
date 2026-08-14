@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
+import { shouldSuggestWarpOptimization } from '../frontend/src/utils/egressState.js';
 
 const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const realtime = read('../realtime/src/index.js');
@@ -75,4 +76,23 @@ test('WARP tunnel page is reachable and keeps scan separate from apply', () => {
   assert.match(page, /手动优化/);
   assert.match(page, /连续失败时自动优化/);
   assert.match(page, /首次启用后检测一次/);
+});
+
+test('a newly applied WARP egress suggests opening the optimizer exactly from a successful result', () => {
+  const now = Date.now();
+  assert.equal(shouldSuggestWarpOptimization({ component: 'egress', success: true, applied_mode: 'warp_dual', applied_at: now }, now), true);
+  assert.equal(shouldSuggestWarpOptimization({ component: 'egress', success: true, applied_mode: 'native', applied_at: now }, now), false);
+  assert.equal(shouldSuggestWarpOptimization({ component: 'egress', success: false, applied_mode: 'warp_dual', applied_at: now }, now), false);
+  assert.equal(shouldSuggestWarpOptimization({ component: 'egress', success: true, applied_mode: 'warp_dual', applied_at: now - 11 * 60 * 1000 }, now), false);
+  assert.match(state, /建议前往「WARP 隧道」页面/);
+  assert.match(state, /activeTab\.value = 'warp'/);
+  assert.match(state, /warpTargetIp\.value = resultServer\.ip/);
+});
+
+test('applying an optimized Endpoint reports and persists the newly verified WARP exit IP', () => {
+  assert.match(agent, /verified_egress_ip = _verify_warp_exit\(applied_mode\[5:\]/);
+  assert.match(agent, /_emit_warp_optimizer_state\([^\n]*egress_ip=verified_egress_ip/);
+  assert.match(realtime, /messageType === "warp\.optimize\.result"[\s\S]*egress_ip: safeProxyAddress/);
+  assert.match(realtime, /UPDATE servers SET egress_ip = \?/);
+  assert.match(state, /snapshot\.core_warp_result\?\.egress_ip/);
 });

@@ -19,3 +19,10 @@ export function applyEgressRealtimeResult(server, result) {
   }
   return true;
 }
+
+export function shouldSuggestWarpOptimization(result, now = Date.now()) {
+  if (result?.component !== 'egress' || result.success !== true) return false;
+  if (!String(result.applied_mode || '').startsWith('warp_')) return false;
+  const appliedAt = Number(result.applied_at);
+  return Number.isFinite(appliedAt) && appliedAt <= now && now - appliedAt <= 10 * 60 * 1000;
+}
