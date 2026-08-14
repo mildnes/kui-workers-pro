@@ -123,16 +123,12 @@ setup_sysctl() {
     cat > /etc/sysctl.d/99-proxy-lite.conf << 'SYSCTL'
 net.ipv4.conf.all.rp_filter=2
 net.ipv4.conf.default.rp_filter=2
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=1
 SYSCTL
     if command -v sysctl >/dev/null 2>&1; then
         sysctl --system >/dev/null 2>&1 || {
             echo "⚠️  sysctl --system 部分失败，尝试单独应用..."
             sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>&1 || true
             sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>&1 || true
-            sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
-            sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1 || true
         }
     fi
     echo "[+] 内核参数配置完成"

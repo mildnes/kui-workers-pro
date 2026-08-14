@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
-import { applyEgressRealtimeResult } from '../frontend/src/utils/egressState.js';
+import { applyEgressRealtimeResult, mergeServerRealtimeTelemetry } from '../frontend/src/utils/egressState.js';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
@@ -169,6 +169,20 @@ test('an egress apply result received before the save response still refreshes t
     assert.equal(server.egress_ip, '104.28.222.43');
     assert.match(frontend, /const alreadyApplied = vps\.egress_status === 'applied'/);
     assert.match(frontend, /if \(!alreadyApplied\) vps\.egress_status/);
+});
+
+test('new D1 egress state is never overwritten by an older realtime server object', () => {
+    const merged = mergeServerRealtimeTelemetry(
+        { ip: '203.0.113.8', cpu: 10, last_report: 100, egress_status: 'applied', egress_applied_revision: 5, egress_ip: '104.28.222.43' },
+        { ip: '203.0.113.8', cpu: 25, _realtime_ts: 200, egress_status: 'pending', egress_applied_revision: 4, egress_ip: '198.51.100.1' },
+    );
+    assert.equal(merged.cpu, 25);
+    assert.equal(merged._realtime_ts, 200);
+    assert.equal(merged.egress_status, 'applied');
+    assert.equal(merged.egress_applied_revision, 5);
+    assert.equal(merged.egress_ip, '104.28.222.43');
+    assert.match(frontend, /mergeServerRealtimeTelemetry\(item, previous\)/);
+    assert.match(frontend, /!egressResult\.egress_ip[\s\S]{0,600}refreshVpsEgressIp\(resultServer, true\)/);
 });
 
 test('the integrated Worker sends manual egress refresh directly to the presence object', async () => {

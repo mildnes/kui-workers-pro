@@ -6,6 +6,7 @@ import { __test } from '../functions/api/[[path]].js';
 const manager = fs.readFileSync(new URL('../static/vps/lite_manager.py', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 const proxyServer = fs.readFileSync(new URL('../static/vps/proxy_server.py', import.meta.url), 'utf8');
+const installer = fs.readFileSync(new URL('../static/vps/residential-proxy.sh', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const realtime = fs.readFileSync(new URL('../realtime/src/index.js', import.meta.url), 'utf8');
 const frontendState = fs.readFileSync(new URL('../frontend/src/composables/useKuiState.js', import.meta.url), 'utf8');
@@ -115,6 +116,13 @@ test('residential tunnel routing cannot delete or flush cloud policy routes', ()
     assert.doesNotMatch(manager, /\["ip", "route", "flush", "table", str\(table_id\)\]/);
     assert.match(manager, /_cleanup_tunnel_routing\(tun_name, legacy_table/);
     assert.match(manager, /"route", "replace", "default", "dev", tun_name/);
+});
+
+test('residential OpenVPN cannot alter host routes or forwarding used by SSH', () => {
+    assert.match(manager, /"--route-nopull", "--route-noexec"/);
+    assert.match(manager, /"--pull-filter", "ignore", "redirect-gateway"/);
+    assert.doesNotMatch(manager, /net\.ipv4\.ip_forward=1|net\.ipv6\.conf\.all\.forwarding=1/);
+    assert.doesNotMatch(installer, /net\.ipv4\.ip_forward=1|net\.ipv6\.conf\.all\.forwarding=1/);
 });
 
 test('realtime egress results are persisted and acknowledged without HTTP', () => {

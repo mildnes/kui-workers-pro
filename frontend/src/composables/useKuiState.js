@@ -4,7 +4,7 @@ import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
 import { countryCoords, iso2To3 } from './useProbe.js';
 import { nextRealtimeRetryDelay, normalizeRealtimeKey } from './useRealtime.js';
-import { applyEgressRealtimeResult, shouldSuggestWarpOptimization } from '../utils/egressState.js';
+import { applyEgressRealtimeResult, mergeServerRealtimeTelemetry, shouldSuggestWarpOptimization } from '../utils/egressState.js';
 
 
 export function useKuiState() {
@@ -52,6 +52,8 @@ export function useKuiState() {
                   const egressIpRefreshing = reactive({});
                   const egressRefreshRequests = reactive({});
                   const egressRefreshTimers = new Map();
+                  const egressRefreshSilent = new Map();
+                  const egressAutoRefreshMarkers = new Map();
                   const warpTargetIp = ref('');
                   const warpSelectedCandidate = ref('');
                   const warpActionPending = ref(false);
@@ -435,7 +437,7 @@ export function useKuiState() {
                           const draftFields = ['_egress_mode_draft', '_egress_dirty', '_egress_saving', '_proxy_mode_draft', '_proxy_categories_draft', '_socks5_addr', '_socks5_port', '_socks5_user', '_socks5_pass', '_socks5_clear_password', '_proxy_custom_domains'];
                           servers.value = (data.servers || []).map(item => {
                               const previous = previousByIp.get(normalizeRealtimeKey(item.ip));
-                              const merged = previous?._realtime_ts > Number(item.last_report || 0) ? { ...item, ...previous } : { ...item };
+                              const merged = mergeServerRealtimeTelemetry(item, previous);
                               if (previous?.warp) merged.warp = previous.warp;
                               if (previous) for (const field of draftFields) if (previous[field] !== undefined) merged[field] = previous[field];
                               if (merged._proxy_custom_domains === undefined) {
@@ -664,15 +666,19 @@ export function useKuiState() {
                   const forceReapplyEgress = async vps => {
                       await updateVpsEgress(vps, vps.egress_mode || 'native', vps.proxy_mode || 'global', vps.proxy_categories || '');
                   };
-                  const refreshVpsEgressIp = async vps => {
+                  const refreshVpsEgressIp = async (vps, silent = false) => {
                       if (egressIpRefreshing[vps.ip]) return;
                       egressIpRefreshing[vps.ip] = true;
+                      egressRefreshSilent.set(vps.ip, silent);
                       clearTimeout(egressRefreshTimers.get(vps.ip));
                       const requestId = crypto.randomUUID();
                       egressRefreshRequests[vps.ip] = requestId;
                       egressRefreshTimers.set(vps.ip, setTimeout(() => {
-                          if (egressIpRefreshing[vps.ip]) alert(`刷新 ${vps.name || vps.ip} 实际出口 IP 超时，请确认 Agent 在线且出口可访问。`);
+                          if (egressIpRefreshing[vps.ip] && !egressRefreshSilent.get(vps.ip)) alert(`刷新 ${vps.name || vps.ip} 实际出口 IP 超时，请确认 Agent 在线且出口可访问。`);
                           egressIpRefreshing[vps.ip] = false;
+                          egressRefreshRequests[vps.ip] = '';
+                          egressRefreshTimers.delete(vps.ip);
+                          egressRefreshSilent.delete(vps.ip);
                       }, 90000));
                       try {
                           await fetchApi('/api/vps/egress-refresh', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ip: vps.ip, request_id: requestId }) });
@@ -680,6 +686,7 @@ export function useKuiState() {
                           clearTimeout(egressRefreshTimers.get(vps.ip)); egressRefreshTimers.delete(vps.ip);
                           egressIpRefreshing[vps.ip] = false;
                           egressRefreshRequests[vps.ip] = '';
+                          egressRefreshSilent.delete(vps.ip);
                       }
                   };
 
@@ -1097,13 +1104,24 @@ export function useKuiState() {
                       const key = normalizeRealtimeKey(snapshot.ip);
                       const resultServer = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
                       const egressResult = snapshot.core_egress_result || snapshot.core_config_result;
-                      if (applyEgressRealtimeResult(resultServer, egressResult)) suggestWarpOptimization(resultServer, egressResult);
+                      if (applyEgressRealtimeResult(resultServer, egressResult)) {
+                          suggestWarpOptimization(resultServer, egressResult);
+                          if (egressResult.success && !egressResult.egress_ip) {
+                              const marker = `${egressResult.deployment_id || ''}:${egressResult.revision}`;
+                              if (egressAutoRefreshMarkers.get(resultServer.ip) !== marker) {
+                                  egressAutoRefreshMarkers.set(resultServer.ip, marker);
+                                  setTimeout(() => refreshVpsEgressIp(resultServer, true), 0);
+                              }
+                          }
+                      }
                       const egressProbe = snapshot.core_egress_probe_result;
                       if (resultServer && egressProbe?.request_id && egressProbe.request_id === egressRefreshRequests[resultServer.ip]) {
+                          const silent = egressRefreshSilent.get(resultServer.ip) === true;
                           clearTimeout(egressRefreshTimers.get(resultServer.ip)); egressRefreshTimers.delete(resultServer.ip);
+                          egressRefreshSilent.delete(resultServer.ip);
                           egressIpRefreshing[resultServer.ip] = false; egressRefreshRequests[resultServer.ip] = '';
                           if (egressProbe.success && egressProbe.egress_ip) resultServer.egress_ip = egressProbe.egress_ip;
-                          else alert(`刷新实际出口 IP 失败：${egressProbe.error || 'VPS 未返回有效出口 IP'}`);
+                          else if (!silent) alert(`刷新实际出口 IP 失败：${egressProbe.error || 'VPS 未返回有效出口 IP'}`);
                       }
                       if (snapshot.core) {
                           const timestamp = Number(snapshot.core_last_seen || snapshot.updated_at || 0);

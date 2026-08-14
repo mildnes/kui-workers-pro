@@ -26,3 +26,20 @@ export function shouldSuggestWarpOptimization(result, now = Date.now()) {
   const appliedAt = Number(result.applied_at);
   return Number.isFinite(appliedAt) && appliedAt <= now && now - appliedAt <= 10 * 60 * 1000;
 }
+
+const SERVER_REALTIME_TELEMETRY_FIELDS = [
+  'cpu', 'mem', 'disk', 'load', 'uptime', 'net_in_speed', 'net_out_speed',
+  'tcp_conn', 'udp_conn', 'last_report', 'realtime_state', 'boot_id', 'sequence',
+  'config_result', 'config_result_at', '_realtime_ts', 'warp',
+  'residential_active_exit_ip', 'residential_standby_exit_ip',
+  'residential_ready', 'residential_reason', 'residential_last_seen',
+];
+
+export function mergeServerRealtimeTelemetry(server, realtime) {
+  const merged = { ...server };
+  if (!realtime || Number(realtime._realtime_ts || 0) <= Number(server?.last_report || 0)) return merged;
+  for (const field of SERVER_REALTIME_TELEMETRY_FIELDS) {
+    if (realtime[field] !== undefined) merged[field] = realtime[field];
+  }
+  return merged;
+}

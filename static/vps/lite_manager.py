@@ -449,10 +449,18 @@ def setup_env():
     if not AUTH_FILE.exists():
         AUTH_FILE.write_text("vpn\nvpn\n", encoding="utf-8")
         AUTH_FILE.chmod(0o600)
+    # proxy-lite is an application-level SOCKS relay. It never needs kernel
+    # forwarding, which can disable IPv6 RA routes and disconnect host SSH.
+    # Rewrite the file owned by older releases so the unsafe settings do not
+    # return after the next reboot.
+    proxy_sysctl = Path("/etc/sysctl.d/99-proxy-lite.conf")
+    try:
+        proxy_sysctl.write_text("net.ipv4.conf.all.rp_filter=2\nnet.ipv4.conf.default.rp_filter=2\n", encoding="utf-8")
+        proxy_sysctl.chmod(0o644)
+    except OSError:
+        pass
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.all.rp_filter=2"], capture_output=True)
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.default.rp_filter=2"], capture_output=True)
-    subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"], capture_output=True)
-    subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.forwarding=1"], capture_output=True)
 
 def harvest_snapshot_nodes() -> list:
     try:
@@ -539,9 +547,11 @@ def connect_node(tun: Tunnel, node: dict, generation: int):
         ovpn_version = subprocess.run(["openvpn", "--version"], capture_output=True, text=True).stdout
         cipher_args = ["--ncp-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305"] if "2.4" in ovpn_version else ["--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305", "--data-ciphers-fallback", "AES-128-CBC"]
         
-        # 强制添加 --nobind 解除端口冲突，--route-nopull 剥夺路由修改权
+        # route-noexec is the hard boundary: OpenVPN may configure only its
+        # TUN address; all routing remains owned by setup_routing() below.
         cmd = ["openvpn", "--config", str(cfg_path), "--dev", tun.name, "--dev-type", "tun", 
-               "--nobind", "--route-nopull",
+               "--nobind", "--route-nopull", "--route-noexec",
+               "--pull-filter", "ignore", "redirect-gateway",
                "--pull-filter", "ignore", "route-ipv6", "--pull-filter", "ignore", "ifconfig-ipv6", 
                "--auth-user-pass", str(AUTH_FILE),
                "--connect-timeout", "5", "--connect-retry-max", "1", "--verb", "3"] + cipher_args
