@@ -17,6 +17,7 @@ import hmac
 import threading
 import configparser
 import ipaddress
+import random
 try:
     from realtime_client import RealtimeChannel
 except ImportError:
@@ -35,6 +36,8 @@ if sys.stdout.encoding != 'UTF-8':
 CONF_FILE = "/opt/kui/config.json"
 SINGBOX_CONF_PATH = "/etc/sing-box/config.json"
 WARP_CONF_PATH = "/opt/kui/warp.json"
+WARP_BENCH_CONF_PATH = "/opt/kui/warp-benchmark.json"
+WARP_OPT_STATE_PATH = "/opt/kui/warp-optimizer.json"
 EGRESS_STATE_PATH = "/opt/kui/egress-state.json"
 TRAFFIC_STATE_PATH = "/opt/kui/traffic-state.json"
 WGCF_VERSION = "2.2.31"
@@ -212,35 +215,38 @@ def _validate_warp_profile(profile):
     profile["peer_host"] = str(profile.get("peer_host") or "engage.cloudflareclient.com").strip("[]")
     return profile
 
-def _load_warp_profile():
-    if os.path.exists(WARP_CONF_PATH):
+def _load_warp_profile_path(path):
+    if os.path.exists(path):
         try:
-            with open(WARP_CONF_PATH, "r", encoding="utf-8") as profile_file:
+            with open(path, "r", encoding="utf-8") as profile_file:
                 profile = _validate_warp_profile(json.load(profile_file))
-            os.chmod(WARP_CONF_PATH, 0o600)
+            os.chmod(path, 0o600)
             return profile
         except Exception:
             return None
     return None
 
-def _create_warp_profile():
+def _load_warp_profile():
+    return _load_warp_profile_path(WARP_CONF_PATH)
+
+def _generate_warp_profile(registration_attempts=5):
     wgcf = _ensure_wgcf()
     workdir = tempfile.mkdtemp(prefix="kui-warp-", dir="/opt/kui")
     try:
         registered = None
-        for attempt in range(5):
+        for attempt in range(registration_attempts):
             registered = subprocess.run([wgcf, "register", "--accept-tos"], cwd=workdir, capture_output=True, text=True, timeout=60)
             if registered.returncode == 0:
                 break
             err_msg = (registered.stderr or registered.stdout).strip()
-            if "429" in err_msg and attempt < 4:
+            if "429" in err_msg and attempt < registration_attempts - 1:
                 delay = 15 * (2 ** attempt)
-                print(f"[agent] WARP registration rate-limited, retrying in {delay}s ({attempt+1}/5)", flush=True)
+                print(f"[agent] WARP registration rate-limited, retrying in {delay}s ({attempt+1}/{registration_attempts})", flush=True)
                 time.sleep(delay)
                 continue
             raise RuntimeError(f"WARP registration failed: {err_msg[-300:]}")
         if registered is None or registered.returncode != 0:
-            raise RuntimeError("WARP registration failed after 5 attempts")
+            raise RuntimeError(f"WARP registration failed after {registration_attempts} attempts")
         generated = subprocess.run([wgcf, "generate"], cwd=workdir, capture_output=True, text=True, timeout=30)
         if generated.returncode != 0:
             raise RuntimeError(f"WARP profile generation failed: {(generated.stderr or generated.stdout).strip()[-300:]}")
@@ -266,16 +272,14 @@ def _create_warp_profile():
         }
         if not ipv4_address or not ipv6_address:
             raise RuntimeError("WARP registration did not return dual-stack addresses")
-        descriptor, temp_profile = tempfile.mkstemp(prefix="warp.", suffix=".tmp", dir="/opt/kui")
-        with os.fdopen(descriptor, "w", encoding="utf-8") as profile_file:
-            json.dump(profile, profile_file)
-            profile_file.flush()
-            os.fsync(profile_file.fileno())
-        os.chmod(temp_profile, 0o600)
-        os.replace(temp_profile, WARP_CONF_PATH)
         return _validate_warp_profile(profile)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+def _create_warp_profile():
+    profile = _generate_warp_profile()
+    _write_json_state(WARP_CONF_PATH, profile)
+    return profile
 
 _warp_prepare_lock = threading.Lock()
 _warp_prepare_thread = None
@@ -342,6 +346,329 @@ def _refresh_warp_endpoint():
     profile["peer_host"] = host
     _write_json_state(WARP_CONF_PATH, profile)
     print(f"[agent] refreshed WARP endpoint: {host} -> {profile['peer_address']}", flush=True)
+    return True
+
+def _normalize_warp_optimizer_policy(value):
+    return value if value in {"manual", "on_failure", "first_enable"} else "manual"
+
+def _warp_candidate_endpoints(profile, resolved=None, seed=None, limit=24):
+    """Build a small, deterministic and diverse WARP endpoint sample."""
+    limit = max(1, min(int(limit or 24), 48))
+    current_address = str(profile.get("peer_address") or "")
+    current_port = int(profile.get("peer_port") or 2408)
+    candidates = []
+    seen = set()
+
+    def add(address, port, current=False):
+        try:
+            address = str(ipaddress.ip_address(str(address).strip("[]")))
+            port = int(port)
+        except (ValueError, TypeError):
+            return
+        if not 1 <= port <= 65535 or (address, port) in seen or len(candidates) >= limit:
+            return
+        seen.add((address, port))
+        candidates.append({"address": address, "port": port, "current": bool(current)})
+
+    add(current_address, current_port, True)
+    rng = random.Random(seed if seed is not None else int(time.time() // 86400))
+    resolved_addresses = list(resolved or [])
+    for address in resolved_addresses:
+        add(address, current_port, address == current_address)
+
+    prefixes = [
+        "162.159.192.0/24", "162.159.193.0/24", "162.159.195.0/24", "162.159.204.0/24",
+        "188.114.96.0/24", "188.114.97.0/24", "188.114.98.0/24", "188.114.99.0/24",
+    ]
+    sampled = []
+    for prefix in prefixes:
+        network = ipaddress.ip_network(prefix)
+        sampled.append(str(network.network_address + rng.randint(1, 254)))
+    rng.shuffle(sampled)
+    ports = list(dict.fromkeys([current_port, 2408, 500, 4500]))
+    for address in sampled:
+        for port in ports:
+            add(address, port, address == current_address and port == current_port)
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+def _rank_warp_candidates(results):
+    def number(item, key, fallback):
+        try: return float(item[key]) if item.get(key) is not None else fallback
+        except (TypeError, ValueError): return fallback
+    return sorted(results, key=lambda item: (
+        not bool(item.get("success")),
+        max(0, min(number(item, "loss_pct", 100), 100)),
+        number(item, "latency_ms", 999999) if number(item, "latency_ms", 999999) > 0 else 999999,
+        str(item.get("address", "")),
+        int(item.get("port", 0) or 0),
+    ))
+
+def _default_warp_optimizer_state():
+    return {"status": "idle", "stage": "", "policy": "manual", "progress": 0, "candidates": [], "recommended": None, "previous": None, "history": [], "error": "", "last_scan_at": 0, "first_enable_attempted": False, "consecutive_failures": 0, "updated_at": 0}
+
+def _load_warp_optimizer_state():
+    state = _default_warp_optimizer_state()
+    try:
+        with open(WARP_OPT_STATE_PATH, "r", encoding="utf-8") as state_file:
+            saved = json.load(state_file)
+        if isinstance(saved, dict): state.update(saved)
+    except Exception:
+        pass
+    state["policy"] = _normalize_warp_optimizer_policy(state.get("policy"))
+    state["candidates"] = state.get("candidates", [])[:48] if isinstance(state.get("candidates"), list) else []
+    state["history"] = state.get("history", [])[:12] if isinstance(state.get("history"), list) else []
+    return state
+
+def _save_warp_optimizer_state(state):
+    value = dict(state)
+    value["policy"] = _normalize_warp_optimizer_policy(value.get("policy"))
+    value["candidates"] = value.get("candidates", [])[:48]
+    value["history"] = value.get("history", [])[:12]
+    value["updated_at"] = int(time.time() * 1000)
+    _write_json_state(WARP_OPT_STATE_PATH, value)
+    return value
+
+def _public_warp_optimizer_state():
+    profile = _load_warp_profile()
+    optimizer = _load_warp_optimizer_state()
+    mode = _load_egress_state().get("applied_mode", "native") if "_load_egress_state" in globals() else "native"
+    return {
+        "configured": bool(profile),
+        "active_mode": mode,
+        "peer_address": str(profile.get("peer_address", "")) if profile else "",
+        "peer_port": int(profile.get("peer_port", 0)) if profile else 0,
+        "peer_family": f"IPv{ipaddress.ip_address(profile['peer_address']).version}" if profile else "",
+        "tunnel_ipv4": str(profile.get("ipv4_address", "")) if profile else "",
+        "tunnel_ipv6": str(profile.get("ipv6_address", "")) if profile else "",
+        "optimizer": optimizer,
+    }
+
+def _free_loopback_port():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+    finally:
+        listener.close()
+
+def _warp_benchmark_config(profile, address, port, listen_port, mode="ipv4"):
+    mode = mode if mode in {"ipv4", "ipv6", "dual"} else "ipv4"
+    addresses, allowed_ips = [], []
+    if mode in {"ipv4", "dual"}:
+        addresses.append(profile["ipv4_address"]); allowed_ips.append("0.0.0.0/0")
+    if mode in {"ipv6", "dual"}:
+        addresses.append(profile["ipv6_address"]); allowed_ips.append("::/0")
+    return {
+        "log": {"level": "error"},
+        "inbounds": [{"type": "socks", "tag": "warp-bench-in", "listen": "127.0.0.1", "listen_port": listen_port}],
+        "endpoints": [{
+            "type": "wireguard", "tag": "warp-bench-out", "system": False,
+            "mtu": min(max(int(profile.get("mtu", 1280)), 1280), 1420),
+            "address": addresses, "private_key": profile["private_key"],
+            "peers": [{"address": address, "port": int(port), "public_key": profile["peer_public_key"], "allowed_ips": allowed_ips, "persistent_keepalive_interval": 25}],
+        }],
+        "route": {"rules": [{"inbound": ["warp-bench-in"], "action": "route", "outbound": "warp-bench-out"}]},
+    }
+
+def _test_warp_candidate(profile, candidate, attempts=1, mode="ipv4", timeout=4):
+    address, port = str(candidate["address"]), int(candidate["port"])
+    result = {"address": address, "port": port, "family": f"IPv{ipaddress.ip_address(address).version}", "current": bool(candidate.get("current")), "success": False, "latency_ms": 0, "loss_pct": 100, "colo": "", "exit_ipv4": "", "exit_ipv6": "", "error": ""}
+    sing_box = shutil.which("sing-box")
+    if not sing_box:
+        result["error"] = "sing-box binary not found"
+        return result
+    listen_port = _free_loopback_port()
+    descriptor, config_path = tempfile.mkstemp(prefix="warp-bench-", suffix=".json", dir="/opt/kui")
+    process = None
+    latencies, completed = [], 0
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+            json.dump(_warp_benchmark_config(profile, address, port, listen_port, mode), config_file)
+        os.chmod(config_path, 0o600)
+        checked = subprocess.run([sing_box, "check", "-c", config_path], capture_output=True, text=True, timeout=20)
+        if checked.returncode != 0:
+            raise RuntimeError(f"sing-box rejected candidate: {checked.stderr.strip()[-200:]}")
+        process = subprocess.Popen([sing_box, "run", "-c", config_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ready = False
+        for _ in range(20):
+            if process.poll() is not None: break
+            try:
+                with socket.create_connection(("127.0.0.1", listen_port), timeout=0.1): ready = True; break
+            except OSError: time.sleep(0.1)
+        if not ready: raise RuntimeError("candidate SOCKS listener did not start")
+        checks = []
+        if mode in {"ipv4", "dual"}: checks.append(("ipv4", "https://1.1.1.1/cdn-cgi/trace", ["-4", "-k"]))
+        if mode in {"ipv6", "dual"}: checks.append(("ipv6", "https://[2606:4700:4700::1111]/cdn-cgi/trace", ["-k"]))
+        total = max(1, int(attempts)) * len(checks)
+        for family, url, extra in checks:
+            for _ in range(max(1, int(attempts))):
+                started = time.monotonic()
+                response = subprocess.run(["curl", "-fsSL", "--connect-timeout", str(timeout), "--max-time", str(timeout + 2), "--proxy", f"socks5h://127.0.0.1:{listen_port}", *extra, url], capture_output=True, text=True)
+                elapsed = (time.monotonic() - started) * 1000
+                if response.returncode != 0 or "warp=on" not in response.stdout.lower(): continue
+                trace = dict(line.split("=", 1) for line in response.stdout.splitlines() if "=" in line)
+                completed += 1; latencies.append(elapsed)
+                result[f"exit_{family}"] = trace.get("ip", "")
+                if trace.get("colo"): result["colo"] = trace["colo"]
+        result["loss_pct"] = round((total - completed) * 100 / total)
+        result["success"] = completed == total
+        if latencies:
+            ordered = sorted(latencies); result["latency_ms"] = round(ordered[len(ordered) // 2], 1)
+        if not result["success"]: result["error"] = "WARP data-plane verification failed"
+    except Exception as error:
+        result["error"] = str(error)[:240]
+    finally:
+        if process:
+            stop_process(process)
+        try: os.remove(config_path)
+        except OSError: pass
+    return result
+
+_warp_optimizer_lock = threading.Lock()
+_warp_optimizer_thread = None
+_warp_optimizer_cancel = threading.Event()
+
+def _emit_warp_optimizer_state(state=None, request_id=""):
+    public = _public_warp_optimizer_state()
+    try: heartbeat_wakeup.set()
+    except Exception: pass
+    if realtime_channel and realtime_channel.connected:
+        realtime_channel.send({"request_id": request_id, **public}, "warp.optimize.result")
+    return public
+
+def _load_or_create_warp_benchmark_profile():
+    profile = _load_warp_profile_path(WARP_BENCH_CONF_PATH)
+    if profile: return profile
+    profile = _generate_warp_profile(registration_attempts=3)
+    _write_json_state(WARP_BENCH_CONF_PATH, profile)
+    return profile
+
+def _restart_singbox():
+    if os.path.exists("/etc/alpine-release"):
+        restarted = subprocess.run(["rc-service", "sing-box", "restart"], capture_output=True, text=True, timeout=30)
+    else:
+        restarted = subprocess.run(["systemctl", "restart", "sing-box"], capture_output=True, text=True, timeout=30)
+    return restarted.returncode == 0 and _singbox_service_healthy()
+
+def _apply_warp_endpoint(address, port, request_id="", allow_previous=False, reason="manual"):
+    address = str(ipaddress.ip_address(str(address).strip("[]"))); port = int(port)
+    if not 1 <= port <= 65535: raise ValueError("invalid WARP Endpoint port")
+    state = _load_warp_optimizer_state()
+    allowed = any(item.get("success") and item.get("address") == address and int(item.get("port", 0)) == port for item in state.get("candidates", []))
+    previous = state.get("previous") or {}
+    if allow_previous and previous.get("address") == address and int(previous.get("port", 0)) == port: allowed = True
+    if not allowed: raise ValueError("WARP Endpoint is not a verified candidate")
+    if not _warp_optimizer_lock.acquire(blocking=False): raise RuntimeError("WARP optimizer is busy")
+    profile = _require_warp_profile()
+    old_profile = dict(profile)
+    old_config = ""
+    temp_path = ""
+    try:
+        state.update({"status": "applying", "stage": "正在验证并切换", "progress": 95, "error": ""}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        profile["peer_address"] = address; profile["peer_port"] = port
+        applied_mode = _load_egress_state().get("applied_mode", "native")
+        if applied_mode.startswith("warp_"):
+            with open(SINGBOX_CONF_PATH, "r", encoding="utf-8") as config_file: config = json.load(config_file)
+            old_config = json.dumps(config, indent=2)
+            endpoint = next((item for item in config.get("endpoints", []) if item.get("tag") == "warp-out"), None)
+            if not endpoint or not endpoint.get("peers"): raise RuntimeError("active WARP endpoint is missing from sing-box config")
+            endpoint["peers"][0]["address"] = address; endpoint["peers"][0]["port"] = port
+            candidate_config = json.dumps(config, indent=2)
+            temp_path = SINGBOX_CONF_PATH + ".warp-optimize"
+            with open(temp_path, "w", encoding="utf-8") as config_file: config_file.write(candidate_config)
+            os.chmod(temp_path, 0o600)
+            checked = subprocess.run([shutil.which("sing-box") or "/usr/bin/sing-box", "check", "-c", temp_path], capture_output=True, text=True, timeout=30)
+            if checked.returncode != 0: raise RuntimeError(f"sing-box rejected optimized Endpoint: {checked.stderr.strip()[-300:]}")
+            _write_json_state(WARP_CONF_PATH, profile)
+            os.replace(temp_path, SINGBOX_CONF_PATH)
+            if not _restart_singbox(): raise RuntimeError("sing-box failed to restart with optimized Endpoint")
+            _verify_warp_exit(applied_mode[5:], _current_egress_check_host())
+        else:
+            verified = _test_warp_candidate(profile, {"address": address, "port": port}, attempts=1, mode="dual", timeout=6)
+            if not verified.get("success"): raise RuntimeError(verified.get("error") or "optimized WARP Endpoint verification failed")
+            _write_json_state(WARP_CONF_PATH, profile)
+        now = int(time.time() * 1000)
+        history = [{"at": now, "from_address": old_profile["peer_address"], "from_port": int(old_profile["peer_port"]), "to_address": address, "to_port": port, "reason": "restore" if allow_previous else str(reason or "manual")[:32], "success": True}] + state.get("history", [])
+        candidates = [dict(item, current=item.get("address") == address and int(item.get("port", 0)) == port) for item in state.get("candidates", [])]
+        state.update({"status": "success", "stage": "端点已应用", "progress": 100, "previous": {"address": old_profile["peer_address"], "port": int(old_profile["peer_port"])}, "recommended": None, "candidates": candidates, "history": history[:12], "consecutive_failures": 0, "error": ""})
+        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        return state
+    except Exception as error:
+        _write_json_state(WARP_CONF_PATH, old_profile)
+        if old_config:
+            restore_path = SINGBOX_CONF_PATH + ".warp-rollback"
+            with open(restore_path, "w", encoding="utf-8") as config_file: config_file.write(old_config)
+            os.chmod(restore_path, 0o600); os.replace(restore_path, SINGBOX_CONF_PATH); _restart_singbox()
+        state.update({"status": "failed", "stage": "应用失败，已回滚", "progress": 100, "error": str(error)[:500]})
+        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        raise
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try: os.remove(temp_path)
+            except OSError: pass
+        _warp_optimizer_lock.release()
+
+def _run_warp_endpoint_scan(request_id="", auto_apply=False):
+    if not _warp_optimizer_lock.acquire(blocking=False):
+        raise RuntimeError("WARP optimizer is busy")
+    try:
+        _warp_optimizer_cancel.clear()
+        state = _load_warp_optimizer_state()
+        state.update({"status": "scanning", "stage": "准备独立测速身份", "progress": 2, "candidates": [], "recommended": None, "error": ""})
+        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        real_profile = _require_warp_profile()
+        benchmark_profile = _load_or_create_warp_benchmark_profile()
+        resolved = []
+        try:
+            resolved = [item[4][0] for item in socket.getaddrinfo(real_profile.get("peer_host") or "engage.cloudflareclient.com", int(real_profile["peer_port"]), socket.AF_UNSPEC, socket.SOCK_DGRAM) if item[4]]
+        except OSError: pass
+        candidates = _warp_candidate_endpoints(real_profile, list(dict.fromkeys(resolved)), limit=24)
+        results = []
+        for index, candidate in enumerate(candidates):
+            if _warp_optimizer_cancel.is_set():
+                state.update({"status": "idle", "stage": "检测已取消", "progress": 0, "candidates": results, "recommended": None}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id); return
+            result = _test_warp_candidate(benchmark_profile, candidate, attempts=1, mode="ipv4")
+            results.append(result)
+            state.update({"stage": f"检测候选 {index + 1}/{len(candidates)}", "progress": 5 + round((index + 1) * 65 / max(1, len(candidates))), "candidates": _rank_warp_candidates(results)})
+            _save_warp_optimizer_state(state)
+            try: heartbeat_wakeup.set()
+            except Exception: pass
+        successful = _rank_warp_candidates([item for item in results if item.get("success")])[:5]
+        if not successful: raise RuntimeError("没有候选 Endpoint 通过 WARP 数据面验证")
+        applied_mode = _load_egress_state().get("applied_mode", "warp_dual")
+        verify_mode = applied_mode[5:] if applied_mode.startswith("warp_") else "dual"
+        refined = []
+        for index, candidate in enumerate(successful):
+            if _warp_optimizer_cancel.is_set(): break
+            refined.append(_test_warp_candidate(benchmark_profile, candidate, attempts=3, mode=verify_mode, timeout=5))
+            state.update({"stage": f"复测最优候选 {index + 1}/{len(successful)}", "progress": 75 + round((index + 1) * 20 / len(successful))}); _save_warp_optimizer_state(state)
+        if _warp_optimizer_cancel.is_set():
+            state.update({"status": "idle", "stage": "检测已取消", "progress": 0, "recommended": None}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id); return
+        refined_by_key = {(item["address"], item["port"]): item for item in refined}
+        final_results = [refined_by_key.get((item["address"], item["port"]), item) for item in results]
+        ranked = _rank_warp_candidates(final_results)
+        recommended = next((item for item in ranked if item.get("success")), None)
+        if not recommended: raise RuntimeError("复测后没有可用的 WARP Endpoint")
+        state.update({"status": "ready", "stage": "检测完成，等待应用", "progress": 100, "candidates": ranked, "recommended": recommended, "last_scan_at": int(time.time() * 1000), "error": ""})
+        _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+    except Exception as error:
+        state = _load_warp_optimizer_state(); state.update({"status": "failed", "stage": "检测失败", "progress": 100, "error": str(error)[:500]}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+        return
+    finally:
+        _warp_optimizer_lock.release()
+    if auto_apply and recommended:
+        try: _apply_warp_endpoint(recommended["address"], recommended["port"], request_id, False, "failure")
+        except Exception: pass
+
+def _start_warp_endpoint_scan(request_id="", auto_apply=False):
+    global _warp_optimizer_thread
+    if _warp_optimizer_thread and _warp_optimizer_thread.is_alive(): return False
+    _warp_optimizer_thread = threading.Thread(target=_run_warp_endpoint_scan, args=(request_id, auto_apply), name="kui-warp-optimizer", daemon=True)
+    _warp_optimizer_thread.start()
     return True
 
 def _load_egress_state():
@@ -1654,6 +1981,7 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
     status = get_system_status(global_interval)
     status["ip"] = VPS_IP
     status["argo_urls"] = argo_urls
+    status["warp"] = _public_warp_optimizer_state()
     
     deltas = []
     pending_bytes = dict(last_reported_bytes)
@@ -1918,6 +2246,10 @@ def fetch_and_apply_configs():
                         verified_egress_ip = build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
                     else:
                         raise
+                if runtime_warp != "off":
+                    optimizer_health = _load_warp_optimizer_state()
+                    if optimizer_health.get("consecutive_failures"):
+                        optimizer_health["consecutive_failures"] = 0; _save_warp_optimizer_state(optimizer_health)
                 if apply_egress_change:
                     result = {"success": True, "component": "egress", "revision": revision, "deployment_id": deployment_id, "desired_mode": desired_egress, "applied_mode": desired_egress, "rolled_back": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000), "egress_ip": verified_egress_ip}
                     _save_egress_state(desired_egress, revision, result, deployment_id, desired_config)
@@ -1925,6 +2257,10 @@ def fetch_and_apply_configs():
                         ack = _deliver_egress_result(result)
                         if ack.get("accepted"): _save_egress_state(desired_egress, revision, deployment_id=deployment_id, applied_config=desired_config)
                     except Exception: pass
+                    optimizer = _load_warp_optimizer_state()
+                    if desired_egress.startswith("warp_") and optimizer.get("policy") == "first_enable" and not optimizer.get("first_enable_attempted"):
+                        optimizer["first_enable_attempted"] = True; _save_warp_optimizer_state(optimizer)
+                        _start_warp_endpoint_scan(auto_apply=False)
                 elif realtime_channel and realtime_channel.connected:
                     realtime_channel.send({"success": True, "component": "config", "config_hash": config_hash, "old_config_active": False, "rollback_healthy": True, "applied_at": int(time.time() * 1000)}, "config.result")
             except EgressPreparing as preparing:
@@ -1955,6 +2291,12 @@ def fetch_and_apply_configs():
                     except Exception: pass
                 elif realtime_channel and realtime_channel.connected:
                     realtime_channel.send({"success": False, "component": "config", "config_hash": config_hash, "error": str(error)[:500], "old_config_active": _singbox_service_healthy(), "rollback_healthy": _singbox_service_healthy(), "applied_at": int(time.time() * 1000)}, "config.result")
+                if runtime_warp != "off":
+                    optimizer_health = _load_warp_optimizer_state()
+                    optimizer_health["consecutive_failures"] = int(optimizer_health.get("consecutive_failures", 0)) + 1
+                    _save_warp_optimizer_state(optimizer_health)
+                    if optimizer_health.get("policy") == "on_failure" and optimizer_health["consecutive_failures"] >= 2:
+                        _start_warp_endpoint_scan(auto_apply=True)
                 raise
             return nodes
     except Exception as error:
@@ -1991,6 +2333,35 @@ if __name__ == "__main__":
                 finally:
                     egress_probe_lock.release()
             threading.Thread(target=probe, name="kui-egress-probe", daemon=True).start()
+        if message.get("type") == "warp.optimize":
+            request_id = str(message.get("request_id", ""))[:64]
+            action = str(message.get("action", ""))
+            try:
+                if action == "scan":
+                    if not _start_warp_endpoint_scan(request_id): raise RuntimeError("WARP 端点检测正在进行中")
+                elif action == "apply":
+                    threading.Thread(target=_apply_warp_endpoint, args=(message.get("address", ""), message.get("port", 0), request_id), name="kui-warp-apply", daemon=True).start()
+                elif action == "restore":
+                    previous = _load_warp_optimizer_state().get("previous") or {}
+                    if not previous: raise RuntimeError("没有可恢复的 WARP 端点")
+                    threading.Thread(target=_apply_warp_endpoint, args=(previous.get("address", ""), previous.get("port", 0), request_id, True), name="kui-warp-restore", daemon=True).start()
+                elif action == "cancel":
+                    _warp_optimizer_cancel.set()
+                    state = _load_warp_optimizer_state()
+                    if state.get("status") != "scanning":
+                        state.update({"status": "idle", "stage": "", "progress": 0, "candidates": [], "recommended": None, "error": ""}); _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+                elif action == "policy":
+                    state = _load_warp_optimizer_state(); policy = _normalize_warp_optimizer_policy(message.get("policy"))
+                    if policy == "first_enable" and state.get("policy") != policy: state["first_enable_attempted"] = False
+                    state["policy"] = policy
+                    should_scan = policy == "first_enable" and _load_egress_state().get("applied_mode", "native").startswith("warp_") and not state.get("first_enable_attempted")
+                    if should_scan: state["first_enable_attempted"] = True
+                    _save_warp_optimizer_state(state); _emit_warp_optimizer_state(request_id=request_id)
+                    if should_scan: _start_warp_endpoint_scan(request_id, auto_apply=False)
+                else: raise ValueError("不支持的 WARP 优化操作")
+            except Exception as error:
+                if realtime_channel and realtime_channel.connected:
+                    realtime_channel.send({"request_id": request_id, "error": str(error)[:500], **_public_warp_optimizer_state()}, "warp.optimize.result")
 
     def create_realtime_channel():
         return RealtimeChannel(REALTIME_URL, VPS_IP, TOKEN, "core", on_realtime_message)

@@ -1,6 +1,6 @@
 const mutationTarget = (url, options) => {
   if (!options.method || options.method === 'GET') return null;
-  if (url === '/api/vps/egress-refresh') return null;
+  if (url === '/api/vps/egress-refresh' || url === '/api/vps/warp-optimize') return null;
   if (!/^\/api\/(nodes|vps|config)/.test(url) && !/^\/api\/proxy\/(config|switch)/.test(url)) return null;
   try {
     return JSON.parse(options.body || '{}').ip || new URL(url, location.origin).searchParams.get('ip') || '';

@@ -57,6 +57,25 @@ async function readJsonBody(request, maxBytes) {
 }
 
 function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
+
+function normalizeWarpOptimizeRequest(value) {
+    const ip = String(value?.ip || '').trim();
+    const action = String(value?.action || '').trim();
+    if (!validIp(ip)) throw new Error('Invalid VPS IP for WARP optimizer');
+    if (!['scan', 'apply', 'cancel', 'restore', 'policy'].includes(action)) throw new Error('Invalid WARP optimizer action');
+    let address = '', port = 0, policy = '';
+    if (action === 'apply') {
+        address = String(value?.address || '').trim().replace(/^\[|\]$/g, '');
+        port = Number(value?.port);
+        if (!validIp(address)) throw new Error('Invalid WARP Endpoint address');
+        if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid WARP Endpoint port');
+    }
+    if (action === 'policy') {
+        policy = String(value?.policy || '');
+        if (!['manual', 'on_failure', 'first_enable'].includes(policy)) throw new Error('Invalid WARP optimizer policy');
+    }
+    return { ip, action, address, port, policy };
+}
 function safeProxyAddress(value) { const address = String(value || '').trim(); return validIp(address) ? address : ''; }
 
 function normalizePingTarget(value) {
@@ -414,6 +433,29 @@ async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin 
         method: 'POST',
         headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
         body: JSON.stringify({ ip, request_id: requestId }),
+        signal: AbortSignal.timeout(10000),
+    });
+    const result = await response.json().catch(() => ({ error: `实时服务返回非 JSON 响应（HTTP ${response.status}）` }));
+    return { status: response.status, result };
+}
+
+async function requestRealtimeWarpOptimize(env, db, command, requestId, pagesOrigin = '') {
+    if (env.VPS_PRESENCE && typeof env.VPS_PRESENCE.idFromName === 'function') {
+        const server = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(command.ip).first();
+        if (!server?.agent_token) return { status: 404, result: { error: 'VPS Agent Token 不存在' } };
+        const tokenHash = await sha256(server.agent_token);
+        const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(`v2:${command.ip}:${tokenHash}`));
+        const response = await stub.fetch(new Request('https://presence.internal/warp-optimize', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KUI-Request-ID': requestId }, body: JSON.stringify(command) }));
+        const result = await response.json().catch(() => ({ error: `WARP 优化指令失败（HTTP ${response.status}）` }));
+        return { status: response.status, result };
+    }
+    const authorization = await realtimeAdminHeader(env);
+    const configured = env.REALTIME_URL || (await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first())?.val;
+    if (!authorization || !configured || !/^https:\/\//i.test(configured)) throw new Error('实时服务未配置');
+    const response = await fetch(`${configured.replace(/\/$/, '')}/warp-optimize`, {
+        method: 'POST',
+        headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
+        body: JSON.stringify({ ...command, request_id: requestId }),
         signal: AbortSignal.timeout(10000),
     });
     const result = await response.json().catch(() => ({ error: `实时服务返回非 JSON 响应（HTTP ${response.status}）` }));
@@ -2326,6 +2368,19 @@ rules:
         
         if (action === "vps" && isAdmin) {
             await ensureDbSchema(db);
+            if (params.path[1] === "warp-optimize" && method === "POST") {
+                let command;
+                try { command = normalizeWarpOptimizeRequest(await readJsonBody(request, 4 * 1024)); }
+                catch (error) { return Response.json({ error: error.message || 'Invalid WARP optimizer request' }, { status: 400 }); }
+                if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(command.ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
+                const requestId = crypto.randomUUID();
+                try {
+                    const { status, result } = await requestRealtimeWarpOptimize(env, db, command, requestId, new URL(request.url).origin);
+                    return Response.json(result, { status });
+                } catch (error) {
+                    return Response.json({ error: error.message || 'WARP 优化指令发送失败' }, { status: 503 });
+                }
+            }
             if (params.path[1] === "egress-refresh" && method === "POST") {
                 const data = await readJsonBody(request, 4 * 1024);
                 const ip = String(data.ip || '');
@@ -2514,7 +2569,9 @@ export const __test = {
     proxyPublicListenerEnabled,
     normalizeEgressRequest,
     normalizeProxyCustomDomains,
+    normalizeWarpOptimizeRequest,
     requestRealtimeEgressRefresh,
+    requestRealtimeWarpOptimize,
     normalizeNodePayload,
     nodeListenerConflicts,
     notifyRealtimeVps,

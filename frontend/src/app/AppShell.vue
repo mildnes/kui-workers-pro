@@ -10,6 +10,7 @@
         <ServersPage />
         <UsersPage />
         <ResidentialProxyPage />
+        <WarpTunnelPage />
         <PublicListenerPage />
         <UserDashboardPage />
         <ThirdPartyPage />
@@ -27,6 +28,7 @@ import MobileNavigation from './MobileNavigation.vue';
 import TopBar from './TopBar.vue';
 import { KUI_KEY } from './context.js';
 import ResidentialProxyPage from '../pages/ResidentialProxyPage.vue';
+import WarpTunnelPage from '../pages/WarpTunnelPage.vue';
 import PublicListenerPage from '../pages/PublicListenerPage.vue';
 import ServersPage from '../pages/ServersPage.vue';
 import SettingsPage from '../pages/SettingsPage.vue';
@@ -40,6 +42,7 @@ export default {
     MobileNavigation,
     TopBar,
     ResidentialProxyPage,
+    WarpTunnelPage,
     PublicListenerPage,
     ServersPage,
     SettingsPage,

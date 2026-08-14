@@ -41,7 +41,7 @@ const primaryAdminItems = [
   { id: 'public-listener', icon: '◉', label: '公网监听' },
 ];
 const moreItems = [
-  { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'users', icon: '◎', label: '用户' }, { id: 'settings', icon: '⚙', label: '设置' },
+  { id: 'warp', icon: '◈', label: 'WARP' }, { id: 'thirdparty', icon: '↗', label: '订阅' }, { id: 'users', icon: '◎', label: '用户' }, { id: 'settings', icon: '⚙', label: '设置' },
 ];
 const moreItemsBeforeTheme = moreItems.filter(item => item.id !== 'settings');
 const moreItemsAfterTheme = moreItems.filter(item => item.id === 'settings');

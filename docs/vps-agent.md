@@ -10,6 +10,16 @@
 
 支持 XTLS-Reality、Hysteria2、TUIC、Shadowsocks 2022、Trojan、H2/gRPC-Reality、AnyTLS、Naive、VLESS-Argo、Socks5 和 Dokodemo-door。
 
+## WARP Endpoint 优选
+
+在 **WARP 隧道** 页面选择目标 VPS 后，可以检测 Cloudflare WireGuard Endpoint 的真实可用性、失败率和延迟。检测使用 VPS 上单独保存的测速身份，不会让当前业务 WARP 身份在候选之间漂移。
+
+- 手动检测只生成推荐结果，点击 **应用推荐端点** 后才会切换。
+- 应用时会验证实际 WARP 数据面；失败会恢复原 Endpoint 和 sing-box 配置。
+- 默认策略为手动。可选择首次启用后检测一次，或连续两次失败后自动检测并恢复。
+- 优选只改善 VPS 到 Cloudflare WARP 入口的质量，不保证改变出口国家或流媒体解锁能力。
+- `warp.json`、测速身份和优化历史在完整更新 Agent 时会保留，文件权限为 `600`。
+
 ## 卸载与清理
 
 每台 VPS 卡片提供两种清理命令。

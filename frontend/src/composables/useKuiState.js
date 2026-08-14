@@ -52,6 +52,9 @@ export function useKuiState() {
                   const egressIpRefreshing = reactive({});
                   const egressRefreshRequests = reactive({});
                   const egressRefreshTimers = new Map();
+                  const warpTargetIp = ref('');
+                  const warpSelectedCandidate = ref('');
+                  const warpActionPending = ref(false);
 
                   // --- 动态拉取核心 ---
                   const availableThemes = ref([
@@ -82,10 +85,11 @@ export function useKuiState() {
                   
                   const showWelcomePopup = ref(false);
 
-                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') updateCustomStyles(); else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); } });
+                  watch(activeTab, (val) => { localStorage.setItem('monitor_preferred_tab', val); if (val === 'proxy' && isLoggedIn.value) { loadProxyPool(); setTimeout(pcInitProxy, 0); } else { pcStopProxy(); } if (val === 'nodes' && isLoggedIn.value && role.value === 'admin') loadTrafficStats(true); if (val === 'warp' && !warpTargetIp.value && servers.value.length) warpTargetIp.value = servers.value[0].ip; if (val === 'warp' && realtimeSocket?.readyState === WebSocket.OPEN) realtimeSocket.send(JSON.stringify({ type: 'resync' })); if (val === 'thirdparty') loadThirdPartySubscriptions(); if (val === 'settings' && isLoggedIn.value && role.value === 'admin') loadAdminProbeServers(); if (val === 'probe') updateCustomStyles(); else { document.body.className = ''; document.getElementById('kui-custom-styles')?.remove(); } });
                   watch(colorMode, (val) => localStorage.setItem('kui_color_mode', val));
                   watch(effectiveColorMode, applyColorMode);
                   watch(probeView, (val) => localStorage.setItem('monitor_preferred_view', val));
+                  watch(warpTargetIp, () => { warpSelectedCandidate.value = ''; });
 
                   const hasCustomCssFlag = computed(() => {
                       const t = availableThemes.value.find(x => x.id === probeSys.theme);
@@ -432,6 +436,7 @@ export function useKuiState() {
                           servers.value = (data.servers || []).map(item => {
                               const previous = previousByIp.get(normalizeRealtimeKey(item.ip));
                               const merged = previous?._realtime_ts > Number(item.last_report || 0) ? { ...item, ...previous } : { ...item };
+                              if (previous?.warp) merged.warp = previous.warp;
                               if (previous) for (const field of draftFields) if (previous[field] !== undefined) merged[field] = previous[field];
                               if (merged._proxy_custom_domains === undefined) {
                                   let domains = merged.proxy_custom_domains;
@@ -451,6 +456,8 @@ export function useKuiState() {
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                               if ((s.egress_mode === 'socks5' || s.socks5_addr) && s._socks5_addr === undefined) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = ''; s._socks5_clear_password = false; }
                           });
+                          if (!warpTargetIp.value && servers.value.length) warpTargetIp.value = servers.value[0].ip;
+                          if (warpTargetIp.value && !servers.value.some(server => server.ip === warpTargetIp.value)) warpTargetIp.value = servers.value[0]?.ip || '';
                       if (activeTab.value === 'nodes' && !throwOnError) await loadTrafficStats();
                       
                       if (activeTab.value === 'thirdparty') loadThirdPartySubscriptions();
@@ -1025,6 +1032,43 @@ export function useKuiState() {
                       }
                   };
 
+                  const sendWarpOptimizerCommand = async (action, extra = {}) => {
+                      const ip = warpTargetIp.value;
+                      if (!ip) return alert('请先选择目标 VPS。');
+                      if (warpActionPending.value) return;
+                      warpActionPending.value = true;
+                      try {
+                          const response = await fetchApi('/api/vps/warp-optimize', {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ip, action, ...extra }),
+                          });
+                          const result = await response.json();
+                          const server = servers.value.find(item => item.ip === ip);
+                          if (server?.warp?.optimizer) {
+                              if (action === 'scan') Object.assign(server.warp.optimizer, { status: 'scanning', stage: '指令已发送，等待 Agent 开始检测', progress: 1, error: '' });
+                              if (action === 'apply' || action === 'restore') Object.assign(server.warp.optimizer, { status: 'applying', stage: '指令已发送，等待 Agent 验证', progress: 95, error: '' });
+                          }
+                          return result;
+                      } finally { warpActionPending.value = false; }
+                  };
+                  const startWarpOptimization = () => { warpSelectedCandidate.value = ''; return sendWarpOptimizerCommand('scan'); };
+                  const applyWarpCandidate = () => {
+                      const server = servers.value.find(item => item.ip === warpTargetIp.value);
+                      const candidates = server?.warp?.optimizer?.candidates || [];
+                      const selected = candidates.find(item => `${item.address}:${item.port}` === warpSelectedCandidate.value) || server?.warp?.optimizer?.recommended;
+                      if (!selected?.success) return alert('当前没有可应用的已验证 Endpoint。');
+                      if (!confirm(`应用 WARP Endpoint ${selected.address}:${selected.port}？\n正在使用 WARP 时会短暂重载 sing-box，失败将自动回滚。`)) return;
+                      return sendWarpOptimizerCommand('apply', { address: selected.address, port: selected.port });
+                  };
+                  const cancelWarpOptimization = () => { warpSelectedCandidate.value = ''; return sendWarpOptimizerCommand('cancel'); };
+                  const restoreWarpEndpoint = () => {
+                      const server = servers.value.find(item => item.ip === warpTargetIp.value);
+                      const previous = server?.warp?.optimizer?.previous;
+                      if (!previous?.address || !confirm(`恢复上一个 WARP Endpoint ${previous.address}:${previous.port}？`)) return;
+                      return sendWarpOptimizerCommand('restore');
+                  };
+                  const updateWarpPolicy = policy => sendWarpOptimizerCommand('policy', { policy });
+
                   let dataTimer = null; let pingTimer = null; let probeTimer = null;
                   const applyRealtimeSnapshot = (snapshot) => {
                       if (!snapshot?.ip) return;
@@ -1044,13 +1088,14 @@ export function useKuiState() {
                           const server = servers.value.find(item => normalizeRealtimeKey(item.ip) === key);
                           if (server && timestamp >= Number(server._realtime_ts || server.last_report || 0)) {
                               const core = snapshot.core;
-                              Object.assign(server, { cpu: core.cpu, mem: core.mem, disk: core.disk, load: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_report: timestamp, realtime_state: snapshot.core_state, boot_id: snapshot.boot_id?.core, sequence: snapshot.sequence?.core, config_result: snapshot.core_config_result, config_result_at: snapshot.core_config_result_at, _realtime_ts: timestamp });
+                              Object.assign(server, { cpu: core.cpu, mem: core.mem, disk: core.disk, load: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, warp: core.warp || server.warp, last_report: timestamp, realtime_state: snapshot.core_state, boot_id: snapshot.boot_id?.core, sequence: snapshot.sequence?.core, config_result: snapshot.core_config_result, config_result_at: snapshot.core_config_result_at, _realtime_ts: timestamp });
                           }
                           const core = snapshot.core;
                           const probe = publicProbeServers.value.find(item => normalizeRealtimeKey(item.id) === key);
                           if (probe && timestamp >= Number(probe._realtime_ts || probe.last_updated || 0)) Object.assign(probe, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp });
                           if (normalizeRealtimeKey(probeDetail.value?.id) === key && timestamp >= Number(probeDetail.value?._realtime_ts || probeDetail.value?.last_updated || 0)) { Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp }); updateProbeDetailCharts(probeDetail.value); }
                       }
+                      if (resultServer && snapshot.core_warp_result?.warp) resultServer.warp = snapshot.core_warp_result.warp;
                       if (resultServer && Array.isArray(snapshot.proxy?.details)) {
                           const details = snapshot.proxy.details;
                           const active = details.find(item => item?.active && (item.exit_ip || item.node_ip));
@@ -1126,7 +1171,7 @@ export function useKuiState() {
                   onMounted(async () => {
                       if (authKey.value && currentUser.value) {
                           isLoggedIn.value = true;
-                          if (role.value !== 'admin' && activeTab.value === 'proxy') activeTab.value = 'dashboard';
+                          if (role.value !== 'admin' && ['proxy', 'warp'].includes(activeTab.value)) activeTab.value = 'dashboard';
                           if (role.value === 'admin') {
                               await refreshData();
                               queueMicrotask(connectRealtime);
@@ -1151,5 +1196,6 @@ export function useKuiState() {
                       showWelcomePopup, closePopup,
                       availableThemes, pingNodes, pullGithubNodes, githubNodesPulling, hasCustomCssFlag,
                       proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, refreshVpsEgressIp, egressIpRefreshing, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, markEgressDirty, markProxyCustomDomainsDirty, clearProxyCustomDomains, proxyCustomDomainCount, setProxyMode, egressHasDraft, applyEgressDraft, cancelEgressDraft, onEgressModeChange,
+                      warpTargetIp, warpSelectedCandidate, warpActionPending, startWarpOptimization, applyWarpCandidate, cancelWarpOptimization, restoreWarpEndpoint, updateWarpPolicy,
                   };
 }

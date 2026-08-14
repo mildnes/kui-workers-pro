@@ -78,10 +78,58 @@ function safeProxyAddress(value) {
   return /^[0-9A-Fa-f:.]{2,64}$/.test(address) ? address : "";
 }
 
+function compactWarpCandidate(value) {
+  const address = safeProxyAddress(value?.address);
+  const port = Number(value?.port) || 0;
+  if (!address || port < 1 || port > 65535) return null;
+  return {
+    address, port,
+    family: String(value?.family || "").slice(0, 8),
+    current: value?.current === true,
+    success: value?.success === true,
+    latency_ms: Math.max(0, Math.min(Number(value?.latency_ms) || 0, 60000)),
+    loss_pct: Math.max(0, Math.min(Number(value?.loss_pct) || 0, 100)),
+    colo: String(value?.colo || "").toUpperCase().slice(0, 8),
+    exit_ipv4: safeProxyAddress(value?.exit_ipv4),
+    exit_ipv6: safeProxyAddress(value?.exit_ipv6),
+    error: String(value?.error || "").slice(0, 240),
+  };
+}
+
+function compactWarpState(value) {
+  if (!value || typeof value !== "object") return null;
+  const optimizer = value.optimizer && typeof value.optimizer === "object" ? value.optimizer : {};
+  const candidates = Array.isArray(optimizer.candidates) ? optimizer.candidates.slice(0, 48).map(compactWarpCandidate).filter(Boolean) : [];
+  const recommended = compactWarpCandidate(optimizer.recommended);
+  const previous = optimizer.previous && safeProxyAddress(optimizer.previous.address) ? { address: safeProxyAddress(optimizer.previous.address), port: Number(optimizer.previous.port) || 0 } : null;
+  const history = Array.isArray(optimizer.history) ? optimizer.history.slice(0, 12).map(item => ({
+    at: Number(item?.at) || 0,
+    from_address: safeProxyAddress(item?.from_address), from_port: Number(item?.from_port) || 0,
+    to_address: safeProxyAddress(item?.to_address), to_port: Number(item?.to_port) || 0,
+    reason: String(item?.reason || "").slice(0, 32), success: item?.success === true,
+  })) : [];
+  return {
+    configured: value.configured === true,
+    active_mode: String(value.active_mode || "native").slice(0, 32),
+    peer_address: safeProxyAddress(value.peer_address), peer_port: Number(value.peer_port) || 0,
+    peer_family: String(value.peer_family || "").slice(0, 8),
+    tunnel_ipv4: String(value.tunnel_ipv4 || "").slice(0, 64), tunnel_ipv6: String(value.tunnel_ipv6 || "").slice(0, 96),
+    optimizer: {
+      status: String(optimizer.status || "idle").slice(0, 24), stage: String(optimizer.stage || "").slice(0, 120),
+      policy: ["manual", "on_failure", "first_enable"].includes(optimizer.policy) ? optimizer.policy : "manual",
+      progress: Math.max(0, Math.min(Number(optimizer.progress) || 0, 100)), candidates, recommended, previous, history,
+      error: String(optimizer.error || "").slice(0, 500), last_scan_at: Number(optimizer.last_scan_at) || 0, updated_at: Number(optimizer.updated_at) || 0,
+    },
+  };
+}
+
 function compactRoleState(role, data) {
   if (role === "core") {
     const keys = ["cpu", "mem", "disk", "load", "uptime", "net_in_speed", "net_out_speed", "tcp_conn", "udp_conn", "os", "arch"];
-    return Object.fromEntries(keys.filter(key => data?.[key] !== undefined).map(key => [key, data[key]]));
+    const result = Object.fromEntries(keys.filter(key => data?.[key] !== undefined).map(key => [key, data[key]]));
+    const warp = compactWarpState(data?.warp);
+    if (warp) result.warp = warp;
+    return result;
   }
   return {
     details: Array.isArray(data?.details) ? data.details.slice(0, 4).map(item => ({ tunnel: String(item?.tunnel || "").slice(0, 32), active: item?.active === true, node_ip: safeProxyAddress(item?.node_ip), exit_ip: safeProxyAddress(item?.exit_ip), country: String(item?.country || "").toUpperCase().slice(0, 2), port: Number(item?.port) || 0, ready: item?.ready === true, connected_time: Math.max(0, Math.min(Number(item?.connected_time) || 0, 31536000)) })) : [],
@@ -228,6 +276,22 @@ export default {
       return new Response(response.body, { status: response.status, headers: { ...Object.fromEntries(response.headers), ...cors(request, env) } });
     }
 
+    if (url.pathname === "/warp-optimize" && request.method === "POST") {
+      if (!(await verifyAdmin(request.headers.get("Authorization"), request, env))) return json({ error: "Forbidden" }, 403, cors(request, env));
+      const body = await request.json().catch(() => ({}));
+      const ip = String(body.ip || "");
+      const action = String(body.action || "");
+      if (!/^[0-9A-Fa-f:.]{2,64}$/.test(ip) || !["scan", "apply", "cancel", "restore", "policy"].includes(action)) return json({ error: "Invalid WARP optimizer request" }, 400, cors(request, env));
+      if (action === "apply" && (!safeProxyAddress(body.address) || !Number.isInteger(Number(body.port)) || Number(body.port) < 1 || Number(body.port) > 65535)) return json({ error: "Invalid WARP Endpoint" }, 400, cors(request, env));
+      if (action === "policy" && !["manual", "on_failure", "first_enable"].includes(String(body.policy || ""))) return json({ error: "Invalid WARP optimizer policy" }, 400, cors(request, env));
+      const name = await presenceName(ip, env);
+      if (!name) return json({ error: "VPS not found" }, 404, cors(request, env));
+      const requestId = /^[0-9a-f-]{36}$/i.test(String(body.request_id || "")) ? String(body.request_id) : crypto.randomUUID();
+      const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(name));
+      const response = await stub.fetch(new Request("https://presence.internal/warp-optimize", { method: "POST", headers: { "Content-Type": "application/json", "X-KUI-Request-ID": requestId }, body: JSON.stringify({ action, address: String(body.address || ""), port: Number(body.port) || 0, policy: String(body.policy || "") }) }));
+      return new Response(response.body, { status: response.status, headers: { ...Object.fromEntries(response.headers), ...cors(request, env) } });
+    }
+
     if (url.pathname === "/public-policy" && request.method === "POST") {
       if (!(await verifyAdmin(request.headers.get("Authorization"), request, env))) return json({ error: "Forbidden" }, 403, cors(request, env));
       const body = await request.json().catch(() => ({}));
@@ -315,6 +379,17 @@ export class VpsPresence extends DurableObject {
       }
       return sent ? json({ success: true, request_id: requestId }) : json({ error: "出口检测指令发送失败" }, 503);
     }
+    if (url.pathname === "/warp-optimize" && request.method === "POST") {
+      const sockets = this.ctx.getWebSockets("core");
+      if (!sockets.length) return json({ error: "VPS Agent 当前离线" }, 409);
+      const requestId = request.headers.get("X-KUI-Request-ID") || crypto.randomUUID();
+      const command = await request.json().catch(() => ({}));
+      let sent = false;
+      for (const ws of sockets) {
+        try { ws.send(JSON.stringify({ type: "warp.optimize", request_id: requestId, action: command.action, address: command.address, port: command.port, policy: command.policy, ts: Date.now() })); sent = true; } catch {}
+      }
+      return sent ? json({ success: true, request_id: requestId }) : json({ error: "WARP 优化指令发送失败" }, 503);
+    }
     if (url.pathname === "/dashboard-active" && request.method === "POST") {
       this.setDashboardActivity(request.headers.get("X-KUI-Active") === "1", Number(request.headers.get("X-KUI-Interval")) || IDLE_STATUS_INTERVAL, Number(request.headers.get("X-KUI-Until")) || Date.now() + 300000);
       return json({ success: true });
@@ -374,6 +449,17 @@ export class VpsPresence extends DurableObject {
       if (result.success && result.egress_ip) await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ?").bind(result.egress_ip, attachment.ip).run();
       this.snapshot.core_egress_probe_result = result;
       this.snapshot.core_egress_probe_result_at = Date.now();
+      ws.serializeAttachment(attachment);
+      await this.persistAndBroadcast();
+      return;
+    }
+    if (messageType === "warp.optimize.result") {
+      if (role !== "core") return;
+      const warp = compactWarpState(envelope.data);
+      if (!warp) return;
+      this.snapshot.core = { ...(this.snapshot.core || {}), warp };
+      this.snapshot.core_warp_result = { request_id: String(envelope.data?.request_id || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), warp, updated_at: Date.now() };
+      this.snapshot.core_warp_result_at = Date.now();
       ws.serializeAttachment(attachment);
       await this.persistAndBroadcast();
       return;
