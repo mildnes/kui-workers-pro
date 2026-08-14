@@ -4,7 +4,7 @@ import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
 import { countryCoords, iso2To3 } from './useProbe.js';
 import { nextRealtimeRetryDelay, normalizeRealtimeKey } from './useRealtime.js';
-import { applyEgressRealtimeResult, mergeServerRealtimeTelemetry, shouldSuggestWarpOptimization } from '../utils/egressState.js';
+import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry, shouldSuggestWarpOptimization } from '../utils/egressState.js';
 
 
 export function useKuiState() {
@@ -1120,8 +1120,8 @@ export function useKuiState() {
                           clearTimeout(egressRefreshTimers.get(resultServer.ip)); egressRefreshTimers.delete(resultServer.ip);
                           egressRefreshSilent.delete(resultServer.ip);
                           egressIpRefreshing[resultServer.ip] = false; egressRefreshRequests[resultServer.ip] = '';
-                          if (egressProbe.success && egressProbe.egress_ip) resultServer.egress_ip = egressProbe.egress_ip;
-                          else if (!silent) alert(`刷新实际出口 IP 失败：${egressProbe.error || 'VPS 未返回有效出口 IP'}`);
+                          const probeApplied = applyEgressProbeResult(resultServer, egressProbe);
+                          if (!probeApplied && !silent) alert(`刷新实际出口 IP 失败：${egressProbe.error || 'VPS 未返回与当前配置匹配的有效出口 IP'}`);
                       }
                       if (snapshot.core) {
                           const timestamp = Number(snapshot.core_last_seen || snapshot.updated_at || 0);
@@ -1136,7 +1136,7 @@ export function useKuiState() {
                           if (normalizeRealtimeKey(probeDetail.value?.id) === key && timestamp >= Number(probeDetail.value?._realtime_ts || probeDetail.value?.last_updated || 0)) { Object.assign(probeDetail.value, { cpu: core.cpu, ram: core.mem, disk: core.disk, load_avg: core.load, uptime: core.uptime, net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed, tcp_conn: core.tcp_conn, udp_conn: core.udp_conn, last_updated: timestamp, realtime_state: snapshot.core_state, _realtime_ts: timestamp }); updateProbeDetailCharts(probeDetail.value); }
                       }
                       if (resultServer && snapshot.core_warp_result?.warp) resultServer.warp = snapshot.core_warp_result.warp;
-                      if (resultServer && snapshot.core_warp_result?.egress_ip) resultServer.egress_ip = snapshot.core_warp_result.egress_ip;
+                      if (resultServer && snapshot.core_warp_result?.egress_ip) applyEgressProbeResult(resultServer, { success: true, ...snapshot.core_warp_result });
                       if (resultServer && Array.isArray(snapshot.proxy?.details)) {
                           const details = snapshot.proxy.details;
                           const active = details.find(item => item?.active && (item.exit_ip || item.node_ip));

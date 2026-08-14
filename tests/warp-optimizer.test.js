@@ -94,5 +94,7 @@ test('applying an optimized Endpoint reports and persists the newly verified WAR
   assert.match(agent, /_emit_warp_optimizer_state\([^\n]*egress_ip=verified_egress_ip/);
   assert.match(realtime, /messageType === "warp\.optimize\.result"[\s\S]*egress_ip: safeProxyAddress/);
   assert.match(realtime, /UPDATE servers SET egress_ip = \?/);
+  assert.match(realtime, /egress_applied_mode = \? AND egress_applied_revision = \?/);
+  assert.match(agent, /"applied_revision": int\(egress_state\.get\("applied_revision", 0\)\)/);
   assert.match(state, /snapshot\.core_warp_result\?\.egress_ip/);
 });

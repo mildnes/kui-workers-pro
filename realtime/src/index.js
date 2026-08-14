@@ -268,11 +268,13 @@ export default {
       if (!(await verifyAdmin(request.headers.get("Authorization"), request, env))) return json({ error: "Forbidden" }, 403, cors(request, env));
       const body = await request.json().catch(() => ({}));
       const ip = String(body.ip || "");
+      const expectedMode = String(body.expected_mode || "");
+      const expectedRevision = Number(body.expected_revision);
       const name = await presenceName(ip, env);
       if (!name) return json({ error: "VPS not found" }, 404, cors(request, env));
       const requestId = /^[0-9a-f-]{36}$/i.test(String(body.request_id || "")) ? String(body.request_id) : crypto.randomUUID();
       const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(name));
-      const response = await stub.fetch(new Request("https://presence.internal/egress-refresh", { method: "POST", headers: { "X-KUI-Request-ID": requestId } }));
+      const response = await stub.fetch(new Request("https://presence.internal/egress-refresh", { method: "POST", headers: { "X-KUI-Request-ID": requestId, "X-KUI-Expected-Mode": expectedMode, "X-KUI-Expected-Revision": String(expectedRevision) } }));
       return new Response(response.body, { status: response.status, headers: { ...Object.fromEntries(response.headers), ...cors(request, env) } });
     }
 
@@ -373,9 +375,12 @@ export class VpsPresence extends DurableObject {
       const sockets = this.ctx.getWebSockets("core");
       if (!sockets.length) return json({ error: "VPS Agent 当前离线" }, 409);
       const requestId = request.headers.get("X-KUI-Request-ID") || crypto.randomUUID();
+      const expectedMode = request.headers.get("X-KUI-Expected-Mode") || "";
+      const expectedRevision = Number(request.headers.get("X-KUI-Expected-Revision"));
+      if (!["native", "residential", "warp_ipv4", "warp_ipv6", "warp_dual", "socks5"].includes(expectedMode) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return json({ error: "出口检测目标状态无效" }, 409);
       let sent = false;
       for (const ws of sockets) {
-        try { ws.send(JSON.stringify({ type: "egress.refresh", request_id: requestId, ts: Date.now() })); sent = true; } catch {}
+        try { ws.send(JSON.stringify({ type: "egress.refresh", request_id: requestId, expected_mode: expectedMode, expected_revision: expectedRevision, ts: Date.now() })); sent = true; } catch {}
       }
       return sent ? json({ success: true, request_id: requestId }) : json({ error: "出口检测指令发送失败" }, 503);
     }
@@ -442,11 +447,23 @@ export class VpsPresence extends DurableObject {
         success: envelope.data?.success === true,
         request_id: String(envelope.data?.request_id || "").slice(0, 64),
         applied_mode: String(envelope.data?.applied_mode || "").slice(0, 32),
+        applied_revision: Number(envelope.data?.applied_revision),
         egress_ip: safeProxyAddress(envelope.data?.egress_ip),
         error: String(envelope.data?.error || "").slice(0, 500),
         measured_at: Number(envelope.data?.measured_at) || Date.now(),
       };
-      if (result.success && result.egress_ip) await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ?").bind(result.egress_ip, attachment.ip).run();
+      result.accepted = false;
+      if (result.success && result.egress_ip && Number.isSafeInteger(result.applied_revision) && result.applied_revision >= 0) {
+        const updated = await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ? AND egress_applied_mode = ? AND egress_applied_revision = ?").bind(result.egress_ip, attachment.ip, result.applied_mode, result.applied_revision).run();
+        result.accepted = Number(updated.meta?.changes || 0) > 0;
+        if (!result.accepted) {
+          result.success = false;
+          result.error = "出口配置已变化，已丢弃过期检测结果";
+        }
+      } else if (result.success) {
+        result.success = false;
+        result.error = "Agent 未返回有效的出口模式、版本或 IP";
+      }
       this.snapshot.core_egress_probe_result = result;
       this.snapshot.core_egress_probe_result_at = Date.now();
       ws.serializeAttachment(attachment);
@@ -457,9 +474,11 @@ export class VpsPresence extends DurableObject {
       if (role !== "core") return;
       const warp = compactWarpState(envelope.data);
       if (!warp) return;
-      const warpResult = { request_id: String(envelope.data?.request_id || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), egress_ip: safeProxyAddress(envelope.data?.egress_ip), warp, updated_at: Date.now() };
+      const warpResult = { request_id: String(envelope.data?.request_id || "").slice(0, 64), error: String(envelope.data?.error || "").slice(0, 500), applied_mode: String(envelope.data?.applied_mode || "").slice(0, 32), applied_revision: Number(envelope.data?.applied_revision), egress_ip: safeProxyAddress(envelope.data?.egress_ip), accepted: false, warp, updated_at: Date.now() };
       if (warp.optimizer.status === "success" && warp.active_mode.startsWith("warp_") && warpResult.egress_ip) {
-        await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ?").bind(warpResult.egress_ip, attachment.ip).run();
+        const updated = await this.env.DB.prepare("UPDATE servers SET egress_ip = ? WHERE ip = ? AND egress_applied_mode = ? AND egress_applied_revision = ?").bind(warpResult.egress_ip, attachment.ip, warpResult.applied_mode, warpResult.applied_revision).run();
+        warpResult.accepted = Number(updated.meta?.changes || 0) > 0;
+        if (!warpResult.accepted) warpResult.egress_ip = "";
       } else {
         warpResult.egress_ip = "";
       }

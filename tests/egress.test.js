@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
-import { applyEgressRealtimeResult, mergeServerRealtimeTelemetry } from '../frontend/src/utils/egressState.js';
+import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry } from '../frontend/src/utils/egressState.js';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
@@ -124,6 +124,8 @@ test('all egress modes report the IP verified during application', () => {
 test('WARP and SOCKS5 verification preserve domains for landing-side DNS', () => {
     assert.match(agent, /--proxy", f"socks5h:\/\/\{check_host\}:39482"/);
     assert.doesNotMatch(agent, /--proxy", f"socks5:\/\/\{check_host\}:39482"/);
+    assert.match(agent, /"--noproxy", "", "--proxy", f"socks5h:\/\/\{check_host\}:39482"/);
+    assert.match(agent, /"--noproxy", "\*"[^\n]+https:\/\/api\.ipify\.org/);
 });
 
 test('WARP preparation is asynchronous and endpoint recovery keeps the identity profile', () => {
@@ -154,9 +156,24 @@ test('admins can refresh the actual VPS egress IP without reapplying configurati
     assert.match(realtime, /type: "egress\.refresh"/);
     assert.match(realtime, /messageType === "egress\.probe\.result"/);
     assert.match(worker, /pathname === '\/egress-refresh'/);
-    assert.match(agent, /def _verify_current_egress_exit\(\)/);
+    assert.match(agent, /def _verify_current_egress_exit\(/);
     assert.match(agent, /"egress\.probe\.result"/);
+    assert.match(agent, /"applied_revision": revision/);
+    assert.match(realtime, /egress_applied_revision = \?/);
     assert.doesNotMatch(api.slice(api.indexOf('params.path[1] === "egress-refresh"'), api.indexOf('if (method === "DELETE")')), /egress_revision\s*=\s*egress_revision\s*\+\s*1/);
+});
+
+test('manual egress probes cannot overwrite a newer applied mode or revision', () => {
+    const server = { egress_applied_mode: 'native', egress_applied_revision: 8, egress_ip: '203.0.113.10' };
+    assert.equal(applyEgressProbeResult(server, { success: true, accepted: true, applied_mode: 'warp_ipv4', applied_revision: 7, egress_ip: '104.28.1.1' }), false);
+    assert.equal(server.egress_ip, '203.0.113.10');
+    assert.equal(applyEgressProbeResult(server, { success: true, accepted: false, applied_mode: 'native', applied_revision: 8, egress_ip: '203.0.113.11' }), false);
+    assert.equal(server.egress_ip, '203.0.113.10');
+    assert.equal(applyEgressProbeResult(server, { success: true, accepted: true, applied_mode: 'native', applied_revision: 8, egress_ip: '203.0.113.12' }), true);
+    assert.equal(server.egress_ip, '203.0.113.12');
+    assert.match(api, /egress_applied_mode, egress_applied_revision/);
+    assert.match(realtime, /expected_mode/);
+    assert.match(realtime, /expected_revision/);
 });
 
 test('an egress apply result received before the save response still refreshes the IP', () => {
@@ -187,7 +204,7 @@ test('new D1 egress state is never overwritten by an older realtime server objec
 
 test('the integrated Worker sends manual egress refresh directly to the presence object', async () => {
     const requests = [];
-    const db = { prepare: () => ({ bind: () => ({ first: async () => ({ agent_token: 'agent-secret' }) }) }) };
+    const db = { prepare: () => ({ bind: () => ({ first: async () => ({ agent_token: 'agent-secret', egress_applied_mode: 'warp_ipv4', egress_applied_revision: 6 }) }) }) };
     const env = { VPS_PRESENCE: {
         idFromName: name => name,
         get: name => ({ fetch: async request => { requests.push({ name, request }); return Response.json({ success: true, request_id: request.headers.get('X-KUI-Request-ID') }); } }),
@@ -198,5 +215,7 @@ test('the integrated Worker sends manual egress refresh directly to the presence
     assert.deepEqual(result.result, { success: true, request_id: requestId });
     assert.equal(requests.length, 1);
     assert.equal(new URL(requests[0].request.url).hostname, 'presence.internal');
+    assert.equal(requests[0].request.headers.get('X-KUI-Expected-Mode'), 'warp_ipv4');
+    assert.equal(requests[0].request.headers.get('X-KUI-Expected-Revision'), '6');
     assert.match(requests[0].name, /^v2:203\.0\.113\.8:[0-9a-f]{64}$/);
 });

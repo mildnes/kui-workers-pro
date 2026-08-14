@@ -8,13 +8,20 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_check_host", "normalize_proxy_custom_domains", "_normalize_egress_config", "_runtime_egress_args", "_warp_candidate_endpoints", "_rank_warp_candidates", "_normalize_warp_optimizer_policy"}
+FUNCTION_NAMES = {"normalize_check_host", "normalize_proxy_custom_domains", "_normalize_egress_config", "_runtime_egress_args", "_warp_candidate_endpoints", "_rank_warp_candidates", "_normalize_warp_optimizer_policy", "_select_warp_exit_ip"}
 SELECTED = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES]
 NAMESPACE = {"ipaddress": ipaddress, "json": json, "re": __import__("re"), "random": __import__("random"), "EGRESS_MODES": {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}, "PROXY_CATEGORIES": {"youtube", "ai", "google", "streaming", "custom"}}
 exec(compile(ast.Module(body=SELECTED, type_ignores=[]), str(SOURCE_PATH), "exec"), NAMESPACE)
 
 
 class AgentEgressTests(unittest.TestCase):
+    def test_dual_stack_verification_reports_the_preferred_ipv4_exit(self):
+        select = NAMESPACE["_select_warp_exit_ip"]
+        exits = {"ipv4": "104.28.1.1", "ipv6": "2606:4700:100::1"}
+        self.assertEqual(select("dual", exits), "104.28.1.1")
+        self.assertEqual(select("ipv4", exits), "104.28.1.1")
+        self.assertEqual(select("ipv6", exits), "2606:4700:100::1")
+
     def test_warp_candidates_keep_current_endpoint_and_are_bounded(self):
         profile = {"peer_address": "162.159.192.1", "peer_port": 2408}
         candidates = NAMESPACE["_warp_candidate_endpoints"](profile, ["162.159.192.2", "2606:4700:d0::a29f:c001"], seed=7, limit=24)

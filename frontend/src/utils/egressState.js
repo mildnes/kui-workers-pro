@@ -20,6 +20,16 @@ export function applyEgressRealtimeResult(server, result) {
   return true;
 }
 
+export function applyEgressProbeResult(server, result) {
+  if (!server || result?.success !== true || result?.accepted !== true || !result.egress_ip) return false;
+  const revision = Number(result.applied_revision);
+  if (!Number.isSafeInteger(revision) || revision < 0) return false;
+  if (String(result.applied_mode || '') !== String(server.egress_applied_mode || 'native')) return false;
+  if (revision !== Number(server.egress_applied_revision || 0)) return false;
+  server.egress_ip = result.egress_ip;
+  return true;
+}
+
 export function shouldSuggestWarpOptimization(result, now = Date.now()) {
   if (result?.component !== 'egress' || result.success !== true) return false;
   if (!String(result.applied_mode || '').startsWith('warp_')) return false;

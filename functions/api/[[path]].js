@@ -417,12 +417,14 @@ async function notifyRealtimeVps(env, db, ip, pagesOrigin = '') {
 }
 
 async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin = '') {
+    const server = await db.prepare('SELECT agent_token, egress_applied_mode, egress_applied_revision FROM servers WHERE ip = ?').bind(ip).first();
+    if (!server?.agent_token) return { status: 404, result: { error: 'VPS Agent Token 不存在' } };
+    const expectedMode = String(server.egress_applied_mode || 'native');
+    const expectedRevision = Number(server.egress_applied_revision || 0);
     if (env.VPS_PRESENCE && typeof env.VPS_PRESENCE.idFromName === 'function') {
-        const server = await db.prepare('SELECT agent_token FROM servers WHERE ip = ?').bind(ip).first();
-        if (!server?.agent_token) return { status: 404, result: { error: 'VPS Agent Token 不存在' } };
         const tokenHash = await sha256(server.agent_token);
         const stub = env.VPS_PRESENCE.get(env.VPS_PRESENCE.idFromName(`v2:${ip}:${tokenHash}`));
-        const response = await stub.fetch(new Request('https://presence.internal/egress-refresh', { method: 'POST', headers: { 'X-KUI-Request-ID': requestId } }));
+        const response = await stub.fetch(new Request('https://presence.internal/egress-refresh', { method: 'POST', headers: { 'X-KUI-Request-ID': requestId, 'X-KUI-Expected-Mode': expectedMode, 'X-KUI-Expected-Revision': String(expectedRevision) } }));
         const result = await response.json().catch(() => ({ error: `出口检测指令失败（HTTP ${response.status}）` }));
         return { status: response.status, result };
     }
@@ -432,7 +434,7 @@ async function requestRealtimeEgressRefresh(env, db, ip, requestId, pagesOrigin 
     const response = await fetch(`${configured.replace(/\/$/, '')}/egress-refresh`, {
         method: 'POST',
         headers: { Authorization: authorization, 'Content-Type': 'application/json', 'X-KUI-Pages-Origin': pagesOrigin },
-        body: JSON.stringify({ ip, request_id: requestId }),
+        body: JSON.stringify({ ip, request_id: requestId, expected_mode: expectedMode, expected_revision: expectedRevision }),
         signal: AbortSignal.timeout(10000),
     });
     const result = await response.json().catch(() => ({ error: `实时服务返回非 JSON 响应（HTTP ${response.status}）` }));

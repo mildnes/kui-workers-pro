@@ -534,10 +534,11 @@ _warp_optimizer_cancel = threading.Event()
 
 def _emit_warp_optimizer_state(state=None, request_id="", egress_ip=""):
     public = _public_warp_optimizer_state()
+    egress_state = _load_egress_state() if "_load_egress_state" in globals() else {"applied_mode": "native", "applied_revision": 0}
     try: heartbeat_wakeup.set()
     except Exception: pass
     if realtime_channel and realtime_channel.connected:
-        realtime_channel.send({"request_id": request_id, "egress_ip": egress_ip, **public}, "warp.optimize.result")
+        realtime_channel.send({"request_id": request_id, "egress_ip": egress_ip, "applied_mode": egress_state.get("applied_mode", "native"), "applied_revision": int(egress_state.get("applied_revision", 0)), **public}, "warp.optimize.result")
     return public
 
 def _load_or_create_warp_benchmark_profile():
@@ -738,6 +739,14 @@ def normalize_check_host(value):
         pass
     return "127.0.0.1"
 
+def _select_warp_exit_ip(mode, exits):
+    """Return the address family that normal traffic prefers for this mode."""
+    if mode == "ipv6":
+        return str(exits.get("ipv6") or "")
+    if mode in {"ipv4", "dual"}:
+        return str(exits.get("ipv4") or "")
+    return ""
+
 def _verify_warp_exit(mode, check_host="127.0.0.1"):
     global _warp_exit_ip
     _warp_exit_ip = ""
@@ -751,17 +760,20 @@ def _verify_warp_exit(mode, check_host="127.0.0.1"):
         # it would try to reach 127.0.0.1 through IPv6 before SOCKS can route
         # the literal IPv6 destination through WARP.
         checks.append(("IPv6", "https://[2606:4700:4700::1111]/cdn-cgi/trace", ["-k"]))
+    verified_ips = {}
     for family, url, extra_args in checks:
         verified = False
         for _ in range(4):
-            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5h://{check_host}:39482", *extra_args, url], capture_output=True, text=True)
+            result = subprocess.run(["curl", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--noproxy", "", "--proxy", f"socks5h://{check_host}:39482", *extra_args, url], capture_output=True, text=True)
             if result.returncode == 0 and "warp=on" in result.stdout.lower():
                 trace = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-                ip = trace.get("ip", "")
-                if ip: _warp_exit_ip = ip
+                ip = _verified_public_ip(trace.get("ip", ""))
+                if ip: verified_ips[family.lower()] = ip
                 verified = True; break
             time.sleep(2)
         if not verified: raise RuntimeError(f"WARP {family} data-plane verification failed")
+    _warp_exit_ip = _select_warp_exit_ip(mode, verified_ips)
+    if not _warp_exit_ip: raise RuntimeError(f"WARP {mode} verification returned no preferred-family exit IP")
     return _warp_exit_ip
 
 _residential_exit_ip = ""
@@ -794,7 +806,7 @@ def _verify_residential_exit(proxy):
     for host in hosts:
         proxy_url = f"socks5h://{auth}{host}:{port}"
         for attempt in range(2):
-            result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--proxy", proxy_url, "https://api.ipify.org"], capture_output=True, text=True)
+            result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--noproxy", "", "--proxy", proxy_url, "https://api.ipify.org"], capture_output=True, text=True)
             ip = _verified_public_ip(result.stdout)
             if result.returncode == 0 and ip and ip != VPS_IP:
                 _residential_exit_ip = ip
@@ -808,14 +820,14 @@ def _verify_residential_exit(proxy):
 def _verify_socks5_exit(check_host="127.0.0.1"):
     check_host = normalize_check_host(check_host)
     for _ in range(4):
-        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--proxy", f"socks5h://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
+        result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--noproxy", "", "--proxy", f"socks5h://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
         ip = _verified_public_ip(result.stdout)
         if result.returncode == 0 and ip: return ip
         time.sleep(2)
     raise RuntimeError("SOCKS5 data-plane verification failed")
 
 def _verify_native_exit():
-    result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "https://api.ipify.org"], capture_output=True, text=True)
+    result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--noproxy", "*", "https://api.ipify.org"], capture_output=True, text=True)
     ip = _verified_public_ip(result.stdout)
     if result.returncode != 0 or not ip:
         raise RuntimeError("native data-plane verification failed")
@@ -830,12 +842,18 @@ def _current_egress_check_host():
     except Exception:
         return "127.0.0.1"
 
-def _verify_current_egress_exit():
-    mode = _load_egress_state().get("applied_mode", "native")
+def _verify_current_egress_exit(expected_mode="", expected_revision=None):
+    state = _load_egress_state()
+    mode = state.get("applied_mode", "native")
+    revision = int(state.get("applied_revision", 0))
+    if expected_mode and mode != expected_mode:
+        raise RuntimeError(f"出口配置已变化：期望 {expected_mode}，当前 {mode}")
+    if expected_revision is not None and int(expected_revision) != revision:
+        raise RuntimeError(f"出口配置版本已变化：期望 {int(expected_revision)}，当前 {revision}")
     check_host = _current_egress_check_host()
-    if mode == "native": return mode, _verify_native_exit()
-    if mode.startswith("warp_"): return mode, _verify_warp_exit(mode[5:], check_host)
-    if mode in {"residential", "socks5"}: return mode, _verify_socks5_exit(check_host)
+    if mode == "native": return mode, revision, _verify_native_exit()
+    if mode.startswith("warp_"): return mode, revision, _verify_warp_exit(mode[5:], check_host)
+    if mode in {"residential", "socks5"}: return mode, revision, _verify_socks5_exit(check_host)
     raise RuntimeError(f"unsupported applied egress mode: {mode}")
 
 def _post_warp_result(payload):
@@ -2322,13 +2340,15 @@ if __name__ == "__main__":
                 _save_egress_state(state["applied_mode"], state["applied_revision"], deployment_id=state.get("deployment_id", ""), applied_config=state.get("applied_config"))
         if message.get("type") == "egress.refresh":
             request_id = str(message.get("request_id", ""))[:64]
+            expected_mode = str(message.get("expected_mode", ""))[:32]
+            expected_revision = message.get("expected_revision")
             def probe():
                 if not egress_probe_lock.acquire(blocking=False):
                     realtime_channel.send({"success": False, "request_id": request_id, "error": "出口检测正在进行中", "measured_at": int(time.time() * 1000)}, "egress.probe.result")
                     return
                 try:
-                    mode, egress_ip = _verify_current_egress_exit()
-                    realtime_channel.send({"success": True, "request_id": request_id, "applied_mode": mode, "egress_ip": egress_ip, "measured_at": int(time.time() * 1000)}, "egress.probe.result")
+                    mode, revision, egress_ip = _verify_current_egress_exit(expected_mode, expected_revision)
+                    realtime_channel.send({"success": True, "request_id": request_id, "applied_mode": mode, "applied_revision": revision, "egress_ip": egress_ip, "measured_at": int(time.time() * 1000)}, "egress.probe.result")
                 except Exception as error:
                     realtime_channel.send({"success": False, "request_id": request_id, "error": str(error)[:500], "measured_at": int(time.time() * 1000)}, "egress.probe.result")
                 finally:
