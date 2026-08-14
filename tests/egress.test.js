@@ -82,14 +82,24 @@ test('SOCKS5 password is write-only and an empty field preserves the stored valu
     assert.doesNotMatch(frontend, /s\.socks5_pass\b|vps\.socks5_pass\s*=/);
 });
 
-test('manual SOCKS5 selection stays as a local draft until complete settings are submitted', () => {
-    assert.match(frontend, /vps\._egress_mode_draft = 'socks5';\s*return;/);
+test('every egress selection stays local until the user applies or cancels it', () => {
+    const modeChange = frontend.slice(frontend.indexOf('const onEgressModeChange'), frontend.indexOf('const proxyCategoryOptions'));
+    const proxyModeChange = frontend.slice(frontend.indexOf('const setProxyMode'), frontend.indexOf('const cancelEgressDraft'));
     assert.match(frontend, /const egressModeOf = vps => vps\._egress_mode_draft \|\| vps\.egress_mode/);
+    assert.match(modeChange, /vps\._egress_mode_draft = mode/);
+    assert.match(modeChange, /vps\._egress_dirty = true/);
+    assert.doesNotMatch(modeChange, /updateVpsEgress/);
+    assert.match(proxyModeChange, /vps\._proxy_mode_draft = proxyMode/);
+    assert.doesNotMatch(proxyModeChange, /updateVpsEgress/);
+    assert.match(frontend, /const applyEgressDraft = async vps/);
+    assert.match(frontend, /const cancelEgressDraft = vps/);
     assert.match(frontend, /const body = \{ ip: vps\.ip, egress_mode: targetMode \}/);
     assert.match(frontend, /const draftFields = \['\_egress_mode_draft'/);
     assert.match(frontend, /s\._socks5_addr === undefined/);
-    assert.match(frontend, /mode !== 'socks5'/);
-    assert.match(frontend, /prevDraftMode \|\| \(targetMode === 'socks5' \? 'socks5' : ''\)/);
+    assert.match(serversPage, /@click="applyEgressDraft\(vps\)"/);
+    assert.match(serversPage, /@click="cancelEgressDraft\(vps\)"/);
+    assert.match(serversPage, /点击“应用”后才会下发到 VPS/);
+    assert.doesNotMatch(serversPage, /应用已选分类/);
 });
 
 test('desired and applied egress snapshots are persisted independently', () => {
