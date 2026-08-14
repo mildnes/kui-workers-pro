@@ -8,9 +8,9 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_check_host", "_normalize_egress_config", "_runtime_egress_args"}
+FUNCTION_NAMES = {"normalize_check_host", "normalize_proxy_custom_domains", "_normalize_egress_config", "_runtime_egress_args"}
 SELECTED = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES]
-NAMESPACE = {"ipaddress": ipaddress, "json": json, "EGRESS_MODES": {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}, "PROXY_CATEGORIES": {"youtube", "ai", "google", "streaming"}}
+NAMESPACE = {"ipaddress": ipaddress, "json": json, "re": __import__("re"), "EGRESS_MODES": {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}, "PROXY_CATEGORIES": {"youtube", "ai", "google", "streaming", "custom"}}
 exec(compile(ast.Module(body=SELECTED, type_ignores=[]), str(SOURCE_PATH), "exec"), NAMESPACE)
 
 
@@ -38,11 +38,13 @@ class AgentEgressTests(unittest.TestCase):
         config = NAMESPACE["_normalize_egress_config"]({
             "mode": "residential",
             "proxy_mode": "selective",
-            "proxy_categories": "youtube,unknown,ai,youtube",
+            "proxy_categories": "youtube,unknown,ai,youtube,custom",
+            "proxy_custom_domains": ["*.Example.COM", "例子.测试"],
         })
-        self.assertEqual(config["proxy_categories"], "youtube,ai")
+        self.assertEqual(config["proxy_categories"], "youtube,ai,custom")
+        self.assertEqual(config["proxy_custom_domains"], ["example.com", "xn--fsqu00a.xn--0zwm56d"])
         runtime_socks, _ = NAMESPACE["_runtime_egress_args"](config, {"addr": "172.17.0.1", "port": 7920}, "172.17.0.1")
-        self.assertEqual(json.loads(runtime_socks["domains"]), {"categories": ["youtube", "ai"]})
+        self.assertEqual(json.loads(runtime_socks["domains"]), {"categories": ["youtube", "ai", "custom"], "custom_domains": ["example.com", "xn--fsqu00a.xn--0zwm56d"]})
 
 
 if __name__ == "__main__":

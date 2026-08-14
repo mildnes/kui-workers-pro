@@ -18,6 +18,7 @@ test('egress requests normalize selective categories and validate SOCKS5 endpoin
         egress_mode: 'socks5',
         proxy_mode: 'selective',
         proxy_categories: 'AI,youtube,ai',
+        proxy_custom_domains: '',
         socks5_addr: 'proxy.example.com',
         socks5_port: 1080,
         socks5_user: 'alice',
@@ -28,12 +29,43 @@ test('egress requests normalize selective categories and validate SOCKS5 endpoin
         mode: 'socks5',
         proxy_mode: 'selective',
         proxy_categories: 'youtube,ai',
+        proxy_custom_domains: [],
         socks5: { addr: 'proxy.example.com', port: 1080, user: 'alice', pass: 'new-secret' },
     });
     assert.throws(() => normalizeEgressRequest({ egress_mode: 'socks5', socks5_addr: 'https://proxy.example.com', socks5_port: 1080 }), /address/i);
     assert.throws(() => normalizeEgressRequest({ egress_mode: 'socks5', socks5_addr: 'proxy.example.com', socks5_port: 0 }), /port/i);
     assert.throws(() => normalizeEgressRequest({ egress_mode: 'residential', proxy_mode: 'selective', proxy_categories: 'unknown' }), /categor/i);
     assert.throws(() => normalizeEgressRequest({ egress_mode: 'residential', proxy_mode: 'selective', proxy_categories: '' }), /categor/i);
+});
+
+test('custom selective domains are normalized, bounded, and versioned separately', () => {
+    const { normalizeEgressRequest, normalizeProxyCustomDomains } = __test;
+    assert.deepEqual(
+        normalizeProxyCustomDomains('Example.COM.\n*.media.example.com\n例子.测试\nexample.com\n'),
+        ['example.com', 'media.example.com', 'xn--fsqu00a.xn--0zwm56d'],
+    );
+    const normalized = normalizeEgressRequest({
+        egress_mode: 'residential',
+        proxy_mode: 'selective',
+        proxy_categories: 'custom',
+        proxy_custom_domains: 'netflix.com\n*.example.org',
+    });
+    assert.equal(normalized.proxyCategories, 'custom');
+    assert.deepEqual(normalized.proxyCustomDomains, ['example.org', 'netflix.com']);
+    assert.deepEqual(normalized.desiredConfig.proxy_custom_domains, ['example.org', 'netflix.com']);
+    for (const invalid of ['https://example.com', 'example.com/path', 'example.com:443', '127.0.0.1', 'localhost', '*.com', 'internal.local']) {
+        assert.throws(() => normalizeProxyCustomDomains(invalid), /domain|IP address/i);
+    }
+    assert.throws(() => normalizeEgressRequest({ egress_mode: 'residential', proxy_mode: 'selective', proxy_categories: 'custom', proxy_custom_domains: '' }), /at least one domain/i);
+});
+
+test('custom domain UI is explicit and submitted with residential and SOCKS5 configurations', () => {
+    assert.match(serversPage, /自定义代理域名（每行一个）/);
+    assert.match(serversPage, /v-model="vps\._proxy_custom_domains"/);
+    assert.match(serversPage, /自定义域名优先级最高/);
+    assert.match(frontend, /body\.proxy_custom_domains = vps\._proxy_custom_domains \|\| ''/);
+    assert.match(api, /proxy_custom_domains: proxyCustomDomains/);
+    assert.match(api, /\['servers', 'proxy_custom_domains'/);
 });
 
 test('SOCKS5 password is write-only and an empty field preserves the stored value', () => {

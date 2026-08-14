@@ -521,7 +521,7 @@ def _deliver_egress_result(payload):
     return _post_warp_result(payload)
 
 EGRESS_MODES = {"native", "residential", "socks5", "warp_ipv4", "warp_ipv6", "warp_dual"}
-PROXY_CATEGORIES = {"youtube", "ai", "google", "streaming"}
+PROXY_CATEGORIES = {"youtube", "ai", "google", "streaming", "custom"}
 SELECTIVE_PROXY_RULE_SETS = {
     "youtube": (
         {
@@ -577,9 +577,39 @@ SELECTIVE_PROXY_EXCLUSIONS = {
     "streaming": ("youtube",),
 }
 
-def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
+def normalize_proxy_custom_domains(value):
+    source = value if isinstance(value, list) else []
+    domains = []
+    if len(source) > 200:
+        raise ValueError("too many custom proxy domains")
+    for raw_value in source:
+        domain = str(raw_value or "").strip().lower().rstrip(".")
+        if domain.startswith("*."):
+            domain = domain[2:]
+        try:
+            domain = domain.encode("idna").decode("ascii")
+        except UnicodeError:
+            raise ValueError("invalid custom proxy domain")
+        labels = domain.split(".")
+        if len(domain) > 253 or len(labels) < 2 or domain.endswith(".local") or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label or "") or len(label) > 63 for label in labels):
+            raise ValueError("invalid custom proxy domain")
+        try:
+            ipaddress.ip_address(domain)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("IP addresses are not custom proxy domains")
+        if domain not in domains:
+            domains.append(domain)
+    return sorted(domains)
+
+def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag, custom_domains=None):
     selected = {category for category in categories or [] if category in SELECTIVE_PROXY_RULE_SETS}
-    if not selected:
+    custom_selected = "custom" in set(categories or [])
+    normalized_custom_domains = normalize_proxy_custom_domains(custom_domains or []) if custom_selected else []
+    if custom_selected and not normalized_custom_domains:
+        raise RuntimeError("custom proxy category requires at least one domain")
+    if not selected and not custom_selected:
         raise RuntimeError("selective SOCKS5 mode requires at least one valid category")
     excluded = {
         specific
@@ -620,6 +650,13 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
     if not inbounds:
         return rule_sets, [], dns_tags, direct_dns_tags
     rules = []
+    if normalized_custom_domains:
+        rules.append({
+            "inbound": inbounds,
+            "domain_suffix": normalized_custom_domains,
+            "action": "route",
+            "outbound": outbound_tag,
+        })
     if direct_route_tags:
         rules.append({
             "inbound": inbounds,
@@ -627,19 +664,18 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag):
             "action": "route",
             "outbound": "direct-out",
         })
-    rules.extend([
-        {
+    if route_tags:
+        rules.append({
             "inbound": inbounds,
             "rule_set": route_tags,
             "action": "route",
             "outbound": outbound_tag,
-        },
-        {"inbound": inbounds, "ip_version": 6, "action": "reject"},
-    ])
+        })
+    rules.append({"inbound": inbounds, "ip_version": 6, "action": "reject"})
     return rule_sets, rules, dns_tags, direct_dns_tags
 
 
-def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, strategy="prefer_ipv4", detoured_dns=None):
+def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, custom_domains=None, strategy="prefer_ipv4", detoured_dns=None):
     inbounds = sorted(set(proxy_inbounds or []))
     local_dns = {"type": "local", "tag": "local-dns"}
     servers = [local_dns]
@@ -667,8 +703,16 @@ def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags
         })
         if mode == "proxy-selective":
             selected_dns_tags = list(dict.fromkeys(dns_rule_tags or []))
-            if not selected_dns_tags:
+            normalized_custom_domains = normalize_proxy_custom_domains(custom_domains or [])
+            if not selected_dns_tags and not normalized_custom_domains:
                 raise RuntimeError("selective proxy DNS requires domain rule sets")
+            if normalized_custom_domains:
+                dns_rules.append({
+                    "domain_suffix": normalized_custom_domains,
+                    "action": "route",
+                    "server": dns_tag,
+                    "strategy": strategy,
+                })
             direct_dns_tags = list(dict.fromkeys(dns_direct_rule_tags or []))
             if direct_dns_tags:
                 dns_rules.append({
@@ -677,12 +721,13 @@ def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags
                     "server": "local-dns",
                     "strategy": strategy,
                 })
-            dns_rules.append({
-                "rule_set": selected_dns_tags,
-                "action": "route",
-                "server": dns_tag,
-                "strategy": strategy,
-            })
+            if selected_dns_tags:
+                dns_rules.append({
+                    "rule_set": selected_dns_tags,
+                    "action": "route",
+                    "server": dns_tag,
+                    "strategy": strategy,
+                })
     else:
         raise RuntimeError(f"unsupported DNS policy mode: {mode}")
 
@@ -740,7 +785,8 @@ def _normalize_egress_config(value, fallback_mode="native", fallback=None):
         categories = [str(item).strip().lower() for item in raw_categories if str(item).strip().lower() in PROXY_CATEGORIES]
     else:
         categories = []
-    config = {"mode": mode, "proxy_mode": proxy_mode, "proxy_categories": ",".join(dict.fromkeys(categories))}
+    custom_domains = normalize_proxy_custom_domains(source.get("proxy_custom_domains") or [])
+    config = {"mode": mode, "proxy_mode": proxy_mode, "proxy_categories": ",".join(dict.fromkeys(categories)), "proxy_custom_domains": custom_domains}
     if mode == "socks5":
         socks = source.get("socks5") if isinstance(source.get("socks5"), dict) else {}
         config["socks5"] = {"addr": str(socks.get("addr") or ""), "port": int(socks.get("port") or 0), "user": str(socks.get("user") or ""), "pass": str(socks.get("pass") or "")}
@@ -750,7 +796,8 @@ def _runtime_egress_args(config, residential, egress_check_host):
     mode = config["mode"]
     proxy_mode = config.get("proxy_mode", "global")
     categories = [item for item in config.get("proxy_categories", "").split(",") if item]
-    proxy_domains = json.dumps({"categories": categories}) if proxy_mode == "selective" and categories else ""
+    custom_domains = normalize_proxy_custom_domains(config.get("proxy_custom_domains") or [])
+    proxy_domains = json.dumps({"categories": categories, "custom_domains": custom_domains}) if proxy_mode == "selective" and categories else ""
     if mode == "residential":
         residential_addr = normalize_check_host(residential.get("addr", "127.0.0.1"))
         if residential_addr == "127.0.0.1" and egress_check_host != "127.0.0.1":
@@ -1254,6 +1301,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
     dns_outbound_tag = ""
     dns_rule_tags = []
     dns_direct_rule_tags = []
+    custom_proxy_domains = []
     dns_strategy = "prefer_ipv4"
     dns_final_rules = []
     landing_dns_detours = []
@@ -1440,12 +1488,16 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         dns_outbound_tag = s5_tag
         if s5_mode == "selective":
             try:
-                selected = json.loads(socks5_outbound.get("domains", "{}") or "{}").get("categories", [])
+                selective_config = json.loads(socks5_outbound.get("domains", "{}") or "{}")
+                selected = selective_config.get("categories", [])
+                custom_proxy_domains = selective_config.get("custom_domains", [])
             except Exception:
                 selected = []
+                custom_proxy_domains = []
             proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
-            rule_sets, selective_rules, dns_rule_tags, dns_direct_rule_tags = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag)
-            singbox_config["route"]["rule_set"] = rule_sets
+            rule_sets, selective_rules, dns_rule_tags, dns_direct_rule_tags = build_selective_proxy_rules(selected, proxy_inbounds, s5_tag, custom_proxy_domains)
+            if rule_sets:
+                singbox_config["route"]["rule_set"] = rule_sets
             singbox_config["route"]["rules"].extend(rule for rule in selective_rules if rule.get("action") != "reject")
             dns_final_rules.extend(rule for rule in selective_rules if rule.get("action") == "reject")
             singbox_config["experimental"] = {
@@ -1509,6 +1561,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         outbound_tag=dns_outbound_tag,
         dns_rule_tags=dns_rule_tags,
         dns_direct_rule_tags=dns_direct_rule_tags,
+        custom_domains=custom_proxy_domains,
         strategy=dns_strategy,
         detoured_dns=landing_dns_detours,
     )

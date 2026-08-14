@@ -8,7 +8,7 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound", "tune_outbound", "get_port_traffic", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
+FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
@@ -105,6 +105,38 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertEqual(len(rules), 2)
         self.assertEqual(rules[0]["rule_set"], ["kui-youtube", "kui-stream-domain", "kui-stream-ip"])
         self.assertEqual(dns_tags, ["kui-youtube", "kui-stream-domain"])
+        self.assertEqual(direct_dns_tags, [])
+
+    def test_custom_domains_override_builtin_direct_exclusions(self):
+        rule_sets, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
+            ["streaming", "custom"], ["in-node"], "socks5-outbound", ["youtube.com", "*.example.org"]
+        )
+
+        custom, direct, proxy, reject_ipv6 = rules
+        self.assertEqual(custom["domain_suffix"], ["example.org", "youtube.com"])
+        self.assertEqual(custom["outbound"], "socks5-outbound")
+        self.assertEqual(direct["rule_set"], ["kui-youtube"])
+        self.assertEqual(proxy["rule_set"], ["kui-stream-domain", "kui-stream-ip"])
+        self.assertEqual(reject_ipv6["action"], "reject")
+        self.assertEqual(dns_tags, ["kui-stream-domain"])
+        self.assertEqual(direct_dns_tags, ["kui-youtube"])
+
+        dns, _, _ = NAMESPACE["build_egress_dns_policy"](
+            ["in-node"], "proxy-selective", outbound_tag="socks5-outbound",
+            dns_rule_tags=dns_tags, dns_direct_rule_tags=direct_dns_tags,
+            custom_domains=["youtube.com", "example.org"],
+        )
+        self.assertEqual(dns["rules"][0]["domain_suffix"], ["example.org", "youtube.com"])
+        self.assertEqual(dns["rules"][0]["server"], "proxy-dns")
+        self.assertEqual(dns["rules"][1]["server"], "local-dns")
+
+    def test_custom_only_selective_proxy_needs_no_remote_rule_set(self):
+        rule_sets, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
+            ["custom"], ["in-node"], "socks5-outbound", ["example.com"]
+        )
+        self.assertEqual(rule_sets, [])
+        self.assertEqual(rules[0]["domain_suffix"], ["example.com"])
+        self.assertEqual(dns_tags, [])
         self.assertEqual(direct_dns_tags, [])
 
     def test_selective_proxy_rules_reject_empty_or_unknown_categories(self):

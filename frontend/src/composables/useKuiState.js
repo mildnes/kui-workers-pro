@@ -428,11 +428,16 @@ export function useKuiState() {
                       try {
                           const res = await fetchApi('/api/data'); const data = await res.json();
                           const previousByIp = new Map(servers.value.map(item => [normalizeRealtimeKey(item.ip), item]));
-                          const draftFields = ['_egress_mode_draft', '_socks5_addr', '_socks5_port', '_socks5_user', '_socks5_pass', '_socks5_clear_password', '_proxy_categories_dirty'];
+                          const draftFields = ['_egress_mode_draft', '_socks5_addr', '_socks5_port', '_socks5_user', '_socks5_pass', '_socks5_clear_password', '_proxy_custom_domains', '_proxy_categories_dirty'];
                           servers.value = (data.servers || []).map(item => {
                               const previous = previousByIp.get(normalizeRealtimeKey(item.ip));
                               const merged = previous?._realtime_ts > Number(item.last_report || 0) ? { ...item, ...previous } : { ...item };
                               if (previous) for (const field of draftFields) if (previous[field] !== undefined) merged[field] = previous[field];
+                              if (merged._proxy_custom_domains === undefined) {
+                                  let domains = merged.proxy_custom_domains;
+                                  if (typeof domains === 'string') { try { domains = JSON.parse(domains || '[]'); } catch { domains = []; } }
+                                  merged._proxy_custom_domains = Array.isArray(domains) ? domains.join('\n') : '';
+                              }
                               return merged;
                           }); nodes.value = data.nodes || []; users.value = data.users || []; groups.value = (data.groups || []).map(group => { let members = []; let resources = []; try { members = JSON.parse(group.members || '[]'); } catch (e) {} try { resources = JSON.parse(group.resources || '[]'); } catch (e) {} if (!groupDrafts[group.id]) groupDrafts[group.id] = { members: Array.isArray(members) ? members : [], resources: Array.isArray(resources) ? resources.map(resource => `${resource.type}:${resource.id}`) : [] }; return group; });
                           if (data.siteTitle) { siteTitle.value = data.siteTitle; if (!siteTitleDirty.value) siteTitleInput.value = data.siteTitle; }
@@ -559,7 +564,7 @@ export function useKuiState() {
                       updateVpsEgress(vps, mode, null, null);
                   };
                   const proxyCategoriesOf = vps => vps.proxy_categories || '';
-                  const proxyCategoryOptions = [ { key: 'youtube', label: 'YouTube' }, { key: 'ai', label: 'AI' }, { key: 'google', label: 'Google 搜索' }, { key: 'streaming', label: '流媒体' } ];
+                  const proxyCategoryOptions = [ { key: 'youtube', label: 'YouTube' }, { key: 'ai', label: 'AI' }, { key: 'google', label: 'Google 搜索' }, { key: 'streaming', label: '流媒体' }, { key: 'custom', label: '自定义' } ];
                   const proxyCategoryActive = (vps, cat) => { const cats = (vps.proxy_categories || '').split(',').filter(Boolean); return cats.includes(cat); };
                   const toggleProxyCategory = (vps, cat) => {
                       if (!['residential','socks5'].includes(egressModeOf(vps))) return;
@@ -569,6 +574,9 @@ export function useKuiState() {
                       vps.proxy_categories = current.join(',');
                       vps._proxy_categories_dirty = true;
                   };
+                  const markProxyCustomDomainsDirty = vps => { vps._proxy_categories_dirty = true; };
+                  const clearProxyCustomDomains = vps => { vps._proxy_custom_domains = ''; vps._proxy_categories_dirty = true; };
+                  const proxyCustomDomainCount = vps => new Set(String(vps._proxy_custom_domains || '').split(/\r?\n/).map(item => item.trim().toLowerCase()).filter(Boolean)).size;
                   const setProxyMode = async (vps, mode, proxyMode) => {
                       const categories = proxyMode === 'selective' ? proxyCategoriesOf(vps) : '';
                       if (proxyMode === 'selective') {
@@ -588,7 +596,7 @@ export function useKuiState() {
                   const updateVpsEgress = async (vps, mode, proxy_mode, proxy_categories) => {
                       if (['pending', 'preparing'].includes(vps.egress_status)) return;
                       const targetMode = mode || egressModeOf(vps);
-                      const prevMode = vps.egress_mode || 'native'; const prevDraftMode = vps._egress_mode_draft || ''; const prevStatus = vps.egress_status; const prevProxyMode = proxyModeOf(vps); const prevCats = proxyCategoriesOf(vps);
+                      const prevMode = vps.egress_mode || 'native'; const prevDraftMode = vps._egress_mode_draft || ''; const prevStatus = vps.egress_status; const prevProxyMode = proxyModeOf(vps); const prevCats = proxyCategoriesOf(vps); const prevCustomDomains = vps.proxy_custom_domains;
                       vps.egress_status = 'pending';
                       vps.egress_mode = targetMode;
                       vps._egress_mode_draft = '';
@@ -596,9 +604,10 @@ export function useKuiState() {
                       if (proxy_categories !== null) vps.proxy_categories = proxy_categories;
                       try {
                           const body = { ip: vps.ip, egress_mode: targetMode };
-                          if (targetMode === 'residential') { body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || ''; }
+                          if (targetMode === 'residential') { body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || ''; body.proxy_custom_domains = vps._proxy_custom_domains || ''; }
                           if (targetMode === 'socks5') {
                               body.proxy_mode = vps.proxy_mode || 'global'; body.proxy_categories = vps.proxy_categories || '';
+                              body.proxy_custom_domains = vps._proxy_custom_domains || '';
                               body.socks5_addr = vps._socks5_addr || ''; body.socks5_port = vps._socks5_port || 1080;
                               body.socks5_user = vps._socks5_user || ''; body.socks5_pass = vps._socks5_pass || '';
                               body.socks5_clear_password = vps._socks5_clear_password === true;
@@ -611,11 +620,13 @@ export function useKuiState() {
                           if (!alreadyApplied) vps.egress_status = saved.egress_status || 'pending';
                           vps.proxy_mode = saved.proxy_mode || (vps.egress_mode === 'residential' || vps.egress_mode === 'socks5' ? 'global' : '');
                           vps.proxy_categories = saved.proxy_categories || '';
+                          vps.proxy_custom_domains = saved.proxy_custom_domains || [];
+                          vps._proxy_custom_domains = vps.proxy_custom_domains.join('\n');
                           vps._proxy_categories_dirty = false;
                           vps.socks5_addr = saved.socks5_addr || ''; vps.socks5_port = saved.socks5_port || 0;
                           vps.socks5_user = saved.socks5_user || ''; vps.socks5_password_set = saved.socks5_password_set === true;
                           vps._socks5_pass = ''; vps._socks5_clear_password = false;
-                      } catch (error) { vps.egress_mode = prevMode; vps._egress_mode_draft = prevDraftMode || (targetMode === 'socks5' ? 'socks5' : ''); vps.proxy_mode = prevProxyMode; vps.proxy_categories = prevCats; vps.egress_status = prevStatus; }
+                      } catch (error) { vps.egress_mode = prevMode; vps._egress_mode_draft = prevDraftMode || (targetMode === 'socks5' ? 'socks5' : ''); vps.proxy_mode = prevProxyMode; vps.proxy_categories = prevCats; vps.proxy_custom_domains = prevCustomDomains; vps.egress_status = prevStatus; }
                   };
                   const forceReapplyEgress = async vps => {
                       vps._egress_mode_draft = '';
@@ -1114,6 +1125,6 @@ export function useKuiState() {
                       qrModalOpen, qrCodeImage, showQrCode, 
                       showWelcomePopup, closePopup,
                       availableThemes, pingNodes, pullGithubNodes, githubNodesPulling, hasCustomCssFlag,
-                      proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, refreshVpsEgressIp, egressIpRefreshing, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, setProxyMode, applyProxyCategories, onEgressModeChange,
+                      proxyConfig, toggleNodeProxy, saveProxyConfig, switchProxyIP, proxyPool, loadProxyPool, egressModeLabel, updateVpsEgress, forceReapplyEgress, refreshVpsEgressIp, egressIpRefreshing, egressModeOf, proxyModeOf, proxyCategoriesOf, proxyCategoryOptions, proxyCategoryActive, toggleProxyCategory, markProxyCustomDomainsDirty, clearProxyCustomDomains, proxyCustomDomainCount, setProxyMode, applyProxyCategories, onEgressModeChange,
                   };
 }

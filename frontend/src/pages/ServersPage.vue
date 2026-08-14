@@ -75,6 +75,12 @@
                                       <div v-if="proxyModeOf(vps) === 'selective'" class="flex flex-wrap gap-1.5 mb-2">
                                           <button v-for="cat in proxyCategoryOptions" :key="cat.key" @click="toggleProxyCategory(vps, cat.key)" :class="{ 'is-active': proxyCategoryActive(vps, cat.key) }" class="kui-egress-category-button">{{ cat.label }}</button>
                                       </div>
+                                      <div v-if="proxyModeOf(vps) === 'selective' && proxyCategoryActive(vps, 'custom')" class="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
+                                          <div class="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-black text-indigo-700"><span>自定义代理域名（每行一个）</span><button @click="clearProxyCustomDomains(vps)" class="text-indigo-500 hover:text-indigo-700">清空</button></div>
+                                          <textarea v-model="vps._proxy_custom_domains" @input="markProxyCustomDomainsDirty(vps)" rows="5" maxlength="32768" spellcheck="false" placeholder="netflix.com&#10;api.example.com&#10;*.example.org" class="w-full resize-y rounded-lg border border-indigo-200 bg-white px-2.5 py-2 font-mono text-xs leading-5 text-slate-700 outline-none focus:border-indigo-400"></textarea>
+                                          <div class="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold text-indigo-600"><span>支持根域名和 *.通配写法；自动匹配子域名</span><span>{{ proxyCustomDomainCount(vps) }} 条</span></div>
+                                          <div class="mt-1 text-[10px] font-bold text-amber-600">自定义域名优先级最高，即使对应内置分类未勾选，也会走住宅出口。</div>
+                                      </div>
                                       <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="['pending', 'preparing'].includes(vps.egress_status)" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
                                       <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ “全局代理”仅覆盖 KUI Agent 管理的节点入站流量，不会接管 VPS 系统默认路由；局部代理仅覆盖所选服务分类。综合分类与具体服务重叠时，未勾选的 YouTube / AI 保持原生直连。</div>
                                       <div class="mt-2 rounded-xl px-3 py-2 text-[10px] font-black" :class="vps.residential_ready ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-rose-200 bg-rose-50 text-rose-700'">
@@ -105,6 +111,12 @@
                                       </div>
                                       <div v-if="proxyModeOf(vps) === 'selective'" class="flex flex-wrap gap-1.5 mb-1">
                                           <button v-for="cat in proxyCategoryOptions" :key="cat.key" @click="toggleProxyCategory(vps, cat.key)" :class="{ 'is-active': proxyCategoryActive(vps, cat.key) }" class="kui-egress-category-button">{{ cat.label }}</button>
+                                      </div>
+                                      <div v-if="proxyModeOf(vps) === 'selective' && proxyCategoryActive(vps, 'custom')" class="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2.5">
+                                          <div class="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-black text-indigo-700"><span>自定义代理域名（每行一个）</span><button @click="clearProxyCustomDomains(vps)" class="text-indigo-500 hover:text-indigo-700">清空</button></div>
+                                          <textarea v-model="vps._proxy_custom_domains" @input="markProxyCustomDomainsDirty(vps)" rows="5" maxlength="32768" spellcheck="false" placeholder="netflix.com&#10;api.example.com&#10;*.example.org" class="w-full resize-y rounded-lg border border-indigo-200 bg-white px-2.5 py-2 font-mono text-xs leading-5 text-slate-700 outline-none focus:border-indigo-400"></textarea>
+                                          <div class="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold text-indigo-600"><span>支持根域名和 *.通配写法；自动匹配子域名</span><span>{{ proxyCustomDomainCount(vps) }} 条</span></div>
+                                          <div class="mt-1 text-[10px] font-bold text-amber-600">自定义域名优先级最高，即使对应内置分类未勾选，也会走 SOCKS5 出口。</div>
                                       </div>
                                       <button v-if="proxyModeOf(vps) === 'selective' && vps._proxy_categories_dirty" @click="applyProxyCategories(vps)" :disabled="['pending', 'preparing'].includes(vps.egress_status)" class="w-full mb-2 rounded-xl bg-indigo-600 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">应用已选分类</button>
                                       <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black text-amber-700">⚠ 填写 SOCKS5 代理地址后点击全局/局部代理按钮应用。综合分类与具体服务重叠时，未勾选的 YouTube / AI 保持原生直连。</div>

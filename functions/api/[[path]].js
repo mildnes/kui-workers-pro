@@ -67,7 +67,7 @@ function normalizePingTarget(value) {
 }
 
 const EGRESS_MODES = new Set(['native', 'residential', 'warp_ipv4', 'warp_ipv6', 'warp_dual', 'socks5']);
-const PROXY_CATEGORIES = new Set(['youtube', 'ai', 'google', 'streaming']);
+const PROXY_CATEGORIES = new Set(['youtube', 'ai', 'google', 'streaming', 'custom']);
 
 function normalizeProxyCategories(value, required = false) {
     const raw = String(value || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
@@ -76,6 +76,27 @@ function normalizeProxyCategories(value, required = false) {
     const categories = [...new Set(raw)].sort((left, right) => [...PROXY_CATEGORIES].indexOf(left) - [...PROXY_CATEGORIES].indexOf(right));
     if (required && !categories.length) throw new Error('Selective proxy mode requires at least one category');
     return categories.join(',');
+}
+
+function normalizeProxyCustomDomains(value) {
+    const source = Array.isArray(value) ? value : String(value || '').split(/\r?\n/);
+    if (source.length > 200 || JSON.stringify(source).length > 32 * 1024) throw new Error('Custom proxy domains exceed the allowed limit');
+    const domains = [];
+    for (const rawValue of source) {
+        let domain = String(rawValue || '').trim().toLowerCase();
+        if (!domain) continue;
+        if (domain.startsWith('*.')) domain = domain.slice(2);
+        domain = domain.replace(/\.+$/, '');
+        if (!domain || domain.length > 253 || /[\x00-\x20\x7f/:?#@]/.test(domain) || domain.includes('://')) throw new Error(`Invalid custom proxy domain: ${rawValue}`);
+        let hostname;
+        try { hostname = new URL(`http://${domain}/`).hostname.toLowerCase().replace(/\.+$/, ''); }
+        catch { throw new Error(`Invalid custom proxy domain: ${rawValue}`); }
+        const labels = hostname.split('.');
+        if (labels.length < 2 || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || labels.some(label => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) throw new Error(`Invalid custom proxy domain: ${rawValue}`);
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':')) throw new Error(`IP addresses are not allowed in custom proxy domains: ${rawValue}`);
+        if (!domains.includes(hostname)) domains.push(hostname);
+    }
+    return domains.sort();
 }
 
 function normalizeSocks5Address(value) {
@@ -109,7 +130,9 @@ function normalizeEgressRequest(data, current = {}) {
     const supportsProxyRules = mode === 'residential' || mode === 'socks5';
     const proxyMode = supportsProxyRules && data.proxy_mode === 'selective' ? 'selective' : 'global';
     const proxyCategories = supportsProxyRules ? normalizeProxyCategories(data.proxy_categories, proxyMode === 'selective') : '';
-    const desiredConfig = { mode, proxy_mode: proxyMode, proxy_categories: proxyCategories };
+    const proxyCustomDomains = supportsProxyRules ? normalizeProxyCustomDomains(data.proxy_custom_domains ?? current.proxy_custom_domains) : [];
+    if (proxyMode === 'selective' && proxyCategories.split(',').includes('custom') && !proxyCustomDomains.length) throw new Error('Custom proxy category requires at least one domain');
+    const desiredConfig = { mode, proxy_mode: proxyMode, proxy_categories: proxyCategories, proxy_custom_domains: proxyCustomDomains };
     let socks5 = null;
     if (mode === 'socks5') {
         const port = Number(data.socks5_port);
@@ -125,7 +148,7 @@ function normalizeEgressRequest(data, current = {}) {
         };
         desiredConfig.socks5 = socks5;
     }
-    return { mode, proxyMode, proxyCategories, socks5, desiredConfig };
+    return { mode, proxyMode, proxyCategories, proxyCustomDomains, socks5, desiredConfig };
 }
 
 function parseEgressConfig(value, fallback) {
@@ -882,7 +905,7 @@ async function initializeDbSchema(db) {
         ['servers', 'socks5_addr', 'TEXT DEFAULT ""'], ['servers', 'socks5_port', 'INTEGER DEFAULT 0'], ['servers', 'socks5_user', 'TEXT DEFAULT ""'], ['servers', 'socks5_pass', 'TEXT DEFAULT ""'], ['servers', 'agent_token', 'TEXT'],
         ['servers', 'egress_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_applied_mode', "TEXT NOT NULL DEFAULT 'native'"], ['servers', 'egress_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_applied_revision', 'INTEGER NOT NULL DEFAULT 0'], ['servers', 'egress_status', "TEXT NOT NULL DEFAULT 'applied'"], ['servers', 'egress_error', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_at', 'INTEGER NOT NULL DEFAULT 0'],
         ['servers', 'egress_desired_config', "TEXT NOT NULL DEFAULT ''"], ['servers', 'egress_applied_config', "TEXT NOT NULL DEFAULT ''"],
-        ['servers', 'proxy_mode', "TEXT DEFAULT 'global'"], ['servers', 'proxy_categories', "TEXT DEFAULT ''"], ['servers', 'egress_ip', "TEXT DEFAULT ''"],
+        ['servers', 'proxy_mode', "TEXT DEFAULT 'global'"], ['servers', 'proxy_categories', "TEXT DEFAULT ''"], ['servers', 'proxy_custom_domains', "TEXT DEFAULT '[]'"], ['servers', 'egress_ip', "TEXT DEFAULT ''"],
         ['probe_servers', 'last_report_id', "TEXT DEFAULT ''"], ['report_receipts', 'applied', 'INTEGER DEFAULT 1'],
     ];
     for (const [table, name, definition] of columns) await ensureColumn(table, name, definition);
@@ -891,12 +914,14 @@ async function initializeDbSchema(db) {
         'mode', COALESCE(NULLIF(egress_mode, ''), 'native'),
         'proxy_mode', COALESCE(NULLIF(proxy_mode, ''), 'global'),
         'proxy_categories', COALESCE(proxy_categories, ''),
+        'proxy_custom_domains', json(COALESCE(NULLIF(proxy_custom_domains, ''), '[]')),
         'socks5', CASE WHEN egress_mode = 'socks5' THEN json_object('addr', COALESCE(socks5_addr, ''), 'port', COALESCE(socks5_port, 0), 'user', COALESCE(socks5_user, ''), 'pass', COALESCE(socks5_pass, '')) ELSE NULL END
     ) WHERE egress_desired_config IS NULL OR egress_desired_config = ''`).run();
     await db.prepare(`UPDATE servers SET egress_applied_config = json_object(
         'mode', COALESCE(NULLIF(egress_applied_mode, ''), 'native'),
         'proxy_mode', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(NULLIF(proxy_mode, ''), 'global') ELSE 'global' END,
         'proxy_categories', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(proxy_categories, '') ELSE '' END,
+        'proxy_custom_domains', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN json(COALESCE(NULLIF(proxy_custom_domains, ''), '[]')) ELSE json('[]') END,
         'socks5', CASE WHEN egress_applied_mode = 'socks5' THEN json_object('addr', COALESCE(socks5_addr, ''), 'port', COALESCE(socks5_port, 0), 'user', COALESCE(socks5_user, ''), 'pass', COALESCE(socks5_pass, '')) ELSE NULL END
     ) WHERE egress_applied_config IS NULL OR egress_applied_config = ''`).run();
     const { results: usersWithoutToken = [] } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = ''").all();
@@ -1657,9 +1682,10 @@ export async function onRequest(context) {
         let egress = { desired_mode: 'native', applied_mode: 'native', revision: 0, applied_revision: 0, status: 'applied', error: '', applied_at: 0 };
         let residential_outbound = { available: false, ready: false, reason: '住宅代理尚未上报可用状态' };
         try {
-            const s = await db.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status, egress_error, egress_applied_at, egress_desired_config, egress_applied_config, proxy_mode, proxy_categories, egress_ip, socks5_addr, socks5_port, socks5_user, socks5_pass FROM servers WHERE ip = ?").bind(ip).first();
+            const s = await db.prepare("SELECT egress_mode, egress_applied_mode, egress_revision, egress_applied_revision, egress_status, egress_error, egress_applied_at, egress_desired_config, egress_applied_config, proxy_mode, proxy_categories, proxy_custom_domains, egress_ip, socks5_addr, socks5_port, socks5_user, socks5_pass FROM servers WHERE ip = ?").bind(ip).first();
             if (s) {
-                const legacyDesired = { mode: s.egress_mode || 'native', proxy_mode: s.proxy_mode || 'global', proxy_categories: s.proxy_categories || '' };
+                let legacyCustomDomains = []; try { legacyCustomDomains = normalizeProxyCustomDomains(JSON.parse(s.proxy_custom_domains || '[]')); } catch {}
+                const legacyDesired = { mode: s.egress_mode || 'native', proxy_mode: s.proxy_mode || 'global', proxy_categories: s.proxy_categories || '', proxy_custom_domains: legacyCustomDomains };
                 if (legacyDesired.mode === 'socks5') legacyDesired.socks5 = { addr: s.socks5_addr || '', port: Number(s.socks5_port || 0), user: s.socks5_user || '', pass: s.socks5_pass || '' };
                 const legacyApplied = { ...legacyDesired, mode: s.egress_applied_mode || 'native' };
                 const desiredConfig = parseEgressConfig(s.egress_desired_config, legacyDesired);
@@ -1675,6 +1701,7 @@ export async function onRequest(context) {
                     applied_at: Number(s.egress_applied_at || 0),
                     proxy_mode: desiredConfig.proxy_mode || 'global',
                     proxy_categories: desiredConfig.proxy_categories || '',
+                    proxy_custom_domains: normalizeProxyCustomDomains(desiredConfig.proxy_custom_domains || []),
                     egress_ip: s.egress_ip || '',
                     socks5_addr: desiredSocks5.addr || '',
                     socks5_port: Number(desiredSocks5.port || 0),
@@ -2147,7 +2174,7 @@ rules:
                 ? (await db.prepare(`SELECT ip, name, cpu, mem, last_report, alert_sent, disk, load, uptime,
                     net_in_speed, net_out_speed, tcp_conn, udp_conn,
                     egress_mode, egress_applied_mode, egress_revision, egress_applied_revision,
-                    egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, egress_ip,
+                    egress_status, egress_error, egress_applied_at, proxy_mode, proxy_categories, proxy_custom_domains, egress_ip,
                     socks5_addr, socks5_port, socks5_user,
                     CASE WHEN COALESCE(socks5_pass, '') <> '' THEN 1 ELSE 0 END AS socks5_password_set
                     FROM servers`).all()).results
@@ -2313,26 +2340,28 @@ rules:
             }
             if (method === "POST") { const { ip, name } = await request.json(); if (!/^[0-9A-Fa-f:.]{2,64}$/.test(String(ip || ''))) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 }); const agentToken = crypto.randomUUID(); const inserted = await db.prepare("INSERT INTO servers (ip, name, alert_sent, agent_token) SELECT ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM servers) < 100 ON CONFLICT(ip) DO NOTHING RETURNING ip").bind(ip, String(name || ip).slice(0, 100), agentToken).first(); if (!inserted) { if (await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first()) return Response.json({ error: 'VPS already exists' }, { status: 409 }); return Response.json({ error: "当前版本最多管理 100 台 VPS" }, { status: 409 }); } return Response.json({ success: true }); }
             if (method === "PUT") {
-                const data = await readJsonBody(request, 16 * 1024);
+                const data = await readJsonBody(request, 40 * 1024);
                 const ip = String(data.ip || '');
                 if (!ip) return Response.json({ error: 'IP required' }, { status: 400 });
                 if (data.egress_mode === undefined) return Response.json({ error: 'Use egress_mode to configure node egress' }, { status: 400 });
                 if (data.egress_mode === 'residential' && env.PROXY_CTRL_URL) return Response.json({ error: '外部住宅控制器模式不支持本机住宅节点出口' }, { status: 409 });
                 if (data.egress_mode === 'residential' && (!env.PROXY_USER || !env.PROXY_PASS)) return Response.json({ error: 'Pages 未配置住宅代理凭据' }, { status: 503 });
-                const current = await db.prepare('SELECT socks5_pass FROM servers WHERE ip = ?').bind(ip).first();
+                const current = await db.prepare('SELECT socks5_pass, proxy_custom_domains FROM servers WHERE ip = ?').bind(ip).first();
                 if (!current) return Response.json({ error: 'VPS not found' }, { status: 404 });
+                try { current.proxy_custom_domains = JSON.parse(current.proxy_custom_domains || '[]'); } catch { current.proxy_custom_domains = []; }
                 let normalized;
                 try { normalized = normalizeEgressRequest(data, current); }
                 catch (error) { return Response.json({ error: error.message || 'Invalid egress configuration' }, { status: 400 }); }
-                const { mode, proxyMode, proxyCategories, socks5, desiredConfig } = normalized;
+                const { mode, proxyMode, proxyCategories, proxyCustomDomains, socks5, desiredConfig } = normalized;
+                const customDomainsJson = JSON.stringify(proxyCustomDomains);
                 let changed;
                 if (socks5) {
-                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ?, socks5_addr = ?, socks5_port = ?, socks5_user = ?, socks5_pass = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, socks5.addr, socks5.port, socks5.user, socks5.pass, ip).first();
+                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ?, proxy_custom_domains = ?, socks5_addr = ?, socks5_port = ?, socks5_user = ?, socks5_pass = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, customDomainsJson, socks5.addr, socks5.port, socks5.user, socks5.pass, ip).first();
                 } else {
-                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, ip).first();
+                    changed = await db.prepare("UPDATE servers SET egress_mode = ?, egress_revision = egress_revision + 1, egress_status = 'pending', egress_error = '', egress_desired_config = ?, proxy_mode = ?, proxy_categories = ?, proxy_custom_domains = ? WHERE ip = ? RETURNING egress_revision").bind(mode, JSON.stringify(desiredConfig), proxyMode, proxyCategories, customDomainsJson, ip).first();
                 }
                 context.waitUntil(notifyRealtimeVps(env, db, ip).catch(() => {}));
-                return Response.json({ success: true, ip, egress_mode: mode, egress_revision: Number(changed.egress_revision), egress_status: 'pending', proxy_mode: proxyMode, proxy_categories: proxyCategories, socks5_addr: socks5?.addr || '', socks5_port: socks5?.port || 0, socks5_user: socks5?.user || '', socks5_password_set: !!socks5?.pass });
+                return Response.json({ success: true, ip, egress_mode: mode, egress_revision: Number(changed.egress_revision), egress_status: 'pending', proxy_mode: proxyMode, proxy_categories: proxyCategories, proxy_custom_domains: proxyCustomDomains, socks5_addr: socks5?.addr || '', socks5_port: socks5?.port || 0, socks5_user: socks5?.user || '', socks5_password_set: !!socks5?.pass });
             }
             if (method === "DELETE") { 
                 const ip = new URL(request.url).searchParams.get("ip"); 
@@ -2484,6 +2513,7 @@ export const __test = {
     validateTrafficReport,
     proxyPublicListenerEnabled,
     normalizeEgressRequest,
+    normalizeProxyCustomDomains,
     requestRealtimeEgressRefresh,
     normalizeNodePayload,
     nodeListenerConflicts,
