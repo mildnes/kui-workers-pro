@@ -19,6 +19,7 @@ const usersPage = read('../frontend/src/pages/UsersPage.vue');
 const qrModal = read('../frontend/src/components/modals/QrModal.vue');
 const probeEditModal = read('../frontend/src/components/modals/ProbeEditModal.vue');
 const app = read('../frontend/src/App.vue');
+const api = read('../functions/api/[[path]].js');
 
 test('removed and hidden pages are absent from the active UI', () => {
     assert.doesNotMatch(appShell, /ServicesPage|RealmPage/);
@@ -348,4 +349,10 @@ test('settings page uses compact semantic sections and guarded actions', () => {
     assert.match(settingsPage, /minlength="12"/);
     assert.match(appStyles, /data-kui-theme="dark"\] \.kui-settings-card/);
     assert.match(settingsPage, /kui-settings-grid-three kui-settings-telegram-grid/);
+});
+
+test('deleting a managed probe also removes its server card and dependent VPS records', () => {
+    assert.match(api, /if \(method === 'DELETE' && subPath === 'admin\/server'\) \{[\s\S]{0,500}await deleteVpsRecords\(db, id\)/);
+    assert.match(api, /async function deleteVpsRecords[\s\S]{0,1000}DELETE FROM servers WHERE ip = \?/);
+    assert.match(state, /删除后，“服务器与节点”中的服务器卡片及其关联节点也会一并移除/);
 });

@@ -900,7 +900,14 @@ export function useKuiState() {
                   };
                   const openProbeEditModal = (s) => { editingProbeNode.value = JSON.parse(JSON.stringify(s)); if(!editingProbeNode.value.is_hidden) editingProbeNode.value.is_hidden = 'false'; if(!editingProbeNode.value.reset_day) editingProbeNode.value.reset_day = '1'; probeEditModalOpen.value = true; };
                   const saveProbeEdit = async () => { await fetchApi('/api/probe/admin/server', { method: 'PUT', body: JSON.stringify(editingProbeNode.value) }); probeEditModalOpen.value = false; refreshData(); fetchProbeData(); };
-                  const deleteProbeNode = async (id) => { if (!confirm("⚠️ 确定要彻底删除该探针记录吗？如果机器还在运行 Agent，之后会自动复活！请确保先在面板的「服务器与节点」中删除此机器。")) return; await fetchApi(`/api/probe/admin/server?id=${id}`, { method: 'DELETE' }); refreshData(); fetchProbeData(); };
+                  const deleteProbeNode = async (id) => {
+                      if (!confirm('⚠️ 确定彻底删除这台 VPS？\n删除后，“服务器与节点”中的服务器卡片及其关联节点也会一并移除。')) return;
+                      await fetchApi(`/api/probe/admin/server?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                      adminProbeServers.value = adminProbeServers.value.filter(item => item.id !== id);
+                      servers.value = servers.value.filter(item => item.ip !== id);
+                      nodes.value = nodes.value.filter(item => item.vps_ip !== id);
+                      await Promise.allSettled([refreshData(true), fetchProbeData(false, true)]);
+                  };
                   
                   const loadThirdPartySubscriptions = async () => {
                       try {

@@ -1240,8 +1240,10 @@ async function handleProbeAPI(request, env, context, pathArray) {
     
     if (method === 'DELETE' && subPath === 'admin/server') {
         const id = url.searchParams.get('id');
-        await db.prepare('DELETE FROM probe_servers WHERE id = ?').bind(id).run();
-        return Response.json({ success: true });
+        if (!validIp(id)) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 });
+        await deleteVpsRecords(db, id);
+        context.waitUntil(invalidatePublicProbeCache(url.origin).catch(() => {}));
+        return Response.json({ success: true, removed: id });
     }
 
     return Response.json({error: "Not Found"}, {status: 404});
