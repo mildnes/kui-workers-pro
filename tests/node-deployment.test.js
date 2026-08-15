@@ -30,6 +30,7 @@ test('single-node payloads normalize fields needed by sing-box', () => {
     assert.equal(normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey, network: 'tcp,udp' })).network, 'tcp,udp');
     assert.equal(normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey })).network, 'tcp,udp');
     assert.equal(normalizeNodePayload(baseNode('Trojan', { uuid: 'credential', private_key: 'secret' })).sni, 'addons.mozilla.org');
+    assert.equal(normalizeNodePayload(baseNode('TUIC', { private_key: 'secret', sni: 'legacy.example.com' })).sni, '');
     assert.equal(normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 })).target_ip, 'relay.example.com');
 });
 
@@ -187,16 +188,21 @@ test('internal H2 and TUIC relay outbounds preserve transport options', () => {
 });
 
 test('subscription exports include supported SOCKS5 and TUIC client options', () => {
+    const internalSubscriptionSource = api.slice(api.indexOf('// --- 传统 Base64 URL 生成 ---'), api.indexOf('// --- 第三方订阅节点整合进订阅 ---'));
     assert.match(api, /node\.protocol === "Socks5"[\s\S]*?type: socks5[\s\S]*?username:/);
     assert.match(api, /node\.protocol === "TUIC"[\s\S]*?udp-relay-mode: native[\s\S]*?congestion-controller: bbr/);
     assert.match(api, /tuic:\/\/\$\{encodeURIComponent\(node\.uuid\)\}:\$\{encodeURIComponent\(node\.private_key\)\}/);
+    assert.match(internalSubscriptionSource, /case "TUIC": link = `tuic:[^`]+\?congestion_control=bbr/);
+    assert.doesNotMatch(internalSubscriptionSource, /case "TUIC": link = `tuic:[^`]+\?sni=/);
 });
 
-test('changing a TLS node SNI invalidates its cached certificate', () => {
+test('TUIC uses a stable internal certificate identity while other TLS nodes follow SNI', () => {
+    assert.match(agent, /certificate_name = "kui-tuic\.local" if proto == "TUIC" else sni/);
     assert.match(agent, /f"\/opt\/kui\/cert_\{node\['id'\]\}\.sni"/);
-    assert.match(agent, /if previous_sni != sni:/);
+    assert.match(agent, /if previous_sni != certificate_name:/);
     assert.match(agent, /for stale_path in \(cert_path, key_path\):/);
-    assert.match(agent, /with open\(sni_path, "w"\) as marker: marker\.write\(sni\)/);
+    assert.match(agent, /with open\(sni_path, "w"\) as marker: marker\.write\(certificate_name\)/);
+    assert.doesNotMatch(agent, /proto == "TUIC"[\s\S]{0,300}"server_name"/);
 });
 
 test('sing-box node traffic and connection tuning are generated safely', () => {

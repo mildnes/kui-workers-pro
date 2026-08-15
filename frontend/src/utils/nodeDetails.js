@@ -21,7 +21,6 @@ export function buildNodeDetailRows(node = {}) {
   } else if (protocol === 'TUIC') {
     add('UUID', node.uuid);
     add('密码', node.private_key);
-    add('SNI / 域名', node.sni);
     add('传输方式', 'UDP / QUIC · ALPN h3');
   } else if (protocol === 'Shadowsocks2022') {
     add('加密方式', node.uuid);

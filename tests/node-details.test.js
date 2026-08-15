@@ -43,6 +43,7 @@ test('credential protocols expose their protocol-specific fields', () => {
     const tuic = asObject(buildNodeDetailRows({ protocol: 'TUIC', port: 443, uuid: 'uuid', private_key: 'password', sni: 'tuic.example' }));
     assert.equal(tuic.UUID, 'uuid');
     assert.equal(tuic['密码'], 'password');
+    assert.equal(tuic['SNI / 域名'], undefined);
     assert.match(tuic['传输方式'], /QUIC/);
 
     const naive = asObject(buildNodeDetailRows({ protocol: 'Naive', port: 443, uuid: 'user', private_key: 'pass', sni: 'naive.example' }));

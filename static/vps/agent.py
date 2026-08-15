@@ -1623,7 +1623,7 @@ def build_chain_outbound(target, tag):
     elif proto == "Hysteria2":
         outbound.update({"type": "hysteria2", "password": target.get("uuid") or target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     elif proto == "TUIC":
-        outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "congestion_control": "bbr", "udp_relay_mode": "native", "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "alpn": ["h3"], "insecure": True}})
+        outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "congestion_control": "bbr", "udp_relay_mode": "native", "tls": {"enabled": True, "alpn": ["h3"], "insecure": True}})
     elif proto == "Shadowsocks2022":
         validate_ss2022_credentials(target.get("uuid", ""), target.get("password", ""))
         outbound.update({"type": "shadowsocks", "method": target["uuid"], "password": target["password"], "network": normalize_ss2022_network(target.get("network"))})
@@ -1686,6 +1686,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             print(f"[agent] skipping invalid node {node.get('id', '<unknown>')}: {error}", flush=True)
             continue
         sni = node.get("sni") or "addons.mozilla.org"
+        certificate_name = "kui-tuic.local" if proto == "TUIC" else sni
         clean_uuid = node.get('uuid', '').replace('-', '')
         
         if proto in ["Hysteria2", "TUIC", "Trojan", "VLESS-WS-TLS", "AnyTLS", "Naive"]:
@@ -1695,19 +1696,19 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             try:
                 with open(sni_path, "r") as marker: previous_sni = marker.read().strip()
             except OSError: pass
-            if previous_sni != sni:
+            if previous_sni != certificate_name:
                 for stale_path in (cert_path, key_path):
                     try: os.remove(stale_path)
                     except OSError: pass
             if not os.path.exists(cert_path):
-                parts = sni.split('.'); cn = f"{parts[-2]}.{parts[-1]}" if len(parts) >= 2 else sni
+                parts = certificate_name.split('.'); cn = f"{parts[-2]}.{parts[-1]}" if len(parts) >= 2 else certificate_name
                 conf_path = f"/opt/kui/cert_{node['id']}.conf"
-                with open(conf_path, "w") as f: f.write(f"[req]\ndistinguished_name = req_distinguished_name\nx509_extensions = v3_req\nprompt = no\n[req_distinguished_name]\nCN = {cn}\n[v3_req]\nsubjectAltName = @alt_names\n[alt_names]\nDNS = {sni}\n")
+                with open(conf_path, "w") as f: f.write(f"[req]\ndistinguished_name = req_distinguished_name\nx509_extensions = v3_req\nprompt = no\n[req_distinguished_name]\nCN = {cn}\n[v3_req]\nsubjectAltName = @alt_names\n[alt_names]\nDNS = {certificate_name}\n")
                 subprocess.run(["openssl", "ecparam", "-genkey", "-name", "prime256v1", "-out", key_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 subprocess.run(["openssl", "req", "-new", "-x509", "-days", "36500", "-key", key_path, "-out", cert_path, "-config", conf_path, "-extensions", "v3_req"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 os.chmod(cert_path, 0o644)
                 os.chmod(key_path, 0o600)
-                with open(sni_path, "w") as marker: marker.write(sni)
+                with open(sni_path, "w") as marker: marker.write(certificate_name)
                 os.chmod(sni_path, 0o600)
                 try: os.remove(conf_path)
                 except: pass

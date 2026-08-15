@@ -209,7 +209,7 @@ const SS2022_KEY_BYTES = {
 
 const NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']);
 const REALITY_PROTOCOLS = new Set(['XTLS-Reality', 'Reality', 'H2-Reality', 'gRPC-Reality']);
-const TLS_NODE_PROTOCOLS = new Set([...REALITY_PROTOCOLS, 'Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive']);
+const TLS_NODE_PROTOCOLS = new Set([...REALITY_PROTOCOLS, 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive']);
 const PASSWORD_NODE_PROTOCOLS = new Set(['TUIC', 'Shadowsocks2022', 'Trojan', 'AnyTLS', 'Naive', 'Socks5']);
 const INTERNAL_RELAY_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS']);
 const UUID_NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'TUIC', 'H2-Reality', 'gRPC-Reality', 'VLESS-Argo']);
@@ -274,7 +274,8 @@ function normalizeNodePayload(input) {
 
     if (node.protocol !== 'dokodemo-door') node.uuid = normalizeNodeText(node.uuid, 'UUID/username', 128);
     if (UUID_NODE_PROTOCOLS.has(node.protocol) && !/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(node.uuid)) throw new Error('Invalid node UUID');
-    if (TLS_NODE_PROTOCOLS.has(node.protocol)) node.sni = normalizeNodeHost(node.sni || 'addons.mozilla.org', 'SNI');
+    if (node.protocol === 'TUIC') node.sni = '';
+    else if (TLS_NODE_PROTOCOLS.has(node.protocol)) node.sni = normalizeNodeHost(node.sni || 'addons.mozilla.org', 'SNI');
     else node.sni = normalizeNodeText(node.sni, 'SNI', 253, false);
 
     if (REALITY_PROTOCOLS.has(node.protocol)) {
@@ -491,7 +492,10 @@ function buildSurgeProxyLine({ name, protocol, host, port, method, uuid, passwor
     const ipVersion = String(host || '').includes(':') ? 'v6-only' : 'v4-only';
     if (protocol === 'Shadowsocks2022' || protocol === 'SS') return `${prefix}ss, ${host}, ${port}, encrypt-method=${method || uuid}, password=${surgeValue(password)}, tfo=true, ip-version=${ipVersion}, udp-relay=${network !== 'tcp'}, block-quic=on`;
     if (protocol === 'Hysteria2') return `${prefix}hysteria2, ${host}, ${port}, password=${surgeValue(password || uuid)}${surgeTlsOptions(sni)}`;
-    if (protocol === 'TUIC') return `${prefix}tuic-v5, ${host}, ${port}, password=${surgeValue(password)}, uuid=${surgeValue(uuid)}, alpn=h3, ip-version=${ipVersion}, block-quic=off, ecn=auto${surgeTlsOptions(sni)}`;
+    if (protocol === 'TUIC') {
+        if (!/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(String(uuid || ''))) return '';
+        return `${prefix}tuic-v5, ${host}, ${port}, password=${surgeValue(password)}, uuid=${uuid}, alpn=h3, ip-version=${ipVersion}, block-quic=off, ecn=auto${surgeTlsOptions(sni)}`;
+    }
     if (protocol === 'Trojan') return `${prefix}trojan, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
     if (protocol === 'AnyTLS') return `${prefix}anytls, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
     if (protocol === 'Socks5') return `${prefix}socks5, ${host}, ${port}, username=${surgeValue(uuid)}, password=${surgeValue(password)}, udp-relay=true`;
@@ -1921,7 +1925,7 @@ export async function onRequest(context) {
                 case "VLESS": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
                 case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${encodeURIComponent(nodeSni)}&fp=chrome&pbk=${encodeURIComponent(node.public_key)}&sid=${encodeURIComponent(node.short_id || "")}&type=tcp&headerType=none#${remark}`; break;
                 case "Hysteria2": link = `hysteria2://${encodeURIComponent(node.uuid || node.private_key)}@${nodeIp}:${node.port}/?insecure=1&sni=${encodeURIComponent(nodeSni)}&alpn=h3#${remark}`; break;
-                case "TUIC": link = `tuic://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?sni=${encodeURIComponent(nodeSni)}&congestion_control=bbr&udp_relay_mode=native&alpn=h3&allow_insecure=1#${remark}`; break;
+                case "TUIC": link = `tuic://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?congestion_control=bbr&udp_relay_mode=native&alpn=h3&allow_insecure=1#${remark}`; break;
                 case "Shadowsocks2022": link = `ss://${base64Url(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
                 case "Trojan": link = `trojan://${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?security=tls&sni=${encodeURIComponent(nodeSni)}&allowInsecure=1&type=tcp#${remark}`; break;
                 case "H2-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${encodeURIComponent(nodeSni)}&fp=chrome&pbk=${encodeURIComponent(node.public_key)}&sid=${encodeURIComponent(node.short_id || "")}&type=http&host=${encodeURIComponent(nodeSni)}&path=%2F#${remark}`; break;
@@ -1934,7 +1938,7 @@ export async function onRequest(context) {
             if (link) subLinks.push(link);
 
             if (format === 'surge') {
-                const surgeLine = buildSurgeProxyLine({ name: rawRemark, protocol: node.protocol, host: nodeIp, port: node.port, method: node.uuid, uuid: node.uuid, password: node.private_key, sni: nodeSni, network: node.network });
+                const surgeLine = buildSurgeProxyLine({ name: rawRemark, protocol: node.protocol, host: nodeIp, port: node.port, method: node.uuid, uuid: node.uuid, password: node.private_key, sni: node.protocol === 'TUIC' ? '' : nodeSni, network: node.network });
                 if (surgeLine) surgeProxies.push(surgeLine);
                 else surgeUnsupported.add(node.protocol);
             }
@@ -1962,7 +1966,7 @@ export async function onRequest(context) {
                 } else if (node.protocol === "Hysteria2") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: hysteria2\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    password: ${yamlString(node.uuid || node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "TUIC") {
-                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    alpn:\n      - h3\n    udp-relay-mode: native\n    congestion-controller: bbr\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    alpn:\n      - h3\n    udp-relay-mode: native\n    congestion-controller: bbr\n    skip-cert-verify: true`;
                 } else if (node.protocol === "Shadowsocks2022") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: ss\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    cipher: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: ${node.network !== 'tcp'}`;
                 } else if (node.protocol === "Socks5") {

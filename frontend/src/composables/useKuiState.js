@@ -695,7 +695,8 @@ export function useKuiState() {
                       const randomSecret = (bytes = 18) => { const value = new Uint8Array(bytes); crypto.getRandomValues(value); return btoa(String.fromCharCode(...value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); };
                       let limitBytes = p.traffic_limit_gb ? Math.floor(parseFloat(p.traffic_limit_gb) * 1073741824) : 0; let expireTs = expiryTimestamp(p.expire_date);
                       const payload = { id, uuid: optionalText(p.node_uuid) || crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: optionalText(p.sni) };
-                      if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'Hysteria2', 'TUIC', 'Trojan', 'AnyTLS', 'Naive'].includes(p.protocol) && !payload.sni) payload.sni = 'addons.mozilla.org';
+                      if (p.protocol === 'TUIC') payload.sni = '';
+                      else if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(p.protocol) && !payload.sni) payload.sni = 'addons.mozilla.org';
                       if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) {
                           const privateKey = optionalText(p.reality_private_key); const publicKey = optionalText(p.reality_public_key);
                           if (!!privateKey !== !!publicKey) { alert('Reality 私钥与公钥必须同时填写，或同时留空自动生成'); return null; }
@@ -757,7 +758,7 @@ export function useKuiState() {
                   const deployAllProtocols = async (ip) => {
                       let startPort = parseInt(batchStartPort[ip]); if (!startPort || startPort < 10 || startPort + 8 > 65535) return alert('⚠️ 请输入有效的起始端口 (推荐: 8881)');
                       const defaultSni = 'addons.mozilla.org'; const commonUser = batchUser[ip] || 'admin'; const commonUUID = crypto.randomUUID(); 
-                      const protocolSequence = [ { protocol: 'XTLS-Reality', offset: 0, sni: defaultSni, type: 'reality' }, { protocol: 'Hysteria2', offset: 1, sni: defaultSni }, { protocol: 'TUIC', offset: 2, sni: defaultSni }, { protocol: 'Shadowsocks2022', offset: 3, method: '2022-blake3-aes-256-gcm' }, { protocol: 'Trojan', offset: 4, sni: defaultSni }, { protocol: 'H2-Reality', offset: 5, sni: defaultSni, type: 'reality' }, { protocol: 'gRPC-Reality', offset: 6, sni: defaultSni, type: 'reality' }, { protocol: 'AnyTLS', offset: 7, sni: defaultSni }, { protocol: 'Naive', offset: 8, sni: defaultSni } ];
+                      const protocolSequence = [ { protocol: 'XTLS-Reality', offset: 0, sni: defaultSni, type: 'reality' }, { protocol: 'Hysteria2', offset: 1, sni: defaultSni }, { protocol: 'TUIC', offset: 2 }, { protocol: 'Shadowsocks2022', offset: 3, method: '2022-blake3-aes-256-gcm' }, { protocol: 'Trojan', offset: 4, sni: defaultSni }, { protocol: 'H2-Reality', offset: 5, sni: defaultSni, type: 'reality' }, { protocol: 'gRPC-Reality', offset: 6, sni: defaultSni, type: 'reality' }, { protocol: 'AnyTLS', offset: 7, sni: defaultSni }, { protocol: 'Naive', offset: 8, sni: defaultSni } ];
                       if (!confirm(`🚀 极速部署确认：\n\n系统将按照 FSCARMEN 模式，向该服务器并发下发完整 ${protocolSequence.length} 个协议矩阵：\n` + protocolSequence.map(p => `- ${p.protocol} (端口: ${startPort + p.offset})`).join('\n') + `\n\n所有节点归属: ${commonUser}\n\n确认立刻组建节点矩阵吗？`)) return;
                       const failures = [];
                       for (let item of protocolSequence) {

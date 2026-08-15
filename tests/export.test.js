@@ -34,9 +34,10 @@ test('renders a Surge Shadowsocks 2022 configuration line', () => {
 
 test('renders Surge native protocols and skips unsupported protocols', () => {
     assert.equal(
-        buildSurgeProxyLine({ name: 'TUIC', protocol: 'TUIC', host: 'example.com', port: 56789, uuid: '00000000-0000-4000-8000-000000000000', password: 'secret', sni: 'example.com' }),
-        'TUIC = tuic-v5, example.com, 56789, password="secret", uuid="00000000-0000-4000-8000-000000000000", alpn=h3, ip-version=v4-only, block-quic=off, ecn=auto, sni="example.com", skip-cert-verify=true',
+        buildSurgeProxyLine({ name: 'TUIC', protocol: 'TUIC', host: 'example.com', port: 56789, uuid: '00000000-0000-4000-8000-000000000000', password: 'secret' }),
+        'TUIC = tuic-v5, example.com, 56789, password="secret", uuid=00000000-0000-4000-8000-000000000000, alpn=h3, ip-version=v4-only, block-quic=off, ecn=auto, skip-cert-verify=true',
     );
+    assert.equal(buildSurgeProxyLine({ name: 'TUIC', protocol: 'TUIC', host: 'example.com', port: 56789, uuid: 'invalid', password: 'secret' }), '');
     assert.equal(
         buildSurgeProxyLine({ name: 'SOCKS', protocol: 'Socks5', host: '203.0.113.9', port: 1080, uuid: 'user', password: 'p@ss' }),
         'SOCKS = socks5, 203.0.113.9, 1080, username="user", password="p@ss", udp-relay=true',
