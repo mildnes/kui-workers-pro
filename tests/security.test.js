@@ -231,3 +231,9 @@ test('static responses include baseline browser security headers', () => {
     assert.match(worker, /X-Frame-Options/);
     assert.match(wrangler, /"run_worker_first"\s*:\s*true/);
 });
+
+test('Worker runtime environment is copied without using the host object as a prototype', () => {
+    assert.doesNotMatch(worker, /Object\.create\(env\)/);
+    assert.match(worker, /Object\.assign\(\{\}, env, \{ PAGES_ORIGIN: origin, REALTIME_URL: origin \}\)/);
+    assert.match(worker, /\[worker\] uncaught fetch error ray=/);
+});
