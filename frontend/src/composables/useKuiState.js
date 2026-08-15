@@ -39,7 +39,7 @@ export function useKuiState() {
                   const refreshing = ref(false);
                   let realtimeSocket = null; let realtimeReconnectTimer = null; let realtimeFallbackTimer = null; let realtimeConnectTimer = null; let realtimePingTimer = null; let realtimeGeneration = 0; let realtimeDisconnectedAt = 0; let lastRealtimePing = 0; let realtimeRetryDelay = 5000;
                   let publicRealtimeSocket = null; let publicRealtimeReconnectTimer = null; let publicRealtimeFallbackTimer = null; let publicRealtimeConnectTimer = null; let publicRealtimeActivityTimer = null; let publicRealtimeDisconnectedAt = 0; let publicRealtimeRetryDelay = 10000;
-                  const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const nodeEditDrafts = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
+                  const newVps = ref({ name: '', ip: '', os: 'debian' }); const newNodeParams = reactive({}); const nodeEditDrafts = reactive({}); const addingNode = reactive({}); const newUser = reactive({ username: '', password: '', traffic_limit_gb: '', expire_date: '' }); const newGroupName = ref(''); const groupDrafts = reactive({});
                   const mySubToken = ref(''); const siteTitle = ref(''); const siteTitleInput = ref(''); const userNewPassword = ref('');
                   const siteTitleDirty = ref(false); const probeSettingsDirty = ref(false);
                   const siteTitleSaving = ref(false); const probeSettingsSaving = ref(false); const subscriptionProtectionSaving = ref(false);
@@ -723,9 +723,14 @@ export function useKuiState() {
                   };
 
                   const addNode = async (ip) => {
-                      const payload = buildNodePayload(ip, newNodeParams[ip], Date.now().toString());
+                      if (addingNode[ip]) return;
+                      const payload = buildNodePayload(ip, newNodeParams[ip], crypto.randomUUID());
                       if (!payload) return;
-                      await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
+                      addingNode[ip] = true;
+                      try {
+                          await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) });
+                          await refreshData();
+                      } finally { addingNode[ip] = false; }
                   };
 
                   const editDraftFromNode = node => ({
@@ -1225,7 +1230,7 @@ export function useKuiState() {
 
                   return { 
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, effectiveColorMode, refreshing, refreshPanel,
-                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
+                      servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, addingNode, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
                       getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyDeployCommand, copyUninstallCommand, copyPurgeCommand, requestAgentBootstrapToken, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, siteTitleDirty, markSiteTitleDirty, saveSiteTitle, siteTitleSaving, userNewPassword, updateUserPassword, passwordSaving, resetMySubLink, subTokenResetting, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,

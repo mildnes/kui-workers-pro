@@ -1614,14 +1614,16 @@ def build_chain_outbound(target, tag):
         if "Reality" in proto:
             outbound["tls"] = {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "reality": {"enabled": True, "public_key": target.get("public_key", ""), "short_id": target.get("short_id", "")}}
         if proto in ["XTLS-Reality", "Reality"]: outbound["flow"] = "xtls-rprx-vision"
-        if proto == "H2-Reality": outbound["transport"] = {"type": "http"}
+        if proto == "H2-Reality":
+            server_name = target.get("sni") or "addons.mozilla.org"
+            outbound["transport"] = {"type": "http", "host": [server_name], "path": "/"}
         if proto == "gRPC-Reality": outbound["transport"] = {"type": "grpc", "service_name": "grpc"}
     elif proto == "Trojan":
         outbound.update({"type": "trojan", "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     elif proto == "Hysteria2":
         outbound.update({"type": "hysteria2", "password": target.get("uuid") or target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
     elif proto == "TUIC":
-        outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "insecure": True}})
+        outbound.update({"type": "tuic", "uuid": target["uuid"], "password": target.get("password", ""), "congestion_control": "bbr", "udp_relay_mode": "native", "tls": {"enabled": True, "server_name": target.get("sni") or "addons.mozilla.org", "alpn": ["h3"], "insecure": True}})
     elif proto == "Shadowsocks2022":
         validate_ss2022_credentials(target.get("uuid", ""), target.get("password", ""))
         outbound.update({"type": "shadowsocks", "method": target["uuid"], "password": target["password"], "network": normalize_ss2022_network(target.get("network"))})
@@ -1713,7 +1715,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         if proto == "VLESS": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}]})
         elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
         elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "congestion_control": "bbr", "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "Shadowsocks2022":
             ss_networks = normalize_ss2022_network(node.get("network"))
             singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": "::", "listen_port": port, "network": ss_networks, "method": node["uuid"], "password": node["private_key"]})

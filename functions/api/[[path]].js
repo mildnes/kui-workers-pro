@@ -486,14 +486,15 @@ function surgeTlsOptions(sni) {
     return `${sni ? `, sni=${surgeValue(sni)}` : ''}, skip-cert-verify=true`;
 }
 
-function buildSurgeProxyLine({ name, protocol, host, port, method, uuid, password, sni }) {
+function buildSurgeProxyLine({ name, protocol, host, port, method, uuid, password, sni, network = 'tcp,udp' }) {
     const prefix = `${surgePolicyName(name)} = `;
-    if (protocol === 'Shadowsocks2022' || protocol === 'SS') return `${prefix}ss, ${host}, ${port}, encrypt-method=${method || uuid}, password=${surgeValue(password)}`;
+    const ipVersion = String(host || '').includes(':') ? 'v6-only' : 'v4-only';
+    if (protocol === 'Shadowsocks2022' || protocol === 'SS') return `${prefix}ss, ${host}, ${port}, encrypt-method=${method || uuid}, password=${surgeValue(password)}, tfo=true, ip-version=${ipVersion}, udp-relay=${network !== 'tcp'}, block-quic=on`;
     if (protocol === 'Hysteria2') return `${prefix}hysteria2, ${host}, ${port}, password=${surgeValue(password || uuid)}${surgeTlsOptions(sni)}`;
-    if (protocol === 'TUIC') return `${prefix}tuic-v5, ${host}, ${port}, uuid=${surgeValue(uuid)}, password=${surgeValue(password)}, alpn=h3${surgeTlsOptions(sni)}`;
+    if (protocol === 'TUIC') return `${prefix}tuic-v5, ${host}, ${port}, password=${surgeValue(password)}, uuid=${surgeValue(uuid)}, alpn=h3, ip-version=${ipVersion}, block-quic=off, ecn=auto${surgeTlsOptions(sni)}`;
     if (protocol === 'Trojan') return `${prefix}trojan, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
     if (protocol === 'AnyTLS') return `${prefix}anytls, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
-    if (protocol === 'Socks5') return `${prefix}socks5, ${host}, ${port}, ${surgeValue(uuid)}, ${surgeValue(password)}`;
+    if (protocol === 'Socks5') return `${prefix}socks5, ${host}, ${port}, username=${surgeValue(uuid)}, password=${surgeValue(password)}, udp-relay=true`;
     return '';
 }
 
@@ -574,6 +575,10 @@ function formatIpForLink(ip) {
     if (ip.startsWith('[') && ip.endsWith(']')) return ip;
     if (ip.includes(':')) return `[${ip}]`;
     return ip;
+}
+
+function base64Url(value) {
+    return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function parseVLESSLink(raw) {
@@ -1715,7 +1720,7 @@ export async function onRequest(context) {
             if (node.protocol !== 'dokodemo-door' || node.relay_type !== 'internal') return true;
             const targetNode = activeNodesById.get(node.target_id);
             if (!targetNode || !INTERNAL_RELAY_PROTOCOLS.has(targetNode.protocol)) return false;
-            node.chain_target = { ip: targetNode.vps_ip, port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id, network: targetNode.network };
+            node.chain_target = { ip: '127.0.0.1', port: targetNode.port, protocol: targetNode.protocol, uuid: targetNode.uuid, password: targetNode.private_key, sni: targetNode.sni, public_key: targetNode.public_key, short_id: targetNode.short_id, network: targetNode.network };
             return true;
         });
         let proxyCfg = { global: {}, toggle: { enable: false } };
@@ -1914,22 +1919,22 @@ export async function onRequest(context) {
             // --- 传统 Base64 URL 生成 ---
             switch (node.protocol) {
                 case "VLESS": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=none&type=tcp#${remark}`; break;
-                case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=tcp&headerType=none#${remark}`; break;
+                case "XTLS-Reality": case "Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${encodeURIComponent(nodeSni)}&fp=chrome&pbk=${encodeURIComponent(node.public_key)}&sid=${encodeURIComponent(node.short_id || "")}&type=tcp&headerType=none#${remark}`; break;
                 case "Hysteria2": link = `hysteria2://${encodeURIComponent(node.uuid || node.private_key)}@${nodeIp}:${node.port}/?insecure=1&sni=${encodeURIComponent(nodeSni)}&alpn=h3#${remark}`; break;
-                case "TUIC": link = `tuic://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?sni=${nodeSni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`; break;
-                case "Shadowsocks2022": link = `ss://${btoa(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
-                case "Trojan": link = `trojan://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&allowInsecure=1&type=tcp#${remark}`; break;
-                case "H2-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`; break;
-                case "gRPC-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${nodeSni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=grpc&serviceName=grpc#${remark}`; break;
-                case "AnyTLS": link = `anytls://${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}&insecure=1#${remark}`; break;
-                case "Naive": link = `naive+https://${node.uuid}:${node.private_key}@${nodeIp}:${node.port}?security=tls&sni=${nodeSni}#${remark}`; break;
-                case "Socks5": link = `socks5://${btoa(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
+                case "TUIC": link = `tuic://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?sni=${encodeURIComponent(nodeSni)}&congestion_control=bbr&udp_relay_mode=native&alpn=h3&allow_insecure=1#${remark}`; break;
+                case "Shadowsocks2022": link = `ss://${base64Url(`${node.uuid}:${node.private_key}`)}@${nodeIp}:${node.port}#${remark}`; break;
+                case "Trojan": link = `trojan://${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?security=tls&sni=${encodeURIComponent(nodeSni)}&allowInsecure=1&type=tcp#${remark}`; break;
+                case "H2-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${encodeURIComponent(nodeSni)}&fp=chrome&pbk=${encodeURIComponent(node.public_key)}&sid=${encodeURIComponent(node.short_id || "")}&type=http&host=${encodeURIComponent(nodeSni)}&path=%2F#${remark}`; break;
+                case "gRPC-Reality": link = `vless://${node.uuid}@${nodeIp}:${node.port}?encryption=none&security=reality&sni=${encodeURIComponent(nodeSni)}&fp=chrome&pbk=${encodeURIComponent(node.public_key)}&sid=${encodeURIComponent(node.short_id || "")}&type=grpc&serviceName=grpc#${remark}`; break;
+                case "AnyTLS": link = `anytls://${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?security=tls&sni=${encodeURIComponent(nodeSni)}&insecure=1#${remark}`; break;
+                case "Naive": link = `naive+https://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?security=tls&sni=${encodeURIComponent(nodeSni)}#${remark}`; break;
+                case "Socks5": link = `socks5://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}#${remark}`; break;
                 case "VLESS-Argo": if (!(node.sni || '').includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
             }
             if (link) subLinks.push(link);
 
             if (format === 'surge') {
-                const surgeLine = buildSurgeProxyLine({ name: rawRemark, protocol: node.protocol, host: nodeIp, port: node.port, method: node.uuid, uuid: node.uuid, password: node.private_key, sni: nodeSni });
+                const surgeLine = buildSurgeProxyLine({ name: rawRemark, protocol: node.protocol, host: nodeIp, port: node.port, method: node.uuid, uuid: node.uuid, password: node.private_key, sni: nodeSni, network: node.network });
                 if (surgeLine) surgeProxies.push(surgeLine);
                 else surgeUnsupported.add(node.protocol);
             }
@@ -1957,9 +1962,11 @@ export async function onRequest(context) {
                 } else if (node.protocol === "Hysteria2") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: hysteria2\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    password: ${yamlString(node.uuid || node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "TUIC") {
-                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
+                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: tuic\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    uuid: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    alpn:\n      - h3\n    udp-relay-mode: native\n    congestion-controller: bbr\n    sni: ${yamlString(nodeSni)}\n    skip-cert-verify: true`;
                 } else if (node.protocol === "Shadowsocks2022") {
                     cProxy = `  - name: ${yamlString(rawRemark)}\n    type: ss\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    cipher: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: ${node.network !== 'tcp'}`;
+                } else if (node.protocol === "Socks5") {
+                    cProxy = `  - name: ${yamlString(rawRemark)}\n    type: socks5\n    server: ${yamlString(nodeIp)}\n    port: ${node.port}\n    username: ${yamlString(node.uuid)}\n    password: ${yamlString(node.private_key)}\n    udp: true`;
                 }
                 
                 if (cProxy) {
@@ -2011,7 +2018,7 @@ export async function onRequest(context) {
                     if (node.protocol === 'SS' && !surgeMethod) {
                         try { surgeMethod = JSON.parse(node.extra || '{}').method || ''; } catch {}
                     }
-                    const surgeLine = buildSurgeProxyLine({ name: node.name || `TP_${node.protocol}_${node.port}`, protocol: node.protocol, host: thirdIp, port: node.port, method: surgeMethod, uuid: node.uuid, password: node.password, sni: thirdSni });
+                    const surgeLine = buildSurgeProxyLine({ name: node.name || `TP_${node.protocol}_${node.port}`, protocol: node.protocol, host: thirdIp, port: node.port, method: surgeMethod, uuid: node.uuid, password: node.password, sni: thirdSni, network: node.network });
                     if (surgeLine) surgeProxies.push(surgeLine);
                     else surgeUnsupported.add(node.protocol);
                 }
@@ -2436,7 +2443,7 @@ rules:
                 catch (error) { return Response.json({ error: error.message || 'Invalid node configuration' }, { status: 400 }); }
                 if (!(await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(n.vps_ip).first())) return Response.json({ error: 'VPS not found' }, { status: 404 });
                 if (await db.prepare('SELECT id FROM nodes WHERE id = ?').bind(n.id).first()) return Response.json({ error: 'Node already exists' }, { status: 409 });
-                const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(n.vps_ip, n.port).all();
+                const { results: listeners } = await db.prepare('SELECT id, protocol, port, network FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(n.vps_ip, n.port).all();
                 if (nodeListenerConflicts(listeners, n)) return Response.json({ error: `${nodeTransports(n).join('/').toUpperCase()} port ${n.port} is already in use on this VPS` }, { status: 409 });
                 let nodeUser = normalizeNodeText(n.username || currentUser, 'username', 64);
                 if (nodeUser === 'admin') nodeUser = currentUser;
@@ -2453,7 +2460,7 @@ rules:
             if (method === "PUT") {
                 const body = await readJsonBody(request, 16 * 1024);
                 const { id, enable, reset_traffic } = body;
-                const node = await db.prepare('SELECT id, vps_ip, protocol, port, relay_type, target_id FROM nodes WHERE id = ?').bind(id).first();
+                const node = await db.prepare('SELECT id, vps_ip, protocol, port, network, relay_type, target_id FROM nodes WHERE id = ?').bind(id).first();
                 if (!node) return Response.json({ error: 'Node not found' }, { status: 404 });
                 if (body.protocol !== undefined) {
                     let updated;
@@ -2461,7 +2468,7 @@ rules:
                     catch (error) { return Response.json({ error: error.message || 'Invalid node configuration' }, { status: 400 }); }
                     const existing = await db.prepare('SELECT enable FROM nodes WHERE id = ?').bind(id).first();
                     if (existing.enable === 1) {
-                        const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, updated.port).all();
+                        const { results: listeners } = await db.prepare('SELECT id, protocol, port, network FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, updated.port).all();
                         if (nodeListenerConflicts(listeners, updated)) return Response.json({ error: `${nodeTransports(updated).join('/').toUpperCase()} port ${updated.port} is already in use on this VPS` }, { status: 409 });
                     }
                     let nodeUser = normalizeNodeText(updated.username || currentUser, 'username', 64);
@@ -2481,7 +2488,7 @@ rules:
                 }
                 if (enable === false && await db.prepare("SELECT id FROM nodes WHERE protocol = 'dokodemo-door' AND relay_type = 'internal' AND target_id = ? AND enable = 1").bind(id).first()) return Response.json({ error: 'Node is used by an enabled internal relay' }, { status: 409 });
                 if (enable === true) {
-                    const { results: listeners } = await db.prepare('SELECT id, protocol, port FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, node.port).all();
+                    const { results: listeners } = await db.prepare('SELECT id, protocol, port, network FROM nodes WHERE vps_ip = ? AND port = ? AND enable = 1').bind(node.vps_ip, node.port).all();
                     if (nodeListenerConflicts(listeners, node)) return Response.json({ error: `${nodeTransports(node).join('/').toUpperCase()} port ${node.port} is already in use on this VPS` }, { status: 409 });
                     if (node.protocol === 'dokodemo-door' && node.relay_type === 'internal') {
                         const target = await db.prepare('SELECT protocol, enable FROM nodes WHERE id = ? AND vps_ip = ?').bind(node.target_id, node.vps_ip).first();

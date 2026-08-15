@@ -8,6 +8,7 @@ const serversPage = fs.readFileSync(new URL('../frontend/src/pages/ServersPage.v
 const appStyles = fs.readFileSync(new URL('../frontend/src/styles/app.css', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
 const installer = fs.readFileSync(new URL('../static/vps/kui.sh', import.meta.url), 'utf8');
+const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 
 const UUID = '11111111-1111-4111-8111-111111111111';
 const REALITY_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -165,6 +166,30 @@ test('node update route normalizes the full payload and protects immutable ident
     assert.match(putRoute, /Internal relay cannot target itself/);
     assert.match(putRoute, /UPDATE nodes SET uuid = \?, protocol = \?, port = \?/);
     assert.doesNotMatch(putRoute, /SET id =|SET vps_ip =/);
+    assert.doesNotMatch(putRoute, /SELECT id, protocol, port FROM nodes/);
+    assert.match(putRoute, /SELECT id, protocol, port, network FROM nodes/);
+});
+
+test('node creation is serialized and refreshes after the API succeeds', () => {
+    const addSource = frontend.slice(frontend.indexOf('const addNode ='), frontend.indexOf('const editDraftFromNode'));
+    assert.match(addSource, /addingNode\[ip\]/);
+    assert.match(addSource, /crypto\.randomUUID\(\)/);
+    assert.match(addSource, /await refreshData\(\)/);
+    assert.match(serversPage, /:disabled="addingNode\[vps\.ip\]"/);
+});
+
+test('internal H2 and TUIC relay outbounds preserve transport options', () => {
+    assert.match(agent, /if proto == "H2-Reality":[\s\S]*?"transport"\] = \{"type": "http", "host": \[server_name\], "path": "\/"\}/);
+    assert.match(agent, /proto == "TUIC":[\s\S]*?"congestion_control": "bbr"/);
+    assert.match(agent, /proto == "TUIC":[\s\S]*?"udp_relay_mode": "native"/);
+    assert.match(agent, /elif proto == "TUIC": singbox_config\["inbounds"\].*"congestion_control": "bbr"/);
+    assert.match(api, /node\.chain_target = \{ ip: '127\.0\.0\.1'/);
+});
+
+test('subscription exports include supported SOCKS5 and TUIC client options', () => {
+    assert.match(api, /node\.protocol === "Socks5"[\s\S]*?type: socks5[\s\S]*?username:/);
+    assert.match(api, /node\.protocol === "TUIC"[\s\S]*?udp-relay-mode: native[\s\S]*?congestion-controller: bbr/);
+    assert.match(api, /tuic:\/\/\$\{encodeURIComponent\(node\.uuid\)\}:\$\{encodeURIComponent\(node\.private_key\)\}/);
 });
 
 test('changing a TLS node SNI invalidates its cached certificate', () => {

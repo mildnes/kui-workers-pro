@@ -205,7 +205,7 @@
                                       <div v-if="newNodeParams[vps.ip].relay_type === 'external'" class="kui-node-form-grid"><label><span>目标 IP / 域名 <b class="kui-required">*</b></span><input v-model="newNodeParams[vps.ip].target_ip" placeholder="example.com" required></label><label><span>目标端口 <b class="kui-required">*</b></span><input v-model.number="newNodeParams[vps.ip].target_port" type="number" min="1" max="65535" placeholder="443" required></label></div>
                                       <label v-else><span>目标节点 <b class="kui-required">*</b></span><select v-model="newNodeParams[vps.ip].target_id" required><option value="">选择本 VPS 的目标节点</option><option v-for="target in nodes.filter(n => n.id && n.vps_ip === vps.ip && n.enable && ['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS'].includes(n.protocol))" :value="target.id">{{ target.protocol }}:{{ target.port }}</option></select></label>
                                   </div>
-                                  <button @click="addNode(vps.ip)" class="kui-node-submit">添加节点</button>
+                                  <button @click="addNode(vps.ip)" :disabled="addingNode[vps.ip]" class="kui-node-submit">{{ addingNode[vps.ip] ? '正在添加…' : '添加节点' }}</button>
                               </div>
                               </div>
                           </details>
