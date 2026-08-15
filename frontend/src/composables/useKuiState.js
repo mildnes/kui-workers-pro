@@ -639,11 +639,10 @@ export function useKuiState() {
                       vps.proxy_mode = targetProxyMode;
                       vps.proxy_categories = targetProxyCategories;
                       try {
-                          const body = { ip: vps.ip, egress_mode: targetMode };
-                          if (targetMode === 'residential') { body.proxy_mode = targetProxyMode || 'global'; body.proxy_categories = targetProxyCategories || ''; body.proxy_custom_domains = vps._proxy_custom_domains || ''; }
+                          const body = { ip: vps.ip, egress_mode: targetMode, proxy_custom_domains: vps._proxy_custom_domains || '' };
+                          if (targetMode === 'residential') { body.proxy_mode = targetProxyMode || 'global'; body.proxy_categories = targetProxyCategories || ''; }
                           if (targetMode === 'socks5') {
                               body.proxy_mode = targetProxyMode || 'global'; body.proxy_categories = targetProxyCategories || '';
-                              body.proxy_custom_domains = vps._proxy_custom_domains || '';
                               body.socks5_addr = vps._socks5_addr || ''; body.socks5_port = vps._socks5_port || 1080;
                               body.socks5_user = vps._socks5_user || ''; body.socks5_pass = vps._socks5_pass || '';
                               body.socks5_clear_password = vps._socks5_clear_password === true;

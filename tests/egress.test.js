@@ -59,11 +59,26 @@ test('custom selective domains are normalized, bounded, and versioned separately
     assert.throws(() => normalizeEgressRequest({ egress_mode: 'residential', proxy_mode: 'selective', proxy_categories: 'custom', proxy_custom_domains: '' }), /at least one domain/i);
 });
 
+test('custom domains persist across non-proxy exits but remain inactive there', () => {
+    const { normalizeEgressRequest } = __test;
+    const current = { proxy_custom_domains: ['example.com', 'netflix.com'] };
+    for (const mode of ['native', 'warp_ipv4', 'warp_ipv6', 'warp_dual']) {
+        const normalized = normalizeEgressRequest({ egress_mode: mode }, current);
+        assert.deepEqual(normalized.proxyCustomDomains, ['example.com', 'netflix.com']);
+        assert.deepEqual(normalized.desiredConfig.proxy_custom_domains, ['example.com', 'netflix.com']);
+        assert.equal(normalized.proxyMode, 'global');
+        assert.equal(normalized.proxyCategories, '');
+    }
+    assert.match(frontend, /const body = \{ ip: vps\.ip, egress_mode: targetMode, proxy_custom_domains: vps\._proxy_custom_domains \|\| '' \}/);
+    assert.match(api, /const proxyCustomDomains = normalizeProxyCustomDomains\(data\.proxy_custom_domains \?\? current\.proxy_custom_domains\)/);
+    assert.match(serversPage, /切换出口或关闭自定义后仍会保留/);
+});
+
 test('custom domain UI is explicit and submitted with residential and SOCKS5 configurations', () => {
     assert.match(serversPage, /自定义代理域名（每行一个）/);
     assert.match(serversPage, /v-model="vps\._proxy_custom_domains"/);
     assert.match(serversPage, /自定义域名优先级最高/);
-    assert.match(frontend, /body\.proxy_custom_domains = vps\._proxy_custom_domains \|\| ''/);
+    assert.match(frontend, /proxy_custom_domains: vps\._proxy_custom_domains \|\| ''/);
     assert.match(api, /proxy_custom_domains: proxyCustomDomains/);
     assert.match(api, /\['servers', 'proxy_custom_domains'/);
 });
@@ -93,7 +108,7 @@ test('every egress selection stays local until the user applies or cancels it', 
     assert.doesNotMatch(proxyModeChange, /updateVpsEgress/);
     assert.match(frontend, /const applyEgressDraft = async vps/);
     assert.match(frontend, /const cancelEgressDraft = vps/);
-    assert.match(frontend, /const body = \{ ip: vps\.ip, egress_mode: targetMode \}/);
+    assert.match(frontend, /const body = \{ ip: vps\.ip, egress_mode: targetMode, proxy_custom_domains:/);
     assert.match(frontend, /const draftFields = \['\_egress_mode_draft'/);
     assert.match(frontend, /s\._socks5_addr === undefined/);
     assert.match(serversPage, /@click="applyEgressDraft\(vps\)"/);

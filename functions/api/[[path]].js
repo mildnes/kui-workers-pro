@@ -149,7 +149,7 @@ function normalizeEgressRequest(data, current = {}) {
     const supportsProxyRules = mode === 'residential' || mode === 'socks5';
     const proxyMode = supportsProxyRules && data.proxy_mode === 'selective' ? 'selective' : 'global';
     const proxyCategories = supportsProxyRules ? normalizeProxyCategories(data.proxy_categories, proxyMode === 'selective') : '';
-    const proxyCustomDomains = supportsProxyRules ? normalizeProxyCustomDomains(data.proxy_custom_domains ?? current.proxy_custom_domains) : [];
+    const proxyCustomDomains = normalizeProxyCustomDomains(data.proxy_custom_domains ?? current.proxy_custom_domains);
     if (proxyMode === 'selective' && proxyCategories.split(',').includes('custom') && !proxyCustomDomains.length) throw new Error('Custom proxy category requires at least one domain');
     const desiredConfig = { mode, proxy_mode: proxyMode, proxy_categories: proxyCategories, proxy_custom_domains: proxyCustomDomains };
     let socks5 = null;
@@ -965,7 +965,7 @@ async function initializeDbSchema(db) {
         'mode', COALESCE(NULLIF(egress_applied_mode, ''), 'native'),
         'proxy_mode', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(NULLIF(proxy_mode, ''), 'global') ELSE 'global' END,
         'proxy_categories', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN COALESCE(proxy_categories, '') ELSE '' END,
-        'proxy_custom_domains', CASE WHEN egress_applied_mode IN ('residential', 'socks5') THEN json(COALESCE(NULLIF(proxy_custom_domains, ''), '[]')) ELSE json('[]') END,
+        'proxy_custom_domains', json(COALESCE(NULLIF(proxy_custom_domains, ''), '[]')),
         'socks5', CASE WHEN egress_applied_mode = 'socks5' THEN json_object('addr', COALESCE(socks5_addr, ''), 'port', COALESCE(socks5_port, 0), 'user', COALESCE(socks5_user, ''), 'pass', COALESCE(socks5_pass, '')) ELSE NULL END
     ) WHERE egress_applied_config IS NULL OR egress_applied_config = ''`).run();
     const { results: usersWithoutToken = [] } = await db.prepare("SELECT username FROM users WHERE sub_token IS NULL OR sub_token = ''").all();
