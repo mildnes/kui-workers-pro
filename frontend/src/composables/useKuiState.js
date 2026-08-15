@@ -787,9 +787,9 @@ export function useKuiState() {
                   };
                   const generateCmd = (ip, token) => { token = requireBootstrapToken(token); const osType = deployOsMap[ip] || 'debian'; const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=full-installer`; if (osType === 'alpine') return `apk update && apk add curl && curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}" | sh -s -- --api "${currentDomain}" --ip "${ip}" --bootstrap "${token}"`; return `apt-get update -y && apt-get install -y curl && bash <(curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}") --api "${currentDomain}" --ip "${ip}" --bootstrap "${token}"`; };
                   const generateUninstallCmd = (ip, token, purge = false) => { token = requireBootstrapToken(token); const scriptUrl = `${currentDomain}/api/agent_update?ip=${encodeURIComponent(ip)}&component=uninstaller`; return `( tmp=$(mktemp /tmp/kui-uninstall.XXXXXX) && curl -fsSL -H "Authorization: Bootstrap ${token}" "${scriptUrl}" -o "$tmp" && chmod 700 "$tmp" && sh "$tmp" --yes ${purge ? '--all ' : ''}--ip "${ip}"${purge ? ` --api "${currentDomain}" --bootstrap "${token}"` : ''}; status=$?; rm -f "\${tmp:-}"; exit $status )`; };
-                  const copyDeployCommand = async vps => { try { const token = await requestAgentBootstrapToken(vps.ip, 'full-installer'); await copyCommand(generateCmd(vps.ip, token), '部署指令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成部署命令失败：${error.message || error}`); } };
-                  const copyUninstallCommand = async (vps) => { if (!confirm(`⚠️ 将生成 ${vps.name || vps.ip} 的 Agent 卸载命令。执行后会删除 KUI Agent 与 KUI sing-box，但保留 proxy-lite、OpenVPN 和面板记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); await copyCommand(generateUninstallCmd(vps.ip, token), '✅ Agent 卸载命令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成卸载命令失败：${error.message || error}`); } };
-                  const copyPurgeCommand = async (vps) => { if (!confirm(`🧨 高危操作：将生成 ${vps.name || vps.ip} 的全量清理命令。执行后会删除 Agent、sing-box、proxy-lite、OpenVPN 配置，并在清理成功后自动删除面板中的 VPS、节点和探针记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); await copyCommand(generateUninstallCmd(vps.ip, token, true), '✅ 全量清理命令已复制，有效期 5 分钟！'); } catch (error) { alert(`生成完整卸载命令失败：${error.message || error}`); } };
+                  const copyDeployCommand = async (vps, event) => { try { const token = await requestAgentBootstrapToken(vps.ip, 'full-installer'); await copyCommand(generateCmd(vps.ip, token), '部署指令已复制，有效期 5 分钟！', event); } catch (error) { alert(`生成部署命令失败：${error.message || error}`); } };
+                  const copyUninstallCommand = async (vps, event) => { if (!confirm(`⚠️ 将生成 ${vps.name || vps.ip} 的 Agent 卸载命令。执行后会删除 KUI Agent 与 KUI sing-box，但保留 proxy-lite、OpenVPN 和面板记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); await copyCommand(generateUninstallCmd(vps.ip, token), '✅ Agent 卸载命令已复制，有效期 5 分钟！', event); } catch (error) { alert(`生成卸载命令失败：${error.message || error}`); } };
+                  const copyPurgeCommand = async (vps, event) => { if (!confirm(`🧨 高危操作：将生成 ${vps.name || vps.ip} 的全量清理命令。执行后会删除 Agent、sing-box、proxy-lite、OpenVPN 配置，并在清理成功后自动删除面板中的 VPS、节点和探针记录。是否继续复制？`)) return; try { const token = await requestAgentBootstrapToken(vps.ip, 'uninstaller'); await copyCommand(generateUninstallCmd(vps.ip, token, true), '✅ 全量清理命令已复制，有效期 5 分钟！', event); } catch (error) { alert(`生成完整卸载命令失败：${error.message || error}`); } };
 
                   const markSiteTitleDirty = () => { siteTitleDirty.value = true; };
                   const markProbeSettingsDirty = () => { probeSettingsDirty.value = true; };
@@ -854,14 +854,24 @@ export function useKuiState() {
                       const copied = document.execCommand('copy'); textarea.remove();
                       if (!copied) throw new Error('浏览器拒绝访问剪贴板，请使用 HTTPS 或手动复制');
                   };
-                  const copyCommand = async (txt, msg) => { try { await writeClipboard(txt); alert(msg); } catch (error) { alert(error.message || '复制失败'); } };
-                  const copySurgeConfig = async (ip='', nodeId='') => {
+                  const closeCopyOverlays = event => {
+                      let current = event?.currentTarget;
+                      while (current) {
+                          const details = current.closest?.('details.kui-server-command-menu[open], details.kui-server-menu[open], details.kui-action-menu[open]');
+                          if (!details) break;
+                          details.removeAttribute('open');
+                          current = details.parentElement;
+                      }
+                  };
+                  const copyCommand = async (txt, msg, event) => { try { await writeClipboard(txt); closeCopyOverlays(event); alert(msg); } catch (error) { alert(error.message || '复制失败'); } };
+                  const copySurgeConfig = async (ip='', nodeId='', event) => {
                       try {
                           const response = await fetch(generateSubLink(ip, 'surge', nodeId), { cache: 'no-store' });
                           if (!response.ok) throw new Error(`HTTP ${response.status}`);
                           const config = await response.text();
                           if (!config.trimStart().startsWith('[Proxy]')) throw new Error('返回内容不是 Surge 配置段');
                           await writeClipboard(config);
+                          closeCopyOverlays(event);
                           alert(nodeId ? '✅ 该节点的 Surge 配置段已复制！' : (ip ? '✅ 该 VPS 的 Surge 配置段已复制！' : '✅ 全量 Surge 配置段已复制！'));
                       } catch (error) {
                           alert(`复制 Surge 配置段失败：${error.message}`);

@@ -145,7 +145,7 @@ test('server card header and deployment actions use the compact explicit layout'
     const ip = serversPage.indexOf('kui-server-ip');
     assert.ok(status >= 0 && status < ip);
     assert.doesNotMatch(serversPage, /UP:|LOAD:|vps\.uptime|vps\.load/);
-    assert.match(serversPage, /<button @click="copyDeployCommand\(vps\)"[\s\S]{0,80}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
+    assert.match(serversPage, /<button @click="copyDeployCommand\(vps, \$event\)"[\s\S]{0,80}kui-copy-deploy-button[\s\S]{0,80}复制完整部署命令<\/button>/);
     assert.match(appStyles, /\.kui-copy-deploy-button \{ display: flex; width: 100%;/);
     assert.match(serversPage, /class="kui-server-name truncate">\{\{ vps\.name \}\}/);
     assert.match(appStyles, /\.kui-server-name \{ font-size: 28px;/);
@@ -155,7 +155,7 @@ test('server overflow menu exports all protocols and opens deployment commands',
     const menu = serversPage.slice(serversPage.indexOf('kui-server-menu'), serversPage.indexOf('kui-server-metric'));
     assert.match(menu, /generateSubLink\(vps\.ip, ''\)/);
     assert.match(menu, /generateSubLink\(vps\.ip, 'clash'\)/);
-    assert.match(menu, /copySurgeConfig\(vps\.ip\)/);
+    assert.match(menu, /copySurgeConfig\(vps\.ip, '', \$event\)/);
     assert.match(menu, /复制所有协议普通订阅/);
     assert.match(menu, /复制所有协议 Clash 订阅/);
     assert.match(menu, /复制所有协议 Surge 配置段/);
@@ -170,10 +170,19 @@ test('deployment commands live in the server overflow flyout with all three copy
     assert.ok(start >= 0);
     assert.doesNotMatch(deployPanel.match(/<details[^>]*>/)?.[0] || '', /\sopen(?:\s|>)/);
     assert.equal((deployPanel.match(/<button\b/g) || []).length, 3);
-    assert.match(deployPanel, /copyDeployCommand\(vps\)/);
-    assert.match(deployPanel, /copyUninstallCommand\(vps\)/);
-    assert.match(deployPanel, /copyPurgeCommand\(vps\)/);
+    assert.match(deployPanel, /copyDeployCommand\(vps, \$event\)/);
+    assert.match(deployPanel, /copyUninstallCommand\(vps, \$event\)/);
+    assert.match(deployPanel, /copyPurgeCommand\(vps, \$event\)/);
     assert.doesNotMatch(serversPage, /kui-server-delivery-section|kui-deploy-panel/);
+});
+
+test('successful command and protocol copies close their floating menus', () => {
+    assert.match(state, /closeCopyOverlays = event =>/);
+    assert.match(state, /details\.kui-server-command-menu\[open\][\s\S]*details\.kui-server-menu\[open\][\s\S]*details\.kui-action-menu\[open\]/);
+    assert.match(state, /await writeClipboard\(txt\); closeCopyOverlays\(event\); alert\(msg\)/);
+    assert.match(state, /await writeClipboard\(config\);\s*closeCopyOverlays\(event\)/);
+    assert.match(serversPage, /copyCommand\(generateSubLink\(vps\.ip, '',?\)[\s\S]{0,100}\$event/);
+    assert.match(topBar, /copySurgeConfig\('', '', \$event\)/);
 });
 
 test('expanded node details expose three node-scoped subscription exports', () => {

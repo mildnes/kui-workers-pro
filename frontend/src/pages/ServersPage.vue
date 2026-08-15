@@ -29,9 +29,9 @@
                                       <summary class="kui-card-menu" title="服务器操作" aria-label="打开服务器操作菜单">•••</summary>
                                       <div class="kui-server-menu-panel">
                                           <div class="kui-server-menu-label">所有协议</div>
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, ''), '该服务器全部协议的普通订阅已复制！')">复制所有协议普通订阅</button>
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copyCommand(generateSubLink(vps.ip, 'clash'), '该服务器全部协议的 Clash 订阅已复制！')">复制所有协议 Clash 订阅</button>
-                                          <button @click="$event.currentTarget.closest('details').removeAttribute('open'); copySurgeConfig(vps.ip)">复制所有协议 Surge 配置段</button>
+                                          <button @click="copyCommand(generateSubLink(vps.ip, ''), '该服务器全部协议的普通订阅已复制！', $event)">复制所有协议普通订阅</button>
+                                          <button @click="copyCommand(generateSubLink(vps.ip, 'clash'), '该服务器全部协议的 Clash 订阅已复制！', $event)">复制所有协议 Clash 订阅</button>
+                                          <button @click="copySurgeConfig(vps.ip, '', $event)">复制所有协议 Surge 配置段</button>
                                           <details class="kui-server-command-menu">
                                               <summary>部署与卸载命令 <span aria-hidden="true">›</span></summary>
                                               <div class="kui-server-command-panel">
@@ -42,9 +42,9 @@
                                                           <label><input type="radio" v-model="deployOsMap[vps.ip]" @change="saveOsMap" value="alpine"> Alpine</label>
                                                       </div>
                                                   </div>
-                                                  <button @click="copyDeployCommand(vps)" class="kui-copy-deploy-button">复制完整部署命令</button>
-                                                  <button @click="copyUninstallCommand(vps)" class="kui-copy-agent-uninstall-button">复制 Agent 卸载命令（保留住宅代理）</button>
-                                                  <button @click="copyPurgeCommand(vps)" class="kui-copy-purge-button" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
+                                                  <button @click="copyDeployCommand(vps, $event)" class="kui-copy-deploy-button">复制完整部署命令</button>
+                                                  <button @click="copyUninstallCommand(vps, $event)" class="kui-copy-agent-uninstall-button">复制 Agent 卸载命令（保留住宅代理）</button>
+                                                  <button @click="copyPurgeCommand(vps, $event)" class="kui-copy-purge-button" title="卸载全部组件并移除面板记录">复制完整卸载命令</button>
                                               </div>
                                           </details>
                                       </div>

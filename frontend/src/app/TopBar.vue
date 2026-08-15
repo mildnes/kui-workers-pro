@@ -14,9 +14,9 @@
       <details v-if="role === 'admin'" class="kui-action-menu">
         <summary class="kui-button kui-button-ghost">订阅与导出 <span>⌄</span></summary>
         <div class="kui-action-menu-panel">
-          <button @click="copyCommand(generateSubLink('', ''), '全量普通订阅已复制！')">复制普通订阅</button>
-          <button @click="copyCommand(generateSubLink('', 'clash'), '全量Clash订阅已复制！')">复制 Clash 订阅</button>
-          <button @click="copySurgeConfig('')">复制 Surge 配置段</button>
+          <button @click="copyCommand(generateSubLink('', ''), '全量普通订阅已复制！', $event)">复制普通订阅</button>
+          <button @click="copyCommand(generateSubLink('', 'clash'), '全量Clash订阅已复制！', $event)">复制 Clash 订阅</button>
+          <button @click="copySurgeConfig('', '', $event)">复制 Surge 配置段</button>
           <button @click="showQrCode(generateSubLink('', ''))">显示订阅二维码</button>
         </div>
       </details>
