@@ -237,3 +237,9 @@ test('Worker runtime environment is copied without using the host object as a pr
     assert.match(worker, /Object\.assign\(\{\}, env, \{ PAGES_ORIGIN: origin, REALTIME_URL: origin \}\)/);
     assert.match(worker, /\[worker\] uncaught fetch error ray=/);
 });
+
+test('Durable Objects use the portable constructor API without a startup-only runtime import', () => {
+    assert.doesNotMatch(realtime, /cloudflare:workers|extends DurableObject|super\(ctx, env\)/);
+    assert.match(realtime, /export class VpsPresence \{/);
+    assert.match(realtime, /export class DashboardHub \{/);
+});
