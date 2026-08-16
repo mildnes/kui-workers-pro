@@ -53,6 +53,13 @@ export default {
             return realtime.fetch(request, runtimeEnv, ctx);
         }
 
+        if (url.pathname === '/vps' || url.pathname.startsWith('/vps/')) {
+            return hardenedResponse(new Response('Not Found', {
+                status: 404,
+                headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+            }));
+        }
+
         // Workers + Assets: 优先通过 Worker 处理，兜底检查 ASSETS 绑定
         if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {
             return hardenedResponse(new Response(

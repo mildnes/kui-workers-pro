@@ -69,7 +69,7 @@ export function useKuiState() {
                   ]);
                   const pingNodes = reactive({ ct: [], cu: [], cm: [] });
 
-                  const probeSys = reactive({ theme: 'theme1', is_public: 'true', site_title: 'Server Monitor Pro', custom_bg: '', custom_css: '', report_interval: '5', realtime_admin_interval: '5', realtime_public_interval: '10', realtime_idle_interval: '30', visits_total: '0', visits_today: '0', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default', enable_popup: 'false', popup_content: '', tg_notify: 'false', tg_bot_token: '', tg_chat_id: '' });
+                  const probeSys = reactive({ theme: 'theme1', is_public: 'false', subscription_protection: 'true', site_title: 'Server Monitor Pro', custom_bg: '', custom_css: '', report_interval: '5', realtime_admin_interval: '5', realtime_public_interval: '10', realtime_idle_interval: '30', visits_total: '0', visits_today: '0', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default', enable_popup: 'false', popup_content: '', tg_notify: 'false', tg_bot_token: '', tg_chat_id: '' });
                   const FALLBACK_DATA_INTERVAL = 15000;
                   const FALLBACK_PROBE_INTERVAL = 30000;
                   const FALLBACK_UI_PING_INTERVAL = 60000;
@@ -328,7 +328,14 @@ export function useKuiState() {
                       }
                   };
 
-                  const openProbeDetail = async (id) => { probeDetailId.value = id; await nextTick(); initProbeDetailCharts(); fetchProbeData(true); };
+                  const openProbeDetail = async (id) => {
+                      const server = publicProbeServers.value.find(item => item.id === id);
+                      if (!server || server.details_available === false) return;
+                      probeDetailId.value = id;
+                      await nextTick();
+                      initProbeDetailCharts();
+                      fetchProbeData(true);
+                  };
 
                   const closePopup = () => {
                       localStorage.setItem('kui_popup_seen', Date.now().toString());
@@ -389,7 +396,7 @@ export function useKuiState() {
                                   const live = liveByIp.get(normalizeRealtimeKey(item.id));
                                   return live && live._realtime_ts > Number(item.last_updated || 0) ? { ...item, ...live } : item;
                               });
-                              if (data.realtime_url && data.realtime_url !== realtimeUrl.value) realtimeUrl.value = data.realtime_url;
+                              if (data.realtime_url !== realtimeUrl.value) realtimeUrl.value = data.realtime_url || '';
                               // A logged-in admin must use the Dashboard channel even
                               // while viewing the probe page. Re-check after every
                               // probe load to avoid the login/realtime URL race.
@@ -1085,7 +1092,7 @@ export function useKuiState() {
                       const server = servers.value.find(item => item.ip === warpTargetIp.value);
                       const candidates = server?.warp?.optimizer?.candidates || [];
                       const selected = candidates.find(item => `${item.address}:${item.port}` === warpSelectedCandidate.value) || server?.warp?.optimizer?.recommended;
-                      if (!selected?.success) return alert('当前没有可应用的已验证 Endpoint。');
+                      if (!selected?.success || !selected?.refined) return alert('当前没有可应用的复测 Endpoint。');
                       if (!confirm(`应用 WARP Endpoint ${selected.address}:${selected.port}？\n正在使用 WARP 时会短暂重载 sing-box，失败将自动回滚。`)) return;
                       return sendWarpOptimizerCommand('apply', { address: selected.address, port: selected.port });
                   };

@@ -29,6 +29,8 @@ class AgentEgressTests(unittest.TestCase):
         self.assertLessEqual(len(candidates), 24)
         self.assertEqual(len({(item["address"], item["port"]) for item in candidates}), len(candidates))
         self.assertTrue(all(1 <= item["port"] <= 65535 for item in candidates))
+        self.assertIn(1701, {item["port"] for item in candidates})
+        self.assertGreaterEqual(len({item["address"] for item in candidates}), 10)
 
     def test_warp_ranking_prefers_valid_low_loss_candidates(self):
         results = [

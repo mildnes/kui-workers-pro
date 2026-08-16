@@ -12,8 +12,9 @@ KUI 是部署在单一 Cloudflare Worker 上的代理节点管理与服务器探
 
 1. 点击上方 **Deploy to Cloudflare Workers**。
 2. 登录 Cloudflare，选择账户并确认部署。
-3. 部署完成后，进入 Worker 的 **Settings → Variables and Secrets**，添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
-4. 打开 Worker 地址，使用用户名 `admin` 和刚设置的密码登录。
+3. 在 Worker 的 **Settings → Domains & Routes → Add → Custom Domain** 中绑定 Cloudflare 托管的自定义域名。项目默认关闭 `workers.dev`，未绑定域名时不会提供公共入口。
+4. 进入 **Settings → Variables and Secrets**，添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
+5. 打开已绑定的 HTTPS 自定义域名，使用用户名 `admin` 和刚设置的密码登录。
 
 如需使用住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。项目不内置任何默认密码。
 

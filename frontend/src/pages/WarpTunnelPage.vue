@@ -38,7 +38,7 @@
             <label><span>恢复策略</span><select :value="optimizer.policy" :disabled="warpActionPending" @change="updateWarpPolicy($event.target.value)"><option value="manual">手动优化</option><option value="on_failure">连续失败时自动优化</option><option value="first_enable">首次启用后检测一次</option></select></label>
             <div class="warp-actions">
               <button class="kui-button kui-button-primary" :disabled="busy" @click="startWarpOptimization"><span>⌁</span>开始检测</button>
-              <button class="kui-button kui-button-success" :disabled="busy || !recommended" @click="applyWarpCandidate">{{ warpSelectedCandidate ? '应用所选端点' : '应用推荐端点' }}</button>
+              <button class="kui-button kui-button-success" :disabled="busy || !recommended?.refined" @click="applyWarpCandidate">{{ warpSelectedCandidate ? '应用所选端点' : '应用推荐端点' }}</button>
               <button class="kui-button kui-button-ghost" :disabled="warpActionPending || (!busy && !recommended)" @click="cancelWarpOptimization">取消</button>
               <button class="kui-button kui-button-ghost" :disabled="busy || !optimizer.previous" @click="restoreWarpEndpoint">恢复上一个端点</button>
             </div>
@@ -51,15 +51,15 @@
         </article>
 
         <article class="warp-panel warp-candidate-panel">
-          <div class="warp-panel-heading"><div><h3>候选端点矩阵</h3><p>先比较失败率，再比较中位延迟；复测通过的候选才允许应用。</p></div><span>{{ candidates.length }} 个候选</span></div>
+          <div class="warp-panel-heading"><div><h3>候选端点矩阵</h3><p>先比较失败率，再比较请求中位延迟；首轮结果仅用于筛选，复测通过后才允许应用。</p></div><span>{{ candidates.length }} 个候选</span></div>
           <div class="warp-table-wrap">
             <table><thead><tr><th>选择</th><th>Endpoint</th><th>地址族</th><th>Colo</th><th>延迟</th><th>失败率</th><th>出口</th><th>状态</th></tr></thead>
               <tbody>
                 <tr v-if="!candidates.length"><td colspan="8" class="warp-table-empty">点击“开始检测”生成候选结果</td></tr>
-                <tr v-for="candidate in candidates" :key="`${candidate.address}:${candidate.port}`" :class="{ 'is-recommended': sameCandidate(candidate, recommended), 'is-current': candidate.current }" @click="candidate.success && (warpSelectedCandidate = `${candidate.address}:${candidate.port}`)">
-                  <td><input type="radio" name="warp-candidate" :disabled="!candidate.success || busy" :value="`${candidate.address}:${candidate.port}`" v-model="warpSelectedCandidate" :aria-label="`选择 ${candidate.address}:${candidate.port}`"></td>
+                <tr v-for="candidate in candidates" :key="`${candidate.address}:${candidate.port}`" :class="{ 'is-recommended': sameCandidate(candidate, recommended), 'is-current': candidate.current }" @click="candidate.success && candidate.refined && (warpSelectedCandidate = `${candidate.address}:${candidate.port}`)">
+                  <td><input type="radio" name="warp-candidate" :disabled="!candidate.success || !candidate.refined || busy" :value="`${candidate.address}:${candidate.port}`" v-model="warpSelectedCandidate" :aria-label="`选择 ${candidate.address}:${candidate.port}`"></td>
                   <td class="warp-mono">{{ endpointText(candidate.address, candidate.port) }}</td><td>{{ candidate.family || '—' }}</td><td>{{ candidate.colo || '—' }}</td><td>{{ candidate.latency_ms ? `${candidate.latency_ms} ms` : '—' }}</td><td>{{ candidate.loss_pct }}%</td><td class="warp-mono">{{ candidate.exit_ipv4 || candidate.exit_ipv6 || '—' }}</td>
-                  <td><span class="warp-result-badge" :class="candidate.success ? 'is-success' : 'is-failed'">{{ sameCandidate(candidate, recommended) ? '推荐' : candidate.current ? '当前' : candidate.success ? '可用' : '失败' }}</span></td>
+                  <td><span class="warp-result-badge" :class="candidate.success && candidate.refined ? 'is-success' : candidate.success ? '' : 'is-failed'">{{ sameCandidate(candidate, recommended) ? '推荐' : candidate.current ? '当前' : candidate.success ? (candidate.refined ? '可用' : '初测') : '失败' }}</span></td>
                 </tr>
               </tbody>
             </table>

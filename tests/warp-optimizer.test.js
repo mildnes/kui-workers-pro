@@ -78,6 +78,23 @@ test('WARP tunnel page is reachable and keeps scan separate from apply', () => {
   assert.match(page, /首次启用后检测一次/);
 });
 
+test('only refined WARP candidates can be selected and applied', () => {
+  assert.match(agent, /"refined": bool\(refined\)/);
+  assert.match(agent, /item\.get\("success"\) and item\.get\("refined"\)/);
+  assert.match(realtime, /refined: value\?\.refined === true/);
+  assert.match(page, /candidate\.success && candidate\.refined/);
+  assert.match(page, /candidate\.refined \? '可用' : '初测'/);
+});
+
+test('WARP benchmark timing and cancellation are measured inside each request', () => {
+  assert.match(agent, /__KUI_TIME_TOTAL__=%\{time_total\}/);
+  assert.match(agent, /cancel_event and cancel_event\.is_set\(\)/);
+  assert.match(agent, /cancel_event=_warp_optimizer_cancel/);
+  assert.match(agent, /WARP_MANUAL_SCAN_COOLDOWN_MS = 60 \* 1000/);
+  assert.match(agent, /WARP_AUTO_SCAN_COOLDOWN_MS = 15 \* 60 \* 1000/);
+  assert.match(agent, /last_scan_started_at/);
+});
+
 test('a newly applied WARP egress suggests opening the optimizer exactly from a successful result', () => {
   const now = Date.now();
   assert.equal(shouldSuggestWarpOptimization({ component: 'egress', success: true, applied_mode: 'warp_dual', applied_at: now }, now), true);

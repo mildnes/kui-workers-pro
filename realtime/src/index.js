@@ -10,8 +10,6 @@ const VIEWER_LEASE_MS = 90_000;
 const RESYNC_COOLDOWN_MS = 30_000;
 const SNAPSHOT_CACHE_MS = 10_000;
 const PROXY_DB_PERSIST_INTERVAL = 60_000;
-const MAX_PUBLIC_SOCKETS = 5;
-const MAX_PUBLIC_SOCKETS_PER_IP = 1;
 const MAX_DASHBOARD_SOCKETS = 5;
 const DEFAULT_FREQUENCY_POLICY = { admin: ADMIN_STATUS_INTERVAL, public: PUBLIC_STATUS_INTERVAL, idle: IDLE_STATUS_INTERVAL };
 
@@ -57,22 +55,6 @@ function cors(request, env) {
   };
 }
 
-function sanitizeSnapshot(snapshot) {
-  if (!snapshot?.ip || !snapshot.core) return null;
-  const core = snapshot.core;
-  return {
-    ip: snapshot.ip,
-    core: {
-      cpu: core.cpu, mem: core.mem, disk: core.disk, load: core.load, uptime: core.uptime,
-      net_in_speed: core.net_in_speed, net_out_speed: core.net_out_speed,
-      tcp_conn: core.tcp_conn, udp_conn: core.udp_conn,
-    },
-    core_last_seen: snapshot.core_last_seen || 0,
-    core_state: snapshot.core_state || "offline",
-    updated_at: snapshot.updated_at || 0,
-  };
-}
-
 function safeProxyAddress(value) {
   const address = String(value || "").trim();
   return /^[0-9A-Fa-f:.]{2,64}$/.test(address) ? address : "";
@@ -86,6 +68,7 @@ function compactWarpCandidate(value) {
     address, port,
     family: String(value?.family || "").slice(0, 8),
     current: value?.current === true,
+    refined: value?.refined === true,
     success: value?.success === true,
     latency_ms: Math.max(0, Math.min(Number(value?.latency_ms) || 0, 60000)),
     loss_pct: Math.max(0, Math.min(Number(value?.loss_pct) || 0, 100)),
@@ -236,12 +219,7 @@ export default {
     }
 
     if (url.pathname === "/public/ws") {
-      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return json({ error: "WebSocket required" }, 426);
-      if (!isAllowedPagesOrigin(request.headers.get("Origin") || "", env)) return json({ error: "Forbidden origin" }, 403);
-      const setting = await env.DB.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-      if (setting && setting.value !== "true") return json({ error: "Private dashboard" }, 403);
-      const hub = env.DASHBOARD_HUB.get(env.DASHBOARD_HUB.idFromName("main"));
-      return hub.fetch(doRequest("/public-ws", request, { "X-KUI-CLIENT-IP": request.headers.get("CF-Connecting-IP") || "unknown" }));
+      return new Response('Not Found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
     }
 
     if (url.pathname === "/dashboard/snapshot") {
@@ -655,8 +633,6 @@ export class DashboardHub extends DurableObject {
     this.activityUntil = 0;
     this.activityInterval = IDLE_STATUS_INTERVAL;
     this.frequencyPolicy = DEFAULT_FREQUENCY_POLICY;
-    this.publicPolicyAllowed = false;
-    this.publicPolicyCheckedAt = 0;
     this.snapshotCache = null;
     this.snapshotCachedAt = 0;
     ctx.blockConcurrencyWhile(async () => {
@@ -696,26 +672,13 @@ export class DashboardHub extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     if (url.pathname === "/public-ws") {
-      const clientIp = request.headers.get("X-KUI-CLIENT-IP") || "unknown";
-      const publicSockets = this.ctx.getWebSockets("public");
-      if (publicSockets.length >= MAX_PUBLIC_SOCKETS || publicSockets.filter(ws => ws.deserializeAttachment()?.clientIp === clientIp).length >= MAX_PUBLIC_SOCKETS_PER_IP) return json({ error: "Too many public connections" }, 429);
-      const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
-      server.serializeAttachment({ public: true, clientIp, connected_at: Date.now(), lastActivity: Date.now(), lastResync: 0 });
-      this.ctx.acceptWebSocket(server, ["public"]);
-      await this.setDashboardActivity();
-      await this.ctx.storage.setAlarm(Date.now() + 60000);
-      server.send(JSON.stringify({ type: "snapshot", data: (await this.snapshot()).map(sanitizeSnapshot).filter(Boolean), ts: Date.now() }));
-      return new Response(null, { status: 101, webSocket: client });
+      return new Response('Not Found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
     }
     if (url.pathname === "/public-policy" && request.method === "POST") {
-      const enabled = request.headers.get("X-KUI-Public") === "1";
-      if (!enabled) {
-        for (const ws of this.ctx.getWebSockets("public")) {
-          try { ws.close(1008, "private dashboard"); } catch {}
-        }
+      for (const ws of this.ctx.getWebSockets("public")) {
+        try { ws.close(1008, "public realtime disabled"); } catch {}
       }
-      return json({ success: true });
+      return json({ success: true, enabled: false });
     }
     if (url.pathname === "/frequency-policy" && request.method === "POST") {
       const policy = validFrequencyPolicy(await request.json().catch(() => null));
@@ -735,13 +698,9 @@ export class DashboardHub extends DurableObject {
       for (const ws of this.ctx.getWebSockets("dashboard")) {
         try { ws.send(payload); } catch {}
       }
-      const publicSnapshot = sanitizeSnapshot(snapshot);
       const publicSockets = this.ctx.getWebSockets("public");
-      if (publicSnapshot && publicSockets.length && await this.publicPolicyEnabled()) {
-        const publicPayload = JSON.stringify({ type: "patch", data: publicSnapshot, ts: Date.now() });
-        for (const ws of this.ctx.getWebSockets("public")) {
-          try { ws.send(publicPayload); } catch {}
-        }
+      for (const ws of publicSockets) {
+        try { ws.close(1008, "public realtime disabled"); } catch {}
       }
       return json({ success: true });
     }
@@ -791,21 +750,21 @@ export class DashboardHub extends DurableObject {
     try {
       const parsed = JSON.parse(message);
       if (parsed?.type === "resync") {
+        if (ws.deserializeAttachment()?.public === true) {
+          ws.close(1008, "public realtime disabled");
+          return;
+        }
         const attachment = ws.deserializeAttachment() || {};
         if (Date.now() - Number(attachment.lastResync || 0) < RESYNC_COOLDOWN_MS) return;
         attachment.lastResync = Date.now(); attachment.lastActivity = Date.now(); ws.serializeAttachment(attachment);
         const snapshots = await this.snapshot();
-        const isPublic = ws.deserializeAttachment()?.public === true;
-        ws.send(JSON.stringify({ type: "snapshot", data: isPublic ? snapshots.map(sanitizeSnapshot).filter(Boolean) : snapshots, ts: Date.now() }));
+        ws.send(JSON.stringify({ type: "snapshot", data: snapshots, ts: Date.now() }));
       }
       if (parsed?.type === "activity") {
         const attachment = ws.deserializeAttachment() || {}; attachment.lastActivity = Date.now(); ws.serializeAttachment(attachment);
         if (ws.deserializeAttachment()?.public === true) {
-          const setting = await this.env.DB.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-          if (setting && setting.value !== "true") {
-            ws.close(1008, "private dashboard");
-            return;
-          }
+          ws.close(1008, "public realtime disabled");
+          return;
         }
         await this.setDashboardActivity();
       }
@@ -841,17 +800,6 @@ export class DashboardHub extends DurableObject {
     }));
   }
 
-  async publicPolicyEnabled() {
-    if (Date.now() - this.publicPolicyCheckedAt < 5000) return this.publicPolicyAllowed;
-    const setting = await this.env.DB.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-    this.publicPolicyAllowed = !setting || setting.value === "true";
-    this.publicPolicyCheckedAt = Date.now();
-    if (!this.publicPolicyAllowed) {
-      for (const ws of this.ctx.getWebSockets("public")) { try { ws.close(1008, "private dashboard"); } catch {} }
-    }
-    return this.publicPolicyAllowed;
-  }
-
   async alarm() {
     const tickets = await this.ctx.storage.list({ prefix: "ticket:" });
     const now = Date.now();
@@ -866,14 +814,8 @@ export class DashboardHub extends DurableObject {
     if (!hasActiveViewers) await this.setDashboardActivity();
     const publicSockets = this.ctx.getWebSockets("public");
     if (publicSockets.length) {
-      const setting = await this.env.DB.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-      if (setting && setting.value !== "true") {
-        for (const ws of publicSockets) {
-          try { ws.close(1008, "private dashboard"); } catch {}
-        }
-      } else {
-        const publicCheck = Date.now() + 30000;
-        if (!next || publicCheck < next) next = publicCheck;
+      for (const ws of publicSockets) {
+        try { ws.close(1008, "public realtime disabled"); } catch {}
       }
     }
     if (hasActiveViewers) { const viewerCheck = Date.now() + 30000; if (!next || viewerCheck < next) next = viewerCheck; }

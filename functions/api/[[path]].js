@@ -23,13 +23,6 @@ async function sessionToken() { const bytes = crypto.getRandomValues(new Uint8Ar
 
 function updateManifest(component, sha, length) { return `v1\n${component}\n${sha}\n${length}\n`; }
 
-async function protectedSubscriptionResponse(request) {
-    // Serve the exact ordinary site landing page instead of any subscription
-    // profile, error, redirect, or endpoint-specific marker.
-    const landing = await fetch(new URL('/', request.url), { headers: { Accept: 'text/html' } });
-    return new Response(landing.body, { status: landing.status, headers: landing.headers });
-}
-
 const MAX_REPORT_BYTES = 256 * 1024;
 const MAX_PROXY_REPORT_BYTES = 32 * 1024;
 const MAX_SUBSCRIPTION_BYTES = 2 * 1024 * 1024;
@@ -1115,7 +1108,7 @@ async function handleProbeAPI(request, env, context, pathArray) {
                     if (s) await tgEdit(chatId, msgId, `🖥 <b>探针详情:</b> ${escapeHtml(s.name)}\n\n系统: ${escapeHtml(s.os||'-')}\nIP类型: IPv4:${escapeHtml(s.ip_v4)} / IPv6:${escapeHtml(s.ip_v6)}\n运行时长: ${escapeHtml(s.uptime)}\n分组: ${escapeHtml(s.server_group)}`, {inline_keyboard: [[{text: '🔙 返回列表', callback_data: 'cb_list_nodes'}]]});
                 }
                 else if (text === 'cb_settings') {
-                    let set = { is_public: 'true', show_price: 'true' }; try { const { results } = await db.prepare("SELECT key, value FROM probe_settings").all(); results.forEach(r => set[r.key]=r.value); } catch(e){}
+                    let set = { is_public: 'false', show_price: 'true' }; try { const { results } = await db.prepare("SELECT key, value FROM probe_settings").all(); results.forEach(r => set[r.key]=r.value); } catch(e){}
                     const kb = { inline_keyboard: [
                         [{text: `${set.is_public === 'true' ? '✅' : '❌'} 公开大盘`, callback_data: 'cb_tog_is_public'}, {text: `${set.show_price === 'true' ? '✅' : '❌'} 显示价格`, callback_data: 'cb_tog_show_price'}],
                         [{text: '🔙 返回主菜单', callback_data: 'cb_menu'}]
@@ -1154,29 +1147,38 @@ async function handleProbeAPI(request, env, context, pathArray) {
         const isAjax = url.searchParams.get('ajax') === '1';
         const cacheKey = new Request(`${url.origin}/api/probe/public?ajax=${isAjax ? '1' : '0'}`);
         const publicSetting = await db.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-        const isPublic = !publicSetting || publicSetting.value === 'true';
-        if (!isPublic && !(await verifyAuth(request.headers.get("Authorization"), request, db, env, context))) return Response.json({ error: "Private Dashboard" }, { status: 401 });
-        if (isPublic) {
+        const isPublic = publicSetting?.value === 'true';
+        const viewer = await verifyAuth(request.headers.get('Authorization'), request, db, env, context);
+        const isAnonymous = !viewer;
+        if (!isPublic && isAnonymous) return Response.json({ error: "Private Dashboard" }, { status: 401 });
+        if (isPublic && isAnonymous) {
             const cached = await caches.default.match(cacheKey);
             if (cached) return cached;
         }
-        const settings = { theme: 'theme1', is_public: 'true', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
+        const settings = { theme: 'theme1', is_public: 'false', site_title: '⚡ Server Monitor Pro', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', custom_css: '', custom_bg: '', report_interval: '5', enable_popup: 'false', popup_content: '', cached_nodes_data: '' };
         try { const { results } = await db.prepare('SELECT * FROM probe_settings').all(); if (results) results.forEach(r => settings[r.key] = r.value); } catch(e){}
         const servers = (await db.prepare('SELECT p.id, p.name, p.cpu, p.ram, p.disk, p.load_avg, p.uptime, p.last_updated, p.net_in_speed, p.net_out_speed, p.os, p.arch, p.virt, p.tcp_conn, p.udp_conn, p.country, p.ip_v4, p.ip_v6, p.server_group, p.price, p.expire_date, p.bandwidth, p.traffic_limit, p.ping_ct, p.ping_cu, p.ping_cm, p.ping_bd, p.monthly_rx, p.monthly_tx, p.net_rx, p.net_tx, p.cpu_info, p.ram_used, p.ram_total, p.disk_used, p.disk_total FROM probe_servers p INNER JOIN servers s ON s.ip = p.id WHERE p.is_hidden != "true"').all()).results;
+        const visibleServers = isAnonymous
+            ? servers.map(({ id, ip_v4, ip_v6, ...server }, index) => ({
+                ...Object.fromEntries(Object.entries(server).map(([key, value]) => [key, typeof value === 'string' ? value.split(id).join('[hidden]') : value])),
+                id: `public-${index + 1}`,
+                name: server.name && !String(server.name).includes(id) ? server.name : `Server ${index + 1}`,
+                details_available: false,
+            }))
+            : servers.map(server => ({ ...server, details_available: true }));
         const publicKeys = new Set(['theme', 'is_public', 'site_title', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'custom_css', 'custom_bg', 'report_interval', 'enable_popup', 'popup_content', 'cached_nodes_data', 'auto_reset_traffic', 'visits_total', 'visits_today', 'visits_date']);
         for (const key of Object.keys(settings)) if (!publicKeys.has(key)) delete settings[key];
         const realtime = env.REALTIME_URL ? null : await db.prepare("SELECT val FROM sys_config WHERE key = 'realtime_url'").first();
-        const response = Response.json({ settings, servers, realtime_url: env.REALTIME_URL || realtime?.val || '' }, { headers: { 'Cache-Control': 'public, max-age=15, s-maxage=15' } });
-        if (settings.is_public === 'true') context.waitUntil(caches.default.put(cacheKey, response.clone()));
+        const response = Response.json({ settings, servers: visibleServers, realtime_url: isAnonymous ? '' : (env.REALTIME_URL || realtime?.val || '') }, { headers: { 'Cache-Control': isAnonymous ? 'public, max-age=15, s-maxage=15' : 'private, no-store' } });
+        if (isAnonymous && settings.is_public === 'true') context.waitUntil(caches.default.put(cacheKey, response.clone()));
         return response;
     }
 
     if (method === 'GET' && subPath === 'detail') {
+        if (!(await verifyAuth(request.headers.get('Authorization'), request, db, env, context))) return Response.json({ error: "Unauthorized" }, { status: 401 });
         const id = url.searchParams.get('id');
         const server = await db.prepare('SELECT * FROM probe_servers WHERE id = ?').bind(id).first();
         if (!server || server.is_hidden === 'true') return Response.json({ error: "Not found" }, { status: 404 });
-        const publicSetting = await db.prepare("SELECT value FROM probe_settings WHERE key = 'is_public'").first();
-        if (publicSetting && publicSetting.value !== 'true' && !(await verifyAuth(request.headers.get('Authorization'), request, db, env, context))) return Response.json({ error: "Unauthorized" }, { status: 401 });
         return Response.json(server);
     }
 
@@ -1859,8 +1861,11 @@ export async function onRequest(context) {
     if (action === "sub" && method === "GET") {
         await ensureDbSchema(db);
         const subscriptionProtection = await db.prepare("SELECT value FROM probe_settings WHERE key = 'subscription_protection'").first();
-        if (subscriptionProtection?.value === 'true') {
-            return protectedSubscriptionResponse(request);
+        if (subscriptionProtection?.value !== 'false') {
+            return new Response('Not Found', {
+                status: 404,
+                headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+            });
         }
         const urlObj = new URL(request.url); 
         const ip = urlObj.searchParams.get("ip"); 

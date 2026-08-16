@@ -231,3 +231,37 @@ test('static responses include baseline browser security headers', () => {
     assert.match(worker, /X-Frame-Options/);
     assert.match(wrangler, /"run_worker_first"\s*:\s*true/);
 });
+
+test('VPS installer assets are only available through the authenticated API', () => {
+    const assetsFallback = worker.indexOf('env.ASSETS.fetch(request)');
+    const privateAssetGuard = worker.indexOf("url.pathname.startsWith('/vps/')");
+    assert.ok(privateAssetGuard > 0 && privateAssetGuard < assetsFallback);
+    assert.match(worker.slice(privateAssetGuard, assetsFallback), /status:\s*404/);
+    assert.match(api, /action === "agent_update"[\s\S]*env\.ASSETS\.fetch/);
+});
+
+test('subscriptions are disabled by default without landing-page camouflage', () => {
+    const subscriptionRoute = api.slice(api.indexOf('if (action === "sub"'), api.indexOf('if (action === "thirdparty"'));
+    assert.doesNotMatch(api, /protectedSubscriptionResponse/);
+    assert.match(subscriptionRoute, /subscriptionProtection\?\.value !== 'false'/);
+    assert.match(subscriptionRoute, /new Response\('Not Found',[\s\S]{0,160}status:\s*404/);
+    assert.match(frontend, /subscription_protection:\s*'true'/);
+});
+
+test('probe dashboards default to private and anonymous payloads hide VPS identities', () => {
+    assert.match(api, /const isPublic = publicSetting\?\.value === 'true'/);
+    assert.match(api, /is_public:\s*'false'/);
+    assert.match(frontend, /is_public:\s*'false'/);
+    assert.match(api, /id:\s*`public-\$\{index \+ 1\}`/);
+    assert.match(api, /details_available:\s*false/);
+    assert.match(api, /realtime_url:\s*isAnonymous \? ''/);
+    assert.match(realtime, /url\.pathname === "\/public\/ws"[\s\S]{0,300}status:\s*404/);
+    assert.match(realtime, /url\.pathname === "\/public-ws"[\s\S]{0,300}status:\s*404/);
+    assert.match(realtime, /public realtime disabled/);
+    assert.doesNotMatch(realtime, /sanitizeSnapshot/);
+});
+
+test('the default deployment does not expose a workers.dev endpoint', () => {
+    assert.match(wrangler, /"workers_dev"\s*:\s*false/);
+    assert.match(readme + fs.readFileSync(new URL('../docs/deployment.md', import.meta.url), 'utf8'), /自定义域名/);
+});

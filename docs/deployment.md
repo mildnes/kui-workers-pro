@@ -6,8 +6,9 @@
 
 1. 在 [README](../README.md) 中点击 **Deploy to Cloudflare Workers**。
 2. 登录 Cloudflare，选择账户并确认部署。
-3. 部署完成后，在 Worker 的 **Settings → Variables and Secrets** 中添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
-4. 打开 Worker 地址，使用用户名 `admin` 和刚设置的密码登录。
+3. 在 Worker 的 **Settings → Domains & Routes → Add → Custom Domain** 中绑定 Cloudflare 托管的自定义域名。项目默认关闭 `workers.dev`，未绑定域名时不会提供公共入口。
+4. 在 **Settings → Variables and Secrets** 中添加 `ADMIN_PASSWORD`，类型选择 **Secret**。
+5. 打开已绑定的 HTTPS 自定义域名，使用用户名 `admin` 和刚设置的密码登录。
 
 如需住宅代理，再添加 `PROXY_USER` 和 `PROXY_PASS` 两个 Secret。管理员和代理凭据应使用不同的独立强密码。
 
@@ -217,7 +218,9 @@ curl -fsS https://你的-worker-域名/health
 
 ## 自定义域名
 
-在 Worker 的 **Settings → Domains & Routes → Add** 中绑定域名或子域名，完成后直接使用该域名访问面板。
+项目默认关闭 `workers.dev` 公共入口，以减少面板和管理接口暴露。首次部署前必须准备 Cloudflare 托管的域名，并在 Worker 的 **Settings → Domains & Routes → Add → Custom Domain** 中绑定域名或子域名；未绑定自定义域名时，部署成功后也没有可访问的公共入口。
+
+绑定完成后，请将 `PAGES_ORIGIN`、Agent 安装命令和回调地址统一设置为该 HTTPS 自定义域名，不要重新开启 `workers.dev`。
 
 ## 故障排查
 

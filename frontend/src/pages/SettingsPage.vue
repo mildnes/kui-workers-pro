@@ -23,7 +23,7 @@
                 <span>订阅保护{{ probeSys.subscription_protection === 'true' ? '已开启' : '已关闭' }}</span>
               </label>
             </div>
-            <small>开启后订阅请求返回普通首页内容，并停止在线更新。</small>
+            <small>开启后订阅接口返回 404，并停止在线更新。</small>
           </div>
         </div>
       </section>
