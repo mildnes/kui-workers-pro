@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import urllib.request
 import urllib.parse
+import http.client
 import json
 import os
 import time
@@ -27,6 +28,46 @@ except ImportError:
         def stop(self): pass
         def send(self, data, message_type="status"): return False
 from datetime import datetime
+
+
+def _prefer_ipv4_create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+    host, port = address
+    addresses = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    addresses.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+    errors = []
+    for family, socktype, proto, _, socket_address in addresses:
+        connection = None
+        try:
+            connection = socket.socket(family, socktype, proto)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                connection.settimeout(timeout)
+            if source_address:
+                connection.bind(source_address)
+            connection.connect(socket_address)
+            return connection
+        except OSError as error:
+            errors.append(error)
+            if connection is not None:
+                connection.close()
+    if errors:
+        raise errors[-1]
+    raise OSError("getaddrinfo returned no addresses")
+
+
+class _PreferIPv4HTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _prefer_ipv4_create_connection
+
+
+class _PreferIPv4HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_PreferIPv4HTTPSConnection, request, context=self._context, check_hostname=self._check_hostname)
+
+
+def _urlopen(request, timeout):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _PreferIPv4HTTPSHandler())
+    return opener.open(request, timeout=timeout)
 
 # 强制系统编码锁
 if sys.stdout.encoding != 'UTF-8':
@@ -122,8 +163,7 @@ def _controller_json_request(url, *, data=None, headers=None, method=None):
     for attempt in range(CONTROL_REQUEST_ATTEMPTS):
         try:
             request = urllib.request.Request(url, data=data, headers=headers or HEADERS, method=method)
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(request, timeout=CONTROL_REQUEST_TIMEOUT) as response:
+            with _urlopen(request, timeout=CONTROL_REQUEST_TIMEOUT) as response:
                 raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else {}
         except Exception as error:
@@ -190,7 +230,7 @@ def _ensure_wgcf():
     url = f"https://github.com/ViRb3/wgcf/releases/download/v{WGCF_VERSION}/wgcf_{WGCF_VERSION}_linux_{arch}"
     temp_path = target + ".tmp"
     request = urllib.request.Request(url, headers={"User-Agent": "KUI-WARP/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with _urlopen(request, timeout=60) as response:
         source = response.read(20 * 1024 * 1024)
     if hashlib.sha256(source).hexdigest() != expected:
         raise RuntimeError("wgcf checksum mismatch")
@@ -845,6 +885,16 @@ def _verify_socks5_exit(check_host="127.0.0.1"):
     raise RuntimeError("SOCKS5 data-plane verification failed")
 
 def _verify_native_exit():
+    try:
+        echo_url = f"{BASE_URL}/api/agent_egress_ip?ip={urllib.parse.quote(VPS_IP, safe='')}"
+        request = urllib.request.Request(echo_url, headers=HEADERS)
+        with _urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        ip = _verified_public_ip(str(payload.get("ip") or ""))
+        if ip:
+            return ip
+    except Exception as error:
+        print(f"[agent] Worker native egress probe failed, trying fallback: {error}", flush=True)
     result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--noproxy", "*", "https://api.ipify.org"], capture_output=True, text=True)
     ip = _verified_public_ip(result.stdout)
     if result.returncode != 0 or not ip:
@@ -1192,7 +1242,7 @@ def check_for_update():
             temporary_files.append(temp_path)
             update_url = f"{BASE_URL}/api/agent_update?ip={urllib.parse.quote(VPS_IP, safe='')}&component={component}"
             request = urllib.request.Request(update_url, headers=HEADERS)
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with _urlopen(request, timeout=20) as response:
                 source = response.read(2 * 1024 * 1024 + 1)
                 expected_hash = response.headers.get("X-Agent-SHA256", "").lower()
                 version = response.headers.get("X-Agent-Manifest-Version", "")
@@ -2080,7 +2130,7 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
             pending_report_payload["node_traffic"] = list(pending_node_traffic or [])
             _write_json_state(TRAFFIC_STATE_PATH, {"last_reported_bytes": last_reported_bytes, "last_reported_system_bytes": last_reported_system_bytes, "pending": {"report_id": pending_report_id, "report_bytes": pending_report_bytes, "node_traffic": pending_node_traffic, "system_bytes": pending_system_bytes, "payload": pending_report_payload}})
         req = urllib.request.Request(REPORT_URL, data=json.dumps(pending_report_payload).encode(), headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=20) as response:
+        with _urlopen(req, timeout=20) as response:
             resp_data = json.loads(response.read().decode('utf-8'))
         last_reported_bytes = pending_report_bytes
         if pending_system_bytes is not None:
@@ -2109,7 +2159,7 @@ def report_status(current_nodes, argo_urls, force_http=False, allow_http=True):
 def fetch_proxy_config():
     try:
         req = urllib.request.Request(f"{PROXY_API}/api/proxy/config?ip={VPS_IP}", headers=_proxy_ctrl_headers())
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with _urlopen(req, timeout=10) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as error:
         print(f"[agent] proxy config fetch failed: {error}", flush=True)
@@ -2138,7 +2188,7 @@ def fetch_proxy_mesh(country="ANY"):
         proxy_path = "/api/proxy/proxies" if PROXY_API.rstrip('/') == BASE_URL.rstrip('/') else "/api/proxies"
         url = f"{PROXY_API}{proxy_path}?ip={VPS_IP}"
         req = urllib.request.Request(url, headers=_proxy_ctrl_headers())
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with _urlopen(req, timeout=10) as response:
             raw = response.read().decode('utf-8')
         peers = []
         for line in raw.splitlines():
@@ -2190,7 +2240,7 @@ def report_proxy_status():
             "last_seen": int(time.time())
         }
         req = urllib.request.Request(f"{PROXY_API}/api/proxy/report", data=json.dumps(payload).encode(), headers=_proxy_ctrl_headers())
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with _urlopen(req, timeout=10) as response:
             response.read(1)
     except Exception as error:
         print(f"[agent] proxy status report failed: {error}", flush=True)

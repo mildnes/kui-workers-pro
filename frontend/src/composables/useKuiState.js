@@ -874,7 +874,8 @@ export function useKuiState() {
                   const copyCommand = async (txt, msg, event) => { try { await writeClipboard(txt); closeCopyOverlays(event); alert(msg); } catch (error) { alert(error.message || '复制失败'); } };
                   const copySurgeConfig = async (ip='', nodeId='', event) => {
                       try {
-                          const response = await fetch(generateSubLink(ip, 'surge', nodeId), { cache: 'no-store' });
+                          const headers = authKey.value ? { 'Authorization': `Bearer ${authKey.value}` } : {};
+                          const response = await fetch(generateSubLink(ip, 'surge', nodeId), { cache: 'no-store', headers });
                           if (!response.ok) throw new Error(`HTTP ${response.status}`);
                           const config = await response.text();
                           if (!config.trimStart().startsWith('[Proxy]')) throw new Error('返回内容不是 Surge 配置段');

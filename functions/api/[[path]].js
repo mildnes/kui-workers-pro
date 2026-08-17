@@ -1531,6 +1531,15 @@ export async function onRequest(context) {
         return Response.json({ success: true, alerted: await checkOfflineServers(env) });
     }
 
+    if (action === "agent_egress_ip" && method === "GET") {
+        await ensureDbSchema(db);
+        const ip = new URL(request.url).searchParams.get('ip') || '';
+        if (!validIp(ip) || !(await verifyAgent(request.headers.get('Authorization'), ip, db, env))) return new Response('Unauthorized', { status: 401 });
+        const observedIp = request.headers.get('CF-Connecting-IP') || '';
+        if (!validIp(observedIp)) return Response.json({ error: 'Client IP unavailable' }, { status: 503 });
+        return Response.json({ ip: observedIp }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     if (action === "agent_update" && method === "GET") {
         await ensureDbSchema(db);
         const updateUrl = new URL(request.url);
@@ -1860,30 +1869,36 @@ export async function onRequest(context) {
     // 🌟 核心拦截并拆分普通订阅与 Clash 订阅生成
     if (action === "sub" && method === "GET") {
         await ensureDbSchema(db);
+        const urlObj = new URL(request.url);
+        const ip = urlObj.searchParams.get("ip");
+        const nodeId = urlObj.searchParams.get("node");
+        const reqUser = urlObj.searchParams.get("user");
+        const token = urlObj.searchParams.get("token");
+        const format = urlObj.searchParams.get("format");
+        const adminUser = env.ADMIN_USERNAME || "admin";
+        const authenticatedSurgeUser = format === 'surge'
+            ? await verifyAuth(request.headers.get('Authorization'), request, db, env, context)
+            : '';
+        const authenticatedSurgeAccess = format === 'surge'
+            && !!authenticatedSurgeUser
+            && authenticatedSurgeUser === reqUser;
         const subscriptionProtection = await db.prepare("SELECT value FROM probe_settings WHERE key = 'subscription_protection'").first();
-        if (subscriptionProtection?.value !== 'false') {
+        if (subscriptionProtection?.value !== 'false' && !authenticatedSurgeAccess) {
             return new Response('Not Found', {
                 status: 404,
                 headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
             });
         }
-        const urlObj = new URL(request.url); 
-        const ip = urlObj.searchParams.get("ip"); 
-        const nodeId = urlObj.searchParams.get("node");
-        const reqUser = urlObj.searchParams.get("user"); 
-        const token = urlObj.searchParams.get("token"); 
-        const format = urlObj.searchParams.get("format"); 
-        const adminUser = env.ADMIN_USERNAME || "admin";
 
         if (nodeId && !/^[A-Za-z0-9_-]{1,64}$/.test(nodeId)) return json({ error: "Not found" }, 404);
 
-        let isValid = false;
-        if (reqUser === adminUser) { 
+        let isValid = authenticatedSurgeAccess;
+        if (!isValid && reqUser === adminUser) {
             let adminSubToken = '';
             try { const r = await db.prepare("SELECT val FROM sys_config WHERE key='admin_sub_token'").first(); if(r && r.val) adminSubToken = r.val; } catch(e){} 
             isValid = !!adminSubToken && token === adminSubToken;
         } 
-        else { 
+        else if (!isValid) {
             const u = await db.prepare("SELECT password, sub_token FROM users WHERE username = ? AND enable = 1").bind(reqUser).first();
             if (u) isValid = !!u.sub_token && token === u.sub_token;
         }

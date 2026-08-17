@@ -71,6 +71,8 @@ test('node subscription links carry a validated node scope through UI and API', 
     assert.match(apiWorker, /if \(nodeId && !\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/\.test\(nodeId\)\) return json\(\{ error: "Not found" \}, 404\)/);
     assert.match(apiWorker, /query \+= " AND id = \?"; sqlParams\.push\(nodeId\)/);
     assert.match(apiWorker, /query \+= " AND n\.id = \?"; sqlParams\.push\(nodeId\)/);
+    assert.match(kuiState, /copySurgeConfig[\s\S]*Authorization[^\n]*Bearer/);
+    assert.match(apiWorker, /authenticatedSurgeAccess = format === 'surge'[\s\S]{0,100}authenticatedSurgeUser === reqUser/);
 });
 
 test('node-scoped subscriptions do not append unrelated external sources', () => {

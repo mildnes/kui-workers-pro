@@ -243,7 +243,8 @@ test('VPS installer assets are only available through the authenticated API', ()
 test('subscriptions are disabled by default without landing-page camouflage', () => {
     const subscriptionRoute = api.slice(api.indexOf('if (action === "sub"'), api.indexOf('if (action === "thirdparty"'));
     assert.doesNotMatch(api, /protectedSubscriptionResponse/);
-    assert.match(subscriptionRoute, /subscriptionProtection\?\.value !== 'false'/);
+    assert.match(subscriptionRoute, /authenticatedSurgeAccess = format === 'surge'[\s\S]{0,100}!!authenticatedSurgeUser/);
+    assert.match(subscriptionRoute, /subscriptionProtection\?\.value !== 'false' && !authenticatedSurgeAccess/);
     assert.match(subscriptionRoute, /new Response\('Not Found',[\s\S]{0,160}status:\s*404/);
     assert.match(frontend, /subscription_protection:\s*'true'/);
 });

@@ -136,6 +136,13 @@ test('all egress modes report the IP verified during application', () => {
     assert.match(agent, /"egress_ip": verified_egress_ip/);
 });
 
+test('native egress verification can use the authenticated Worker IP echo', () => {
+    assert.match(api, /action === "agent_egress_ip"/);
+    assert.match(api, /CF-Connecting-IP/);
+    assert.match(agent, /\/api\/agent_egress_ip\?ip=/);
+    assert.match(agent, /_urlopen\(request, timeout=10\)/);
+});
+
 test('WARP and SOCKS5 verification preserve domains for landing-side DNS', () => {
     assert.match(agent, /--proxy", f"socks5h:\/\/\{check_host\}:39482"/);
     assert.doesNotMatch(agent, /--proxy", f"socks5:\/\/\{check_host\}:39482"/);

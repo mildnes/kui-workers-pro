@@ -138,4 +138,6 @@ test('agent control requests bypass environment proxies and retry transient stal
     assert.match(agent, /for attempt in range\(CONTROL_REQUEST_ATTEMPTS\)/);
     assert.match(agent, /_controller_json_request\(f"\{API_URL\}\?ip=\{VPS_IP\}"/);
     assert.match(manager, /ProxyHandler\(\{\}\)/);
+    assert.doesNotMatch(agent, /urllib\.request\.urlopen/);
+    assert.doesNotMatch(manager, /urllib\.request\.urlopen/);
 });

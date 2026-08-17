@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import base64, csv, os, subprocess, threading, time, urllib.request, urllib.parse, json, ipaddress, hashlib, hmac, sys, re
+import base64, csv, os, subprocess, threading, time, urllib.request, urllib.parse, json, ipaddress, hashlib, hmac, sys, re, socket, http.client
 from collections import deque
 from pathlib import Path
 import proxy_server
@@ -11,6 +11,46 @@ except ImportError:
         def start(self): pass
         def stop(self): pass
         def send(self, data, message_type="status"): return False
+
+
+def _prefer_ipv4_create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+    host, port = address
+    addresses = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    addresses.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+    errors = []
+    for family, socktype, proto, _, socket_address in addresses:
+        connection = None
+        try:
+            connection = socket.socket(family, socktype, proto)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                connection.settimeout(timeout)
+            if source_address:
+                connection.bind(source_address)
+            connection.connect(socket_address)
+            return connection
+        except OSError as error:
+            errors.append(error)
+            if connection is not None:
+                connection.close()
+    if errors:
+        raise errors[-1]
+    raise OSError("getaddrinfo returned no addresses")
+
+
+class _PreferIPv4HTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _prefer_ipv4_create_connection
+
+
+class _PreferIPv4HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_PreferIPv4HTTPSConnection, request, context=self._context, check_hostname=self._check_hostname)
+
+
+def _urlopen(request, timeout):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _PreferIPv4HTTPSHandler())
+    return opener.open(request, timeout=timeout)
 
 API_URL = "https://www.vpngate.net/api/iphone/"
 C2_URL = os.environ.get("C2_URL", "https://YOUR_CONTROLLER_DOMAIN")
@@ -94,6 +134,7 @@ public_ip = ""
 global_node_reservoir = {} 
 reservoir_lock = threading.Lock()
 last_reservoir_log_count = None
+last_empty_candidate_log = 0
 
 class Tunnel:
     def __init__(self, name: str, table_id: int):
@@ -130,7 +171,7 @@ def get_public_ip():
     global public_ip
     try:
         req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "curl/7.68.0"})
-        with urllib.request.urlopen(req, timeout=5) as res:
+        with _urlopen(req, timeout=5) as res:
             public_ip = res.read().decode("utf-8").strip()
         if public_ip and ':' in public_ip:
             raise ValueError("Got IPv6")
@@ -138,7 +179,7 @@ def get_public_ip():
         try:
             req = urllib.request.Request("https://api.ipify.org?format=text",
                                           headers={"User-Agent": "curl/7.68.0"})
-            with urllib.request.urlopen(req, timeout=5) as res:
+            with _urlopen(req, timeout=5) as res:
                 public_ip = res.read().decode("utf-8").strip()
         except:
             public_ip = "Unknown_IP"
@@ -158,8 +199,7 @@ def c2_request(url, *, data=None, method=None):
     for attempt in range(C2_REQUEST_ATTEMPTS):
         try:
             request = urllib.request.Request(url, data=data, headers=get_c2_headers(), method=method)
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(request, timeout=C2_REQUEST_TIMEOUT) as response:
+            with _urlopen(request, timeout=C2_REQUEST_TIMEOUT) as response:
                 return response.read()
         except Exception as error:
             last_error = error
@@ -232,7 +272,7 @@ def check_for_updates():
             if not UPDATE_ORIGIN: raise ValueError("UPDATE_OR is required for updates")
             url = f"{UPDATE_ORIGIN.rstrip('/')}/api/agent_update?ip={urllib.parse.quote(VPS_IP, safe='')}&component={component}"
             request = urllib.request.Request(url, headers=get_c2_headers())
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with _urlopen(request, timeout=20) as response:
                 source = response.read(2 * 1024 * 1024 + 1)
                 expected = response.headers.get("X-Agent-SHA256", "").lower()
                 version = response.headers.get("X-Agent-Manifest-Version", "")
@@ -465,7 +505,7 @@ def setup_env():
 def harvest_snapshot_nodes() -> list:
     try:
         req = urllib.request.Request(API_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as res: text = res.read().decode("utf-8", errors="replace")
+        with _urlopen(req, timeout=15) as res: text = res.read().decode("utf-8", errors="replace")
         lines = [line for line in text.splitlines() if line and not line.startswith("*")]
         if lines and lines[0].startswith("#"): lines[0] = lines[0][1:]
         nodes = []
@@ -610,7 +650,7 @@ def connect_node(tun: Tunnel, node: dict, generation: int):
             try:
                 req_url = f"https://testisp.info/api/check?ip={egress_ip}"
                 check_req = urllib.request.Request(req_url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, method="GET")
-                with urllib.request.urlopen(check_req, timeout=10) as check_res:
+                with _urlopen(check_req, timeout=10) as check_res:
                     data = json.loads(check_res.read().decode("utf-8"))
                     print(f"[*] {tun.name} testisp.info 报告 {egress_ip}: {data.get('isp',{})} / native={data.get('geo',{}).get('is_native','?')}", flush=True)
                     isp = data.get("isp", {})
@@ -737,7 +777,7 @@ def health_check_loop():
                 print(f"[*] {target_tun} 探针无响应，快速复核 ({fail_counts[process_key]}/3)...", flush=True)
 
 def get_best_candidate():
-    global global_node_reservoir, dead_ips, target_country, tun_main, tun_backup
+    global global_node_reservoir, dead_ips, target_country, tun_main, tun_backup, last_empty_candidate_log
     with reservoir_lock:
         all_pool_nodes = sorted(list(global_node_reservoir.values()), key=lambda x: x["ping"])
         candidates = [n for n in all_pool_nodes if (target_country == "ANY" or n["country"] == target_country) and n["ip"] not in dead_ips]
@@ -757,7 +797,10 @@ def get_best_candidate():
         country_counts = {}
         for node in all_pool_nodes:
             country_counts[node["country"]] = country_counts.get(node["country"], 0) + 1
-        print(f"[!] 无可用 {target_country} 候选；节点分布={country_counts}，黑名单={len(dead_ips)}", flush=True)
+        now = time.time()
+        if now - last_empty_candidate_log >= 30:
+            print(f"[!] 无可用 {target_country} 候选；节点分布={country_counts}，黑名单={len(dead_ips)}", flush=True)
+            last_empty_candidate_log = now
     return None
 
 def sanitize_openvpn_config(raw: str, expected_ip: str) -> str:
