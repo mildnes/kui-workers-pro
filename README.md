@@ -82,7 +82,7 @@ Telegram 通知建议登录后在面板中设置。`TG_BOT_TOKEN`、`TG_CHAT_ID`
 3. 复制页面生成的 Full Deploy Command，以 `root` 在目标 VPS 执行。
 4. 等待 Agent 回连后创建节点或执行批量部署。
 
-卸载、备份和完整清理行为见 [VPS Agent 管理](docs/vps-agent.md)。
+国内 VPS 无法从 GitHub 下载 sing-box 时，可使用自有 HTTPS 对象存储或自建 GitHub 代理。镜像配置、卸载、备份和完整清理行为见 [VPS Agent 管理](docs/vps-agent.md)。
 
 ## 常见问题
 

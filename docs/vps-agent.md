@@ -10,6 +10,33 @@
 
 支持 XTLS-Reality、Hysteria2、TUIC、Shadowsocks 2022、Trojan、H2/gRPC-Reality、AnyTLS、Naive、VLESS-Argo、Socks5 和 Dokodemo-door。
 
+## 国内 VPS 下载 sing-box
+
+安装器默认从 GitHub Releases 下载固定版本的 sing-box。国内 VPS 无法访问 GitHub 时，建议将对应的官方压缩包**原样**同步到自己的 HTTPS 对象存储，再在面板复制的部署命令末尾追加：
+
+```bash
+--sing-box-url "https://你的对象存储域名/sing-box-1.13.14-linux-amd64-glibc.tar.gz"
+```
+
+压缩包必须与 VPS 系统和架构匹配：
+
+| VPS 环境 | 官方压缩包后缀 |
+| --- | --- |
+| Debian/Ubuntu x86_64 | `linux-amd64-glibc` |
+| Debian/Ubuntu aarch64 | `linux-arm64-glibc` |
+| Alpine x86_64 | `linux-amd64-musl` |
+| Alpine aarch64 | `linux-arm64-musl` |
+
+如果已有自建的 GitHub HTTPS 代理，也可以在部署命令末尾追加：
+
+```bash
+--github-proxy "https://你的-github-代理域名"
+```
+
+代理地址会作为完整 GitHub Release URL 的前缀。也可分别通过环境变量 `KUI_SING_BOX_URL`、`KUI_GITHUB_PROXY` 传入相同配置。安装器依次尝试自定义完整地址、GitHub 代理、GitHub 官方源；所有下载文件都必须通过项目内固定的 SHA256 校验，校验失败不会安装。若 VPS 已安装准确版本 `1.13.14`，安装器会直接复用。
+
+不要依赖来源不明的公共加速站，也不要重新打包压缩文件，否则 SHA256 校验会失败。
+
 ## WARP Endpoint 优选
 
 在 **WARP 隧道** 页面选择目标 VPS 后，可以检测 Cloudflare WireGuard Endpoint 的真实可用性、失败率和延迟。检测使用 VPS 上单独保存的测速身份，不会让当前业务 WARP 身份在候选之间漂移。

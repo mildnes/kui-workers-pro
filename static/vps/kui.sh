@@ -8,6 +8,8 @@ set -eu
 # ==========================================
 
 API_URL=""; VPS_IP=""; TOKEN=""; PROXY_API_URL=""; BOOTSTRAP=""
+SING_BOX_URL="${KUI_SING_BOX_URL:-}"
+GITHUB_PROXY="${KUI_GITHUB_PROXY:-}"
 
 while [ "$#" -gt 0 ]; do
     case $1 in
@@ -16,6 +18,8 @@ while [ "$#" -gt 0 ]; do
         --token) [ "$#" -ge 2 ] || { echo "--token 缺少参数"; exit 1; }; TOKEN="$2"; shift ;;
         --bootstrap) [ "$#" -ge 2 ] || { echo "--bootstrap 缺少参数"; exit 1; }; BOOTSTRAP="$2"; shift ;;
         --proxy-api) [ "$#" -ge 2 ] || { echo "--proxy-api 缺少参数"; exit 1; }; PROXY_API_URL="$2"; shift ;;
+        --sing-box-url) [ "$#" -ge 2 ] || { echo "--sing-box-url 缺少参数"; exit 1; }; SING_BOX_URL="$2"; shift ;;
+        --github-proxy) [ "$#" -ge 2 ] || { echo "--github-proxy 缺少参数"; exit 1; }; GITHUB_PROXY="$2"; shift ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
     shift
@@ -41,6 +45,14 @@ case "$API_URL" in *'@'*|*'#'*) echo "❌ --api 不能包含用户信息或 frag
 if [ -n "$PROXY_API_URL" ]; then
     case "$PROXY_API_URL" in https://*) ;; *) echo "❌ --proxy-api 必须使用 https://"; exit 1 ;; esac
 fi
+if [ -n "$SING_BOX_URL" ]; then
+    case "$SING_BOX_URL" in https://*) ;; *) echo "❌ --sing-box-url 必须使用 https://"; exit 1 ;; esac
+    case "$SING_BOX_URL" in *'@'*|*'#'*) echo "❌ --sing-box-url 不能包含用户信息或 fragment"; exit 1 ;; esac
+fi
+if [ -n "$GITHUB_PROXY" ]; then
+    case "$GITHUB_PROXY" in https://*) ;; *) echo "❌ --github-proxy 必须使用 https://"; exit 1 ;; esac
+    case "$GITHUB_PROXY" in *'@'*|*'#'*) echo "❌ --github-proxy 不能包含用户信息或 fragment"; exit 1 ;; esac
+fi
 
 if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -65,6 +77,7 @@ INIT_SYS=$(detect_init_system)
 
 INSTALL_SUCCESS=0
 BACKUP_DIR=$(mktemp -d /tmp/kui-install-backup.XXXXXX)
+SB_STAGED_PATH="/usr/bin/.sing-box.kui.$$"
 chmod 700 "$BACKUP_DIR"
 BACKUP_ITEMS=""
 for item in opt/kui etc/sing-box usr/bin/sing-box etc/systemd/system/kui-agent.service etc/systemd/system/sing-box.service etc/init.d/kui-agent etc/init.d/sing-box opt/proxy_lite etc/proxy-lite etc/systemd/system/proxy-lite.service etc/init.d/proxy-lite etc/conf.d/proxy-lite; do
@@ -74,6 +87,7 @@ done
 
 rollback_install() {
     status=$?
+    rm -f "$SB_STAGED_PATH"
     if [ "$INSTALL_SUCCESS" -ne 1 ]; then
         echo "❌ 安装未完成，正在恢复上一个可用版本..."
         if [ "$INIT_SYS" = "openrc" ]; then rc-service kui-agent stop >/dev/null 2>&1 || true; rc-service sing-box stop >/dev/null 2>&1 || true; rc-service proxy-lite stop >/dev/null 2>&1 || true
@@ -142,31 +156,75 @@ else
 fi
 
 echo "[4/7] ⚙️ 部署 Sing-box 代理核心..."
-rm -f /usr/bin/sing-box
-ARCH=$(uname -m)
-case "$ARCH" in
-    x86_64) SB_ARCH="amd64" ;;
-    aarch64) SB_ARCH="arm64" ;;
-    *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
-esac
 SB_VER="1.13.14"
-SB_SUFFIX="linux-${SB_ARCH}-glibc"
-[ "$OS" = "alpine" ] && SB_SUFFIX="linux-${SB_ARCH}-musl"
-curl -fL --retry 3 -o sing-box.tar.gz -A "$CURL_USER_AGENT" "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-${SB_SUFFIX}.tar.gz"
-case "$SB_SUFFIX" in
-    linux-amd64-glibc) EXPECTED_SHA="aae9172317c61760aae3dafcde889b2e51b7ea590c40d2b3c7ccdeae14b361b6" ;;
-    linux-amd64-musl) EXPECTED_SHA="d5b46de6498427bccfeb87dbafcde4dbefdfe35680020d07d286ad915f0bfb34" ;;
-    linux-arm64-glibc) EXPECTED_SHA="08d37b2bf12145ec44307333490cecca4c917df054cd8e27a210f8d9cdbe0fd9" ;;
-    linux-arm64-musl) EXPECTED_SHA="edec18488af35a93cf8b362063146fdd7b557ef9862710ee77a1f4adb5c70118" ;;
-    *) echo "❌ 不支持的 sing-box 构建: $SB_SUFFIX"; exit 1 ;;
-esac
-ACTUAL_SHA=$(sha256sum sing-box.tar.gz | awk '{print $1}')
-[ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "❌ sing-box SHA256 校验失败"; exit 1; }
-tar -xzf sing-box.tar.gz
-test -x "sing-box-${SB_VER}-${SB_SUFFIX}/sing-box"
-mv "sing-box-${SB_VER}-${SB_SUFFIX}/sing-box" /usr/bin/
-chmod +x /usr/bin/sing-box
-rm -rf sing-box.tar.gz "sing-box-${SB_VER}-${SB_SUFFIX}"
+CURRENT_SB_VER=""
+if [ -x /usr/bin/sing-box ]; then
+    CURRENT_SB_VER=$(/usr/bin/sing-box version 2>/dev/null | awk 'NR == 1 && $1 == "sing-box" && $2 == "version" {print $3}')
+fi
+
+if [ "$CURRENT_SB_VER" = "$SB_VER" ]; then
+    echo "✅ 已安装 sing-box ${SB_VER}，跳过下载。"
+else
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64) SB_ARCH="amd64" ;;
+        aarch64) SB_ARCH="arm64" ;;
+        *) echo "不支持的 CPU 架构: $ARCH"; exit 1 ;;
+    esac
+    SB_SUFFIX="linux-${SB_ARCH}-glibc"
+    [ "$OS" = "alpine" ] && SB_SUFFIX="linux-${SB_ARCH}-musl"
+    case "$SB_SUFFIX" in
+        linux-amd64-glibc) EXPECTED_SHA="aae9172317c61760aae3dafcde889b2e51b7ea590c40d2b3c7ccdeae14b361b6" ;;
+        linux-amd64-musl) EXPECTED_SHA="d5b46de6498427bccfeb87dbafcde4dbefdfe35680020d07d286ad915f0bfb34" ;;
+        linux-arm64-glibc) EXPECTED_SHA="08d37b2bf12145ec44307333490cecca4c917df054cd8e27a210f8d9cdbe0fd9" ;;
+        linux-arm64-musl) EXPECTED_SHA="edec18488af35a93cf8b362063146fdd7b557ef9862710ee77a1f4adb5c70118" ;;
+        *) echo "❌ 不支持的 sing-box 构建: $SB_SUFFIX"; exit 1 ;;
+    esac
+
+    SB_DOWNLOAD_DIR="$BACKUP_DIR/sing-box-download"
+    SB_ARCHIVE="$SB_DOWNLOAD_DIR/sing-box.tar.gz"
+    SB_OFFICIAL_URL="https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-${SB_SUFFIX}.tar.gz"
+    mkdir -p "$SB_DOWNLOAD_DIR"
+
+    download_sing_box() {
+        source_url="$1"
+        source_name="$2"
+        rm -f "$SB_ARCHIVE"
+        echo "⏳ 尝试从${source_name}下载 sing-box..."
+        if curl -fL --retry 3 --connect-timeout 15 --proto '=https' --proto-redir '=https' -o "$SB_ARCHIVE" -A "$CURL_USER_AGENT" "$source_url"; then
+            ACTUAL_SHA=$(sha256sum "$SB_ARCHIVE" | awk '{print $1}')
+            if [ "$ACTUAL_SHA" = "$EXPECTED_SHA" ]; then
+                echo "✅ ${source_name}下载及 SHA256 校验通过。"
+                return 0
+            fi
+            echo "⚠️ ${source_name}文件 SHA256 不匹配，拒绝使用。"
+        else
+            echo "⚠️ 无法从${source_name}下载。"
+        fi
+        rm -f "$SB_ARCHIVE"
+        return 1
+    }
+
+    DOWNLOAD_OK=0
+    if [ -n "$SING_BOX_URL" ]; then
+        download_sing_box "$SING_BOX_URL" "自定义镜像" && DOWNLOAD_OK=1 || true
+    fi
+    if [ "$DOWNLOAD_OK" -eq 0 ] && [ -n "$GITHUB_PROXY" ]; then
+        download_sing_box "${GITHUB_PROXY%/}/${SB_OFFICIAL_URL}" "GitHub 代理" && DOWNLOAD_OK=1 || true
+    fi
+    if [ "$DOWNLOAD_OK" -eq 0 ]; then
+        download_sing_box "$SB_OFFICIAL_URL" "GitHub 官方源" && DOWNLOAD_OK=1 || true
+    fi
+    [ "$DOWNLOAD_OK" -eq 1 ] || { echo "❌ 所有 sing-box 下载来源均失败，请配置私有镜像后重试。"; exit 1; }
+
+    tar -xzf "$SB_ARCHIVE" -C "$SB_DOWNLOAD_DIR"
+    SB_EXTRACTED="$SB_DOWNLOAD_DIR/sing-box-${SB_VER}-${SB_SUFFIX}/sing-box"
+    test -x "$SB_EXTRACTED"
+    cp "$SB_EXTRACTED" "$SB_STAGED_PATH"
+    chmod 755 "$SB_STAGED_PATH"
+    mv "$SB_STAGED_PATH" /usr/bin/sing-box
+    echo "✅ sing-box ${SB_VER} 安装完成。"
+fi
 
 echo "[4.5/7] ⚙️ 正在应用网络内核调优（BBR / QUIC / conntrack）..."
 if [ "$OS" = "alpine" ]; then
