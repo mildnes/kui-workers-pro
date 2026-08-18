@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import base64, csv, os, subprocess, threading, time, urllib.request, urllib.parse, json, ipaddress, hashlib, hmac, sys, re, socket, http.client
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from pathlib import Path
 import proxy_server
 try:
@@ -51,6 +53,75 @@ class _PreferIPv4HTTPSHandler(urllib.request.HTTPSHandler):
 def _urlopen(request, timeout):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _PreferIPv4HTTPSHandler())
     return opener.open(request, timeout=timeout)
+
+
+class _VPNGateIndexParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows = []
+        self.current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "tr":
+            self.current = {"country": "", "detail_url": "", "text": []}
+        elif self.current is not None and tag == "img":
+            match = re.search(r"/flags/([A-Za-z]{2})\.png(?:$|\?)", attrs.get("src", ""))
+            if match:
+                self.current["country"] = match.group(1).upper()
+        elif self.current is not None and tag == "a":
+            href = attrs.get("href", "")
+            if "do_openvpn.aspx?" in href:
+                self.current["detail_url"] = href
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current["text"].append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "tr" and self.current is not None:
+            if self.current["country"] and self.current["detail_url"]:
+                self.rows.append(self.current)
+            self.current = None
+
+
+def _parse_vpngate_index(text):
+    parser = _VPNGateIndexParser()
+    parser.feed(text)
+    candidates = []
+    for row in parser.rows:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(row["detail_url"]).query)
+        values = {key: str(query.get(key, [""])[0]) for key in ("ip", "tcp", "udp", "sid", "hid")}
+        try:
+            parsed_ip = ipaddress.ip_address(values["ip"])
+            tcp_port = int(values["tcp"] or 0)
+            udp_port = int(values["udp"] or 0)
+        except ValueError:
+            continue
+        if parsed_ip.version != 4 or not parsed_ip.is_global:
+            continue
+        if not re.fullmatch(r"\d{1,20}", values["sid"]) or not re.fullmatch(r"\d{1,20}", values["hid"]):
+            continue
+        use_tcp = 1 <= tcp_port <= 65535
+        port = tcp_port if use_tcp else udp_port
+        if not 1 <= port <= 65535:
+            continue
+        text_content = " ".join(row["text"])
+        ping_match = re.search(r"Ping:\s*(\d+)\s*ms", text_content, re.I)
+        download_query = urllib.parse.urlencode({
+            "sid": values["sid"],
+            "tcp": "1" if use_tcp else "0",
+            "host": str(parsed_ip),
+            "port": str(port),
+            "hid": values["hid"],
+        })
+        candidates.append({
+            "ip": str(parsed_ip),
+            "country": row["country"],
+            "ping": int(ping_match.group(1)) if ping_match else 9999,
+            "download_url": f"https://www.vpngate.net/common/openvpn_download.aspx?{download_query}",
+        })
+    return candidates
 
 API_URL = "https://www.vpngate.net/api/iphone/"
 C2_URL = os.environ.get("C2_URL", "https://YOUR_CONTROLLER_DOMAIN")
@@ -135,6 +206,10 @@ global_node_reservoir = {}
 reservoir_lock = threading.Lock()
 last_reservoir_log_count = None
 last_empty_candidate_log = 0
+html_fallback_cache = {}
+last_vpngate_source_log = 0
+VPNGATE_HTML_FALLBACK_INTERVAL = 1800
+VPNGATE_HTML_FALLBACK_LIMIT = 8
 
 class Tunnel:
     def __init__(self, name: str, table_id: int):
@@ -502,29 +577,97 @@ def setup_env():
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.all.rp_filter=2"], capture_output=True)
     subprocess.run(["sysctl", "-w", "net.ipv4.conf.default.rp_filter=2"], capture_output=True)
 
+def _read_vpngate_response(url, max_bytes, timeout=15):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname != "www.vpngate.net":
+        raise ValueError("untrusted VPNGate source")
+    request = urllib.request.Request(url, headers={"User-Agent": "KUI-Residential-Agent/2.0", "Accept": "text/csv,text/html;q=0.9,*/*;q=0.1"})
+    with _urlopen(request, timeout=timeout) as response:
+        raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError("VPNGate response exceeds size limit")
+    return raw.decode("utf-8", errors="replace")
+
+
+def _parse_vpngate_csv(text):
+    lines = [line for line in text.splitlines() if line and not line.startswith("*")]
+    if not lines or "OpenVPN_ConfigData_Base64" not in lines[0]:
+        raise ValueError("VPNGate CSV endpoint returned non-CSV content")
+    if lines[0].startswith("#"):
+        lines[0] = lines[0][1:]
+    nodes = []
+    for row in csv.DictReader(lines):
+        try:
+            node_ip = str(ipaddress.ip_address(row.get("IP", "")))
+            if ipaddress.ip_address(node_ip).version != 4 or not ipaddress.ip_address(node_ip).is_global:
+                continue
+            encoded_config = row.get("OpenVPN_ConfigData_Base64", "")
+            if not encoded_config:
+                continue
+            raw_ping = row.get("Ping", "")
+            nodes.append({
+                "ip": node_ip,
+                "ping": int(raw_ping) if raw_ping.isdigit() else 9999,
+                "country": row.get("CountryShort", "").upper(),
+                "config": sanitize_openvpn_config(base64.b64decode(encoded_config, validate=True).decode("utf-8", errors="replace"), node_ip),
+                "harvested_at": time.time(),
+            })
+        except Exception:
+            continue
+    if not nodes:
+        raise ValueError("VPNGate CSV contained no usable OpenVPN nodes")
+    return nodes
+
+
+def _download_vpngate_candidate(candidate):
+    try:
+        raw_config = _read_vpngate_response(candidate["download_url"], 256 * 1024)
+        return {
+            "ip": candidate["ip"],
+            "ping": candidate["ping"],
+            "country": candidate["country"],
+            "config": sanitize_openvpn_config(raw_config, candidate["ip"]),
+            "harvested_at": time.time(),
+        }
+    except Exception:
+        return None
+
+
+def _harvest_vpngate_html_fallback(source_error):
+    global last_vpngate_source_log
+    country = target_country if target_country == "ANY" or re.fullmatch(r"[A-Z]{2}", target_country) else "JP"
+    now = time.time()
+    cached = html_fallback_cache.get(country)
+    if cached and now - cached["updated_at"] < VPNGATE_HTML_FALLBACK_INTERVAL:
+        return [{**node, "harvested_at": now} for node in cached["nodes"]]
+    try:
+        index_text = _read_vpngate_response("https://www.vpngate.net/en/", 2 * 1024 * 1024, timeout=20)
+        candidates = [candidate for candidate in _parse_vpngate_index(index_text) if country == "ANY" or candidate["country"] == country]
+        candidates = sorted(candidates, key=lambda candidate: candidate["ping"])[:VPNGATE_HTML_FALLBACK_LIMIT]
+        if not candidates:
+            raise ValueError(f"official page contained no {country} candidates")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            nodes = [node for node in executor.map(_download_vpngate_candidate, candidates) if node]
+        if not nodes:
+            raise ValueError("official OpenVPN downloads returned no usable profiles")
+        html_fallback_cache[country] = {"updated_at": now, "nodes": nodes}
+        print(f"[source] VPNGate CSV unavailable ({source_error}); official HTTPS fallback loaded {len(nodes)} {country} nodes", flush=True)
+        last_vpngate_source_log = now
+        return nodes
+    except Exception as fallback_error:
+        if cached:
+            return [{**node, "harvested_at": now} for node in cached["nodes"]]
+        if now - last_vpngate_source_log >= VPNGATE_HTML_FALLBACK_INTERVAL:
+            print(f"[source] VPNGate sources unavailable: CSV={source_error}; fallback={fallback_error}", flush=True)
+            last_vpngate_source_log = now
+        return []
+
+
 def harvest_snapshot_nodes() -> list:
     try:
-        req = urllib.request.Request(API_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with _urlopen(req, timeout=15) as res: text = res.read().decode("utf-8", errors="replace")
-        lines = [line for line in text.splitlines() if line and not line.startswith("*")]
-        if lines and lines[0].startswith("#"): lines[0] = lines[0][1:]
-        nodes = []
-        for row in csv.DictReader(lines):
-            try:
-                ip = row.get("IP")
-                if not ip or not row.get("OpenVPN_ConfigData_Base64"): continue
-                raw_ping = row.get("Ping", "")
-                nodes.append({
-                    "ip": ip,
-                    "ping": int(raw_ping) if raw_ping.isdigit() else 9999,
-                    "country": row.get("CountryShort", "").upper(),
-                    "config": sanitize_openvpn_config(base64.b64decode(row["OpenVPN_ConfigData_Base64"], validate=True).decode("utf-8", errors="replace"), ip),
-                    "harvested_at": time.time()
-                })
-            except Exception:
-                continue
-        return nodes
-    except Exception as e: return []
+        return _parse_vpngate_csv(_read_vpngate_response(API_URL, 20 * 1024 * 1024))
+    except Exception as error:
+        return _harvest_vpngate_html_fallback(str(error))
 
 def vpngate_fetch_loop():
     global global_node_reservoir, dead_ips, last_reservoir_log_count

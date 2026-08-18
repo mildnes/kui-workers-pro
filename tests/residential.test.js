@@ -141,3 +141,11 @@ test('agent control requests bypass environment proxies and retry transient stal
     assert.doesNotMatch(agent, /urllib\.request\.urlopen/);
     assert.doesNotMatch(manager, /urllib\.request\.urlopen/);
 });
+
+test('VPNGate CSV failures use a bounded official HTTPS fallback', () => {
+    assert.match(manager, /VPNGATE_HTML_FALLBACK_INTERVAL = 1800/);
+    assert.match(manager, /VPNGATE_HTML_FALLBACK_LIMIT = 8/);
+    assert.match(manager, /parsed\.scheme != "https" or parsed\.hostname != "www\.vpngate\.net"/);
+    assert.match(manager, /ThreadPoolExecutor\(max_workers=2\)/);
+    assert.match(manager, /official HTTPS fallback loaded/);
+});
