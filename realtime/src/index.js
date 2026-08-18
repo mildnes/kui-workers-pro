@@ -55,9 +55,21 @@ function cors(request, env) {
   };
 }
 
+function validIp(value) {
+  if (typeof value !== "string" || value !== value.trim()) return false;
+  if (/^(?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}$/.test(value)) return value.split(".").every(part => Number(part) <= 255);
+  if (!value.includes(":") || !/^[0-9A-Fa-f:.]{2,45}$/.test(value)) return false;
+  try {
+    const parsed = new URL(`http://[${value}]/`);
+    return parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]") && parsed.port === "" && parsed.pathname === "/";
+  } catch {
+    return false;
+  }
+}
+
 function safeProxyAddress(value) {
   const address = String(value || "").trim();
-  return /^[0-9A-Fa-f:.]{2,64}$/.test(address) ? address : "";
+  return validIp(address) ? address : "";
 }
 
 function compactWarpCandidate(value) {

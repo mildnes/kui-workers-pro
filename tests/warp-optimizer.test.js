@@ -19,11 +19,16 @@ const agent = read('../static/vps/agent.py');
 test('WARP optimizer requests accept only bounded actions and candidates', () => {
   const { normalizeWarpOptimizeRequest } = __test;
   assert.deepEqual(normalizeWarpOptimizeRequest({ ip: '203.0.113.8', action: 'scan' }), { ip: '203.0.113.8', action: 'scan', address: '', port: 0, policy: '' });
+  assert.deepEqual(normalizeWarpOptimizeRequest({ ip: '2001:db8::8', action: 'scan' }), { ip: '2001:db8::8', action: 'scan', address: '', port: 0, policy: '' });
   assert.deepEqual(normalizeWarpOptimizeRequest({ ip: '203.0.113.8', action: 'apply', address: '162.159.192.1', port: 2408 }), { ip: '203.0.113.8', action: 'apply', address: '162.159.192.1', port: 2408, policy: '' });
   assert.deepEqual(normalizeWarpOptimizeRequest({ ip: '203.0.113.8', action: 'policy', policy: 'on_failure' }), { ip: '203.0.113.8', action: 'policy', address: '', port: 0, policy: 'on_failure' });
   for (const invalid of [
     { ip: '', action: 'scan' },
+    { ip: 'deadbeef', action: 'scan' },
+    { ip: ':::', action: 'scan' },
+    { ip: '999.1.1.1', action: 'scan' },
     { ip: '203.0.113.8', action: 'apply', address: 'example.com', port: 2408 },
+    { ip: '203.0.113.8', action: 'apply', address: ':::', port: 2408 },
     { ip: '203.0.113.8', action: 'apply', address: '162.159.192.1', port: 0 },
     { ip: '203.0.113.8', action: 'policy', policy: 'always' },
     { ip: '203.0.113.8', action: 'unknown' },

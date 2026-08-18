@@ -158,9 +158,18 @@ test('standalone realtime trusts only explicitly configured Pages origins', () =
 test('public probe content never executes stored administrator markup', () => {
     assert.doesNotMatch(frontend, /v-html="probeSys\.popup_content"/);
     assert.doesNotMatch(frontend, /headWrapper\.innerHTML|kui-custom-script|wrapper\.innerHTML\s*=\s*newVal/);
+    assert.doesNotMatch(frontend, /styleTag\.innerHTML\s*=/);
+    assert.match(frontend, /styleTag\.textContent\s*=\s*css/);
     assert.doesNotMatch(api, /publicKeys[^\n]+custom_(?:head|script)/);
     assert.doesNotMatch(api, /allowedSettings[^\n]+custom_(?:head|script)/);
     assert.match(worker, /script-src 'self'/);
+});
+
+test('VPS and realtime addresses require valid IPv4 or IPv6 syntax', () => {
+    assert.match(api, /function validIp\(value\)[\s\S]{0,900}new URL\(`http:\/\/\[\$\{value\}\]\/`\)/);
+    assert.match(api, /if \(!validIp\(ip\)\) return Response\.json\(\{ error: 'Invalid VPS IP'/);
+    assert.match(realtime, /function validIp\(value\)[\s\S]{0,900}new URL\(`http:\/\/\[\$\{value\}\]\/`\)/);
+    assert.match(realtime, /return validIp\(address\) \? address : ""/);
 });
 
 test('long-lived Agent tokens stay off the browser data plane', () => {

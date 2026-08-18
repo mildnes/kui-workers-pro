@@ -47,7 +47,14 @@ class _PreferIPv4HTTPSConnection(http.client.HTTPSConnection):
 
 class _PreferIPv4HTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, request):
-        return self.do_open(_PreferIPv4HTTPSConnection, request, context=self._context, check_hostname=self._check_hostname)
+        options = {}
+        context = getattr(self, "_context", None)
+        check_hostname = getattr(self, "_check_hostname", None)
+        if context is not None:
+            options["context"] = context
+        if check_hostname is not None:
+            options["check_hostname"] = check_hostname
+        return self.do_open(_PreferIPv4HTTPSConnection, request, **options)
 
 
 def _urlopen(request, timeout):
@@ -485,7 +492,7 @@ def update_config_loop():
                 if target_country != desired_country or force_switch:
                     config_generation += 1
                     target_country = desired_country
-                    if force_switch: print(f"[*] 收到强制更换指令，正在清退通道并拉黑当前 IP...", flush=True)
+                    if force_switch: print("[*] 收到强制更换指令，正在清退通道并拉黑当前 IP...", flush=True)
                     else: print(f"[*] 策略热切换: 目标重定向到 {desired_country}...", flush=True)
                     
                     if tun_main.entry_ip: dead_ips.add(tun_main.entry_ip)

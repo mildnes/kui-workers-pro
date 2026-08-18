@@ -27,9 +27,6 @@ except ImportError:
         def start(self): pass
         def stop(self): pass
         def send(self, data, message_type="status"): return False
-from datetime import datetime
-
-
 def _prefer_ipv4_create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
     host, port = address
     addresses = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -62,7 +59,14 @@ class _PreferIPv4HTTPSConnection(http.client.HTTPSConnection):
 
 class _PreferIPv4HTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, request):
-        return self.do_open(_PreferIPv4HTTPSConnection, request, context=self._context, check_hostname=self._check_hostname)
+        options = {}
+        context = getattr(self, "_context", None)
+        check_hostname = getattr(self, "_check_hostname", None)
+        if context is not None:
+            options["context"] = context
+        if check_hostname is not None:
+            options["check_hostname"] = check_hostname
+        return self.do_open(_PreferIPv4HTTPSConnection, request, **options)
 
 
 def _urlopen(request, timeout):
@@ -1755,8 +1759,6 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             continue
         sni = node.get("sni") or "addons.mozilla.org"
         certificate_name = "kui-tuic.local" if proto == "TUIC" else sni
-        clean_uuid = node.get('uuid', '').replace('-', '')
-        
         if proto in ["Hysteria2", "TUIC", "Trojan", "VLESS-WS-TLS", "AnyTLS", "Naive"]:
             cert_path, key_path, sni_path = f"/opt/kui/cert_{node['id']}.pem", f"/opt/kui/key_{node['id']}.pem", f"/opt/kui/cert_{node['id']}.sni"
             active_certs.extend([f"cert_{node['id']}.pem", f"key_{node['id']}.pem", f"cert_{node['id']}.sni"])

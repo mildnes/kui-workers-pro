@@ -49,7 +49,19 @@ async function readJsonBody(request, maxBytes) {
     return parsed;
 }
 
-function validIp(value) { return typeof value === 'string' && /^[0-9A-Fa-f:.]{2,64}$/.test(value); }
+function validIp(value) {
+    if (typeof value !== 'string' || value !== value.trim()) return false;
+    if (/^(?:0|[1-9]\d{0,2})(?:\.(?:0|[1-9]\d{0,2})){3}$/.test(value)) {
+        return value.split('.').every(part => Number(part) <= 255);
+    }
+    if (!value.includes(':') || !/^[0-9A-Fa-f:.]{2,45}$/.test(value)) return false;
+    try {
+        const parsed = new URL(`http://[${value}]/`);
+        return parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']') && parsed.port === '' && parsed.pathname === '/';
+    } catch {
+        return false;
+    }
+}
 
 function normalizeWarpOptimizeRequest(value) {
     const ip = String(value?.ip || '').trim();
@@ -2428,7 +2440,7 @@ rules:
                     return Response.json({ error: error.message || '出口检测指令发送失败' }, { status: 503 });
                 }
             }
-            if (method === "POST") { const { ip, name } = await request.json(); if (!/^[0-9A-Fa-f:.]{2,64}$/.test(String(ip || ''))) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 }); const agentToken = crypto.randomUUID(); const inserted = await db.prepare("INSERT INTO servers (ip, name, alert_sent, agent_token) SELECT ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM servers) < 100 ON CONFLICT(ip) DO NOTHING RETURNING ip").bind(ip, String(name || ip).slice(0, 100), agentToken).first(); if (!inserted) { if (await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first()) return Response.json({ error: 'VPS already exists' }, { status: 409 }); return Response.json({ error: "当前版本最多管理 100 台 VPS" }, { status: 409 }); } return Response.json({ success: true }); }
+            if (method === "POST") { const { ip, name } = await request.json(); if (!validIp(ip)) return Response.json({ error: 'Invalid VPS IP' }, { status: 400 }); const agentToken = crypto.randomUUID(); const inserted = await db.prepare("INSERT INTO servers (ip, name, alert_sent, agent_token) SELECT ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM servers) < 100 ON CONFLICT(ip) DO NOTHING RETURNING ip").bind(ip, String(name || ip).slice(0, 100), agentToken).first(); if (!inserted) { if (await db.prepare('SELECT ip FROM servers WHERE ip = ?').bind(ip).first()) return Response.json({ error: 'VPS already exists' }, { status: 409 }); return Response.json({ error: "当前版本最多管理 100 台 VPS" }, { status: 409 }); } return Response.json({ success: true }); }
             if (method === "PUT") {
                 const data = await readJsonBody(request, 40 * 1024);
                 const ip = String(data.ip || '');
