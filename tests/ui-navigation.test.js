@@ -177,10 +177,15 @@ test('deployment commands live in the server overflow flyout with all three copy
 });
 
 test('successful command and protocol copies close their floating menus', () => {
-    assert.match(state, /closeCopyOverlays = event =>/);
+    assert.match(state, /closeCopyOverlays = trigger =>/);
     assert.match(state, /details\.kui-server-command-menu\[open\][\s\S]*details\.kui-server-menu\[open\][\s\S]*details\.kui-action-menu\[open\]/);
-    assert.match(state, /await writeClipboard\(txt\); closeCopyOverlays\(event\); alert\(msg\)/);
-    assert.match(state, /await writeClipboard\(config\);\s*closeCopyOverlays\(event\)/);
+    assert.match(state, /copyCommand = async \(txt, msg, eventOrTrigger\) => \{ const trigger = eventOrTrigger\?\.currentTarget \|\| eventOrTrigger;[\s\S]{0,160}await writeClipboard\(txt\); closeCopyOverlays\(trigger\); alert\(msg\)/);
+    const surgeCopy = state.slice(state.indexOf('const copySurgeConfig = async'), state.indexOf('\n                  const showQrCode'));
+    assert.match(surgeCopy, /const trigger = event\?\.currentTarget;/);
+    assert.match(surgeCopy, /await writeClipboard\(config\);\s*closeCopyOverlays\(trigger\)/);
+    for (const functionName of ['copyDeployCommand', 'copyUninstallCommand', 'copyPurgeCommand']) {
+        assert.match(state, new RegExp(`${functionName} = async \\(vps, event\\) => \\{ const trigger = event\\?\\.currentTarget;[\\s\\S]{0,700}copyCommand\\([^;]+, trigger\\)`));
+    }
     assert.match(serversPage, /copyCommand\(generateSubLink\(vps\.ip, '',?\)[\s\S]{0,100}\$event/);
     assert.match(topBar, /copySurgeConfig\('', '', \$event\)/);
 });
