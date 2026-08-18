@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { __test } from '../functions/api/[[path]].js';
 
-const { buildSurgeProxyLine, validateSs2022Credentials } = __test;
+const { buildNodeSubscriptionUri, buildSurgeProxyLine, validateSs2022Credentials } = __test;
 
 test('accepts correctly sized Shadowsocks 2022 keys', () => {
     assert.doesNotThrow(() => validateSs2022Credentials('2022-blake3-aes-128-gcm', Buffer.alloc(16, 1).toString('base64')));
@@ -43,4 +43,13 @@ test('renders Surge native protocols and skips unsupported protocols', () => {
         'SOCKS = socks5, 203.0.113.9, 1080, username="user", password="p@ss", udp-relay=true',
     );
     assert.equal(buildSurgeProxyLine({ name: 'Reality', protocol: 'XTLS-Reality', host: 'example.com', port: 443 }), '');
+    assert.equal(buildSurgeProxyLine({ name: 'MTProxy', protocol: 'MTProxy', host: 'example.com', port: 443 }), '');
+});
+
+test('renders a Telegram MTProxy subscription link', () => {
+    const secret = `ee${'11'.repeat(16)}${Buffer.from('proxy.example.com').toString('hex')}`;
+    assert.equal(
+        buildNodeSubscriptionUri({ protocol: 'MTProxy', vps_ip: '203.0.113.8', port: 443, private_key: secret }),
+        `tg://proxy?server=203.0.113.8&port=443&secret=${secret}`,
+    );
 });

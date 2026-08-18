@@ -51,6 +51,13 @@ test('credential protocols expose their protocol-specific fields', () => {
     assert.equal(naive['密码'], 'pass');
 });
 
+test('MTProxy details expose FakeTLS connection parameters', () => {
+    const rows = asObject(buildNodeDetailRows({ protocol: 'MTProxy', port: 443, sni: 'proxy.example.com', private_key: 'ee-secret' }));
+    assert.equal(rows['监听端口'], '443');
+    assert.equal(rows['TLS 伪装域名'], 'proxy.example.com');
+    assert.equal(rows['FakeTLS 密钥'], 'ee-secret');
+});
+
 test('relay and Argo details expose targets instead of unrelated credentials', () => {
     const relay = asObject(buildNodeDetailRows({ protocol: 'dokodemo-door', port: 9000, relay_type: 'external', target_ip: '10.0.0.1', target_port: 443 }));
     assert.equal(relay['转发类型'], '外部地址');
@@ -73,6 +80,12 @@ test('node subscription links carry a validated node scope through UI and API', 
     assert.match(apiWorker, /query \+= " AND n\.id = \?"; sqlParams\.push\(nodeId\)/);
     assert.match(kuiState, /copySurgeConfig[\s\S]*Authorization[^\n]*Bearer/);
     assert.match(apiWorker, /authenticatedSurgeAccess = format === 'surge'[\s\S]{0,100}authenticatedSurgeUser === reqUser/);
+});
+
+test('MTProxy nodes copy a direct Telegram link instead of unsupported client exports', () => {
+    assert.match(kuiState, /generateMtproxyLink = node => `tg:\/\/proxy\?/);
+    assert.match(serversPage, /node\.protocol === 'MTProxy'[\s\S]*?复制 Telegram 链接/);
+    assert.match(serversPage, /<template v-else>[\s\S]*?复制 Clash 订阅[\s\S]*?复制 Surge 配置段/);
 });
 
 test('node-scoped subscriptions do not append unrelated external sources', () => {

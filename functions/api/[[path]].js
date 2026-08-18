@@ -212,10 +212,10 @@ const SS2022_KEY_BYTES = {
     '2022-blake3-aes-256-gcm': 32,
 };
 
-const NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']);
+const NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door', 'MTProxy']);
 const REALITY_PROTOCOLS = new Set(['XTLS-Reality', 'Reality', 'H2-Reality', 'gRPC-Reality']);
-const TLS_NODE_PROTOCOLS = new Set([...REALITY_PROTOCOLS, 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive']);
-const PASSWORD_NODE_PROTOCOLS = new Set(['TUIC', 'Shadowsocks2022', 'Trojan', 'AnyTLS', 'Naive', 'Socks5']);
+const TLS_NODE_PROTOCOLS = new Set([...REALITY_PROTOCOLS, 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive', 'MTProxy']);
+const PASSWORD_NODE_PROTOCOLS = new Set(['TUIC', 'Shadowsocks2022', 'Trojan', 'AnyTLS', 'Naive', 'Socks5', 'MTProxy']);
 const INTERNAL_RELAY_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS']);
 const UUID_NODE_PROTOCOLS = new Set(['VLESS', 'XTLS-Reality', 'Reality', 'TUIC', 'H2-Reality', 'gRPC-Reality', 'VLESS-Argo']);
 
@@ -257,6 +257,14 @@ function normalizeNodeHost(value, label) {
     return host.toLowerCase();
 }
 
+function validateMtproxySecret(secret, domain) {
+    const normalized = String(secret || '').trim().toLowerCase();
+    if (!/^ee[0-9a-f]{34,}$/.test(normalized) || normalized.length % 2 !== 0) throw new Error('Invalid MTProxy FakeTLS secret');
+    const domainHex = [...new TextEncoder().encode(domain)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    if (normalized.slice(34) !== domainHex) throw new Error('Invalid MTProxy FakeTLS secret for SNI');
+    return normalized;
+}
+
 function normalizeNodePayload(input) {
     const node = { ...input };
     node.id = normalizeNodeText(node.id, 'id', 64);
@@ -280,6 +288,7 @@ function normalizeNodePayload(input) {
     if (node.protocol !== 'dokodemo-door') node.uuid = normalizeNodeText(node.uuid, 'UUID/username', 128);
     if (UUID_NODE_PROTOCOLS.has(node.protocol) && !/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(node.uuid)) throw new Error('Invalid node UUID');
     if (node.protocol === 'TUIC') node.sni = '';
+    else if (node.protocol === 'MTProxy') node.sni = normalizeNodeHost(node.sni, 'MTProxy TLS domain');
     else if (TLS_NODE_PROTOCOLS.has(node.protocol)) node.sni = normalizeNodeHost(node.sni || 'addons.mozilla.org', 'SNI');
     else node.sni = normalizeNodeText(node.sni, 'SNI', 253, false);
 
@@ -290,8 +299,10 @@ function normalizeNodePayload(input) {
         if (!/^[A-Za-z0-9_-]{43}$/.test(node.private_key) || !/^[A-Za-z0-9_-]{43}$/.test(node.public_key)) throw new Error('Invalid Reality key');
         if (!/^(?:[0-9A-Fa-f]{2}){1,16}$/.test(node.short_id)) throw new Error('Invalid Reality short ID');
     }
-    if (PASSWORD_NODE_PROTOCOLS.has(node.protocol)) node.private_key = normalizeNodeText(node.private_key, 'password', 256);
+    if (node.protocol === 'MTProxy') node.private_key = normalizeNodeText(node.private_key, 'password', 1024);
+    else if (PASSWORD_NODE_PROTOCOLS.has(node.protocol)) node.private_key = normalizeNodeText(node.private_key, 'password', 256);
     if (node.protocol === 'Shadowsocks2022') validateSs2022Credentials(node.uuid, node.private_key);
+    if (node.protocol === 'MTProxy') node.private_key = validateMtproxySecret(node.private_key, node.sni);
 
     if (node.protocol === 'dokodemo-door') {
         if (!['internal', 'external'].includes(node.relay_type)) throw new Error('Invalid relay type');
@@ -505,6 +516,15 @@ function buildSurgeProxyLine({ name, protocol, host, port, method, uuid, passwor
     if (protocol === 'AnyTLS') return `${prefix}anytls, ${host}, ${port}, password=${surgeValue(password)}${surgeTlsOptions(sni)}`;
     if (protocol === 'Socks5') return `${prefix}socks5, ${host}, ${port}, username=${surgeValue(uuid)}, password=${surgeValue(password)}, udp-relay=true`;
     return '';
+}
+
+function buildNodeSubscriptionUri(node = {}) {
+    if (node.protocol !== 'MTProxy') return '';
+    const host = String(node.vps_ip || node.host || '').replace(/^\[|\]$/g, '');
+    const port = Number(node.port);
+    const secret = String(node.private_key || '');
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535 || !secret) return '';
+    return `tg://proxy?${new URLSearchParams({ server: host, port: String(port), secret }).toString()}`;
 }
 
 function escapeHtml(value) {
@@ -1966,6 +1986,7 @@ export async function onRequest(context) {
                 case "Naive": link = `naive+https://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}?security=tls&sni=${encodeURIComponent(nodeSni)}#${remark}`; break;
                 case "Socks5": link = `socks5://${encodeURIComponent(node.uuid)}:${encodeURIComponent(node.private_key)}@${nodeIp}:${node.port}#${remark}`; break;
                 case "VLESS-Argo": if (!(node.sni || '').includes('等待')) link = `vless://${node.uuid}@${node.sni}:443?encryption=none&security=tls&type=ws&host=${node.sni}&path=%2F#${remark}-Argo`; break;
+                case "MTProxy": link = buildNodeSubscriptionUri(node); break;
             }
             if (link) subLinks.push(link);
 
@@ -2607,9 +2628,11 @@ export async function onRequestScheduled(context) {
 }
 
 export const __test = {
+    buildNodeSubscriptionUri,
     buildSevenDayTrafficSeries,
     buildSurgeProxyLine,
     validateSs2022Credentials,
+    validateMtproxySecret,
     sanitizeProxyListenHost,
     validateProxyReport,
     validateTrafficReport,

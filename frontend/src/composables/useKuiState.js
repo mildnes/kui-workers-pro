@@ -461,7 +461,7 @@ export function useKuiState() {
                           proxyPublicListenerManageable.value = data.proxyPublicListenerManageable !== false;
                           if (data.realtimeUrl && data.realtimeUrl !== realtimeUrl.value) { realtimeUrl.value = data.realtimeUrl; connectRealtime(); }
                           servers.value.forEach(s => { 
-                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', node_uuid: '', node_username: '', node_password: '', reality_private_key: '', reality_public_key: '', reality_short_id: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: '', ss_network: 'tcp,udp', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
+                              if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'XTLS-Reality', port: 443, username: 'admin', sni: 'addons.mozilla.org', node_uuid: '', node_username: '', node_password: '', reality_private_key: '', reality_public_key: '', reality_short_id: '', ss_method: '2022-blake3-aes-256-gcm', ss_password: '', ss_network: 'tcp,udp', mtproxy_domain: '', mtproxy_secret: '', relay_type: 'external', target_ip: '', target_port: '', target_id: '', traffic_limit_gb: '', expire_date: '' };
                               if(!deployOsMap[s.ip]) deployOsMap[s.ip] = 'debian'; if(!batchStartPort[s.ip]) batchStartPort[s.ip] = ''; if(!batchUser[s.ip]) batchUser[s.ip] = 'admin';
                               if ((s.egress_mode === 'socks5' || s.socks5_addr) && s._socks5_addr === undefined) { s._socks5_addr = s.socks5_addr || ''; s._socks5_port = s.socks5_port || 1080; s._socks5_user = s.socks5_user || ''; s._socks5_pass = ''; s._socks5_clear_password = false; }
                           });
@@ -700,9 +700,11 @@ export function useKuiState() {
                       if (!p.port) { alert('请填写端口!'); return null; }
                       const optionalText = value => String(value || '').trim();
                       const randomSecret = (bytes = 18) => { const value = new Uint8Array(bytes); crypto.getRandomValues(value); return btoa(String.fromCharCode(...value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); };
+                      const generateMtproxySecret = domain => { const random = new Uint8Array(16); crypto.getRandomValues(random); const toHex = bytes => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join(''); return `ee${toHex(random)}${toHex(new TextEncoder().encode(domain))}`; };
                       let limitBytes = p.traffic_limit_gb ? Math.floor(parseFloat(p.traffic_limit_gb) * 1073741824) : 0; let expireTs = expiryTimestamp(p.expire_date);
                       const payload = { id, uuid: optionalText(p.node_uuid) || crypto.randomUUID(), vps_ip: ip, protocol: p.protocol, port: p.port, username: p.username, traffic_limit: limitBytes, expire_time: expireTs, sni: optionalText(p.sni) };
                       if (p.protocol === 'TUIC') payload.sni = '';
+                      else if (p.protocol === 'MTProxy') { payload.sni = optionalText(p.mtproxy_domain).toLowerCase(); if (!payload.sni) { alert('请填写 MTProxy TLS 伪装域名'); return null; } }
                       else if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality', 'Hysteria2', 'Trojan', 'AnyTLS', 'Naive'].includes(p.protocol) && !payload.sni) payload.sni = 'addons.mozilla.org';
                       if (['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(p.protocol)) {
                           const privateKey = optionalText(p.reality_private_key); const publicKey = optionalText(p.reality_public_key);
@@ -722,6 +724,8 @@ export function useKuiState() {
                           payload.uuid = optionalText(p.node_uuid) || crypto.randomUUID(); payload.private_key = optionalText(p.node_password) || randomSecret();
                       } else if (p.protocol === 'Naive' || p.protocol === 'Socks5') {
                           payload.uuid = optionalText(p.node_username) || `user_${crypto.randomUUID().replace(/-/g, '').substring(0, 12)}`; payload.private_key = optionalText(p.node_password) || randomSecret();
+                      } else if (p.protocol === 'MTProxy') {
+                          payload.private_key = optionalText(p.mtproxy_secret) || generateMtproxySecret(payload.sni);
                       } else if (p.protocol === 'VLESS-Argo') {
                           payload.sni = optionalText(p.sni) || '⏳ 正在等待 VPS 自动回传穿透域名...';
                       } else if (p.protocol === 'dokodemo-door') {
@@ -750,6 +754,8 @@ export function useKuiState() {
                       reality_public_key: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.public_key || '' : '',
                       reality_short_id: ['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'].includes(node.protocol) ? node.short_id || '' : '',
                       ss_method: node.protocol === 'Shadowsocks2022' ? node.uuid : '2022-blake3-aes-256-gcm', ss_password: node.protocol === 'Shadowsocks2022' ? node.private_key || '' : '', ss_network: node.protocol === 'Shadowsocks2022' ? node.network || 'tcp,udp' : 'tcp,udp',
+                      mtproxy_secret: node.protocol === 'MTProxy' ? node.private_key || '' : '',
+                      mtproxy_domain: node.protocol === 'MTProxy' ? node.sni || '' : '',
                       relay_type: node.relay_type || 'external', target_ip: node.target_ip || '', target_port: node.target_port || '', target_id: node.target_id || '',
                       traffic_limit_gb: node.traffic_limit > 0 ? Number((node.traffic_limit / 1073741824).toFixed(3)) : '', expire_date: node.expire_time > 0 ? formatDate(node.expire_time) : '',
                   });
@@ -850,6 +856,7 @@ export function useKuiState() {
                       if (nodeId) link += `&node=${encodeURIComponent(nodeId)}`;
                       return link;
                   };
+                  const generateMtproxyLink = node => `tg://proxy?${new URLSearchParams({ server: String(node.vps_ip || '').replace(/^\[|\]$/g, ''), port: String(node.port), secret: node.private_key || '' }).toString()}`;
                   
                   const writeClipboard = async text => {
                       if (navigator.clipboard?.writeText) {
@@ -1252,7 +1259,7 @@ export function useKuiState() {
                       isLoggedIn, showLoginModal, loginUser, password, loginPending, currentUser, role, activeTab, colorMode, effectiveColorMode, refreshing, refreshPanel,
                       servers, nodes, users, groups, securityWarnings, proxyCredentialsReady, proxyPublicListenerManageable, publicListenerSaving, setProxyPublicListener, addingVps, addingNode, newVps, newNodeParams, nodeEditDrafts, newUser, newGroupName,
                       login, logout, refreshData, openProxyList, addUser, toggleUser, deleteUser, resetUserTraffic, addGroup, saveGroup, deleteGroup, groupDraft, addVps, copyPurgeCommand, addNode, startEditNode, cancelEditNode, saveNodeEdit, deleteNode, toggleNode, resetTraffic,
-                      getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyDeployCommand, copyUninstallCommand, copyPurgeCommand, requestAgentBootstrapToken, generateSs2022Password, generateSubLink, copyCommand, copySurgeConfig,
+                      getNodesByIp, getVpsName, formatBytes, formatDate, getExpireText, getTrafficPercent, getPingColor, isOnline, generateCmd, generateUninstallCmd, copyDeployCommand, copyUninstallCommand, copyPurgeCommand, requestAgentBootstrapToken, generateSs2022Password, generateSubLink, generateMtproxyLink, copyCommand, copySurgeConfig,
                       globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, siteTitleDirty, markSiteTitleDirty, saveSiteTitle, siteTitleSaving, userNewPassword, updateUserPassword, passwordSaving, resetMySubLink, subTokenResetting, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols,
                       probeSys, publicProbeServers, filteredProbeServers, probeView, probeDetailId, probeDetail, setProbeView, openProbeDetail, probeGlobalOnline, probeGlobalOffline, probeGlobalSpeedIn, probeGlobalSpeedOut, probeGlobalNetRx, probeGlobalNetTx, filteredProbeGroups, probeCountryStats, currentFilter,
                       probeSettingsDirty, markProbeSettingsDirty, probeSettingsSaving, saveProbeSettings, subscriptionProtectionSaving, saveSubscriptionProtection, adminProbeServers, probeEditModalOpen, editingProbeNode, openProbeEditModal, saveProbeEdit, deleteProbeNode, currentDomain,

@@ -20,6 +20,8 @@ test('default uninstaller removes KUI Agent and sing-box but preserves proxy-lit
     assert.match(script, /REMOVE_SYSTEMD_SINGBOX_UNIT/);
     assert.match(script, /if \[ "\$PURGE_ALL" -eq 1 \]; then[\s\S]*?rm -rf \/opt\/proxy_lite/);
     assert.match(script, /if \[ "\$PURGE_ALL" -eq 1 \]; then systemctl disable --now proxy-lite\.service/);
+    assert.match(script, /kui-mtproxy-/);
+    assert.match(script, /rm -f \/etc\/systemd\/system\/kui-mtproxy-\*\.service/);
 });
 
 test('Worker exposes the authenticated uninstaller asset', () => {

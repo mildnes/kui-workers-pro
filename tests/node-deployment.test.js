@@ -12,6 +12,8 @@ const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.
 
 const UUID = '11111111-1111-4111-8111-111111111111';
 const REALITY_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const MTPROXY_DOMAIN = 'proxy.example.com';
+const MTPROXY_SECRET = `ee${'11'.repeat(16)}${Buffer.from(MTPROXY_DOMAIN).toString('hex')}`;
 
 function baseNode(protocol, overrides = {}) {
     return { id: 'node_1', vps_ip: '203.0.113.8', protocol, port: 443, uuid: UUID, ...overrides };
@@ -31,6 +33,7 @@ test('single-node payloads normalize fields needed by sing-box', () => {
     assert.equal(normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: ssKey })).network, 'tcp,udp');
     assert.equal(normalizeNodePayload(baseNode('Trojan', { uuid: 'credential', private_key: 'secret' })).sni, 'addons.mozilla.org');
     assert.equal(normalizeNodePayload(baseNode('TUIC', { private_key: 'secret', sni: 'legacy.example.com' })).sni, '');
+    assert.equal(normalizeNodePayload(baseNode('MTProxy', { private_key: MTPROXY_SECRET, sni: MTPROXY_DOMAIN })).private_key, MTPROXY_SECRET);
     assert.equal(normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 })).target_ip, 'relay.example.com');
 });
 
@@ -51,6 +54,7 @@ test('every protocol offered by the single-node form reaches a valid normalized 
         baseNode('Socks5', { uuid: 'custom-user', private_key: 'custom-socks-password' }),
         baseNode('VLESS-Argo'),
         baseNode('dokodemo-door', { uuid: '', relay_type: 'external', target_ip: 'relay.example.com', target_port: 8443 }),
+        baseNode('MTProxy', { private_key: MTPROXY_SECRET, sni: MTPROXY_DOMAIN }),
     ];
     for (const payload of cases) assert.equal(normalizeNodePayload(payload).protocol, payload.protocol);
 });
@@ -63,6 +67,8 @@ test('invalid credentials and incomplete relay records are rejected before stora
     assert.throws(() => normalizeNodePayload(baseNode('dokodemo-door', { uuid: '', relay_type: 'internal', target_id: '' })), /target ID/i);
     assert.throws(() => normalizeNodePayload(baseNode('Trojan', { uuid: 'credential', private_key: 'secret', traffic_limit: -1 })), /traffic limit/i);
     assert.throws(() => normalizeNodePayload(baseNode('Shadowsocks2022', { uuid: '2022-blake3-aes-256-gcm', private_key: Buffer.alloc(32).toString('base64'), network: 'icmp' })), /network/i);
+    assert.throws(() => normalizeNodePayload(baseNode('MTProxy', { private_key: MTPROXY_SECRET, sni: 'other.example.com' })), /MTProxy.*secret/i);
+    assert.throws(() => normalizeNodePayload(baseNode('MTProxy', { private_key: 'ee1234', sni: MTPROXY_DOMAIN })), /MTProxy.*secret/i);
 });
 
 test('listener conflicts are scoped by VPS transport', () => {
@@ -99,7 +105,7 @@ test('node forms stay compact and mark required fields explicitly', () => {
 });
 
 test('single-node form exposes every credential used by supported protocols', () => {
-    for (const protocol of ['VLESS', 'XTLS-Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door']) {
+    for (const protocol of ['VLESS', 'XTLS-Reality', 'Hysteria2', 'TUIC', 'Shadowsocks2022', 'Trojan', 'H2-Reality', 'gRPC-Reality', 'AnyTLS', 'Naive', 'Socks5', 'VLESS-Argo', 'dokodemo-door', 'MTProxy']) {
         assert.match(serversPage, new RegExp(`value="${protocol}"`));
     }
     for (const model of ['node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password', 'ss_network']) {
@@ -115,7 +121,7 @@ test('single-node protocols are alphabetized before fixed special entries', () =
     const formStart = serversPage.indexOf('v-model="newNodeParams[vps.ip].protocol"');
     const formEnd = serversPage.indexOf('</select>', formStart);
     const options = serversPage.slice(formStart, formEnd);
-    const labels = ['AnyTLS', 'gRPC + Reality', 'H2 + Reality', 'Hysteria2', 'Naive', 'Shadowsocks 2022', 'SOCKS5', 'Trojan', 'TUIC v5', 'VLESS', 'XTLS + Reality', '──────────', 'VLESS Argo', 'Dokodemo'];
+    const labels = ['AnyTLS', 'gRPC + Reality', 'H2 + Reality', 'Hysteria2', 'Naive', 'Shadowsocks 2022', 'SOCKS5', 'Trojan', 'TUIC v5', 'VLESS', 'XTLS + Reality', '──────────', 'VLESS Argo', 'Dokodemo', 'MTProxy'];
     let previous = -1;
     for (const label of labels) {
         const current = options.indexOf(`>${label}<`);
@@ -133,6 +139,7 @@ test('blank optional credentials receive protocol-safe random defaults', () => {
     assert.match(addNodeSource, /privateKey \? \{ privateKey, publicKey/);
     assert.match(addNodeSource, /: generateRealityKeys\(\)/);
     assert.match(addNodeSource, /replace\(\/\\\+\/g, '-'\).*replace\(\/\\\//s);
+    assert.match(addNodeSource, /generateMtproxySecret\(payload\.sni\)/);
 });
 
 test('configured nodes expose an inline editor with full protocol fields', () => {
@@ -140,7 +147,7 @@ test('configured nodes expose an inline editor with full protocol fields', () =>
     assert.match(serversPage, /v-if="nodeEditDrafts\[node\.id\]" class="kui-node-edit-form"/);
     assert.match(serversPage, /@click="saveNodeEdit\(node\)">保存并应用<\/button>/);
     assert.match(serversPage, /@click="cancelEditNode\(node\.id\)">取消/);
-    for (const field of ['protocol', 'port', 'username', 'node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password', 'relay_type', 'target_ip', 'target_port', 'target_id', 'traffic_limit_gb', 'expire_date']) {
+    for (const field of ['protocol', 'port', 'username', 'node_uuid', 'node_username', 'node_password', 'reality_private_key', 'reality_public_key', 'reality_short_id', 'ss_method', 'ss_password', 'mtproxy_domain', 'mtproxy_secret', 'relay_type', 'target_ip', 'target_port', 'target_id', 'traffic_limit_gb', 'expire_date']) {
         assert.match(serversPage, new RegExp(`nodeEditDrafts\\[node\\.id\\]\\.${field}`));
     }
     assert.match(appStyles, /\.kui-node-edit-form/);
@@ -152,6 +159,7 @@ test('node edit drafts preserve existing credentials and save through the valida
     assert.match(editSource, /reality_private_key: \['XTLS-Reality', 'H2-Reality', 'gRPC-Reality'\]\.includes\(node\.protocol\) \? node\.private_key/);
     assert.match(editSource, /node_password: node\.protocol === 'Hysteria2' \? node\.uuid/);
     assert.match(editSource, /ss_password: node\.protocol === 'Shadowsocks2022' \? node\.private_key/);
+    assert.match(editSource, /mtproxy_secret: node\.protocol === 'MTProxy' \? node\.private_key/);
     assert.match(editSource, /traffic_limit_gb: node\.traffic_limit > 0/);
     assert.match(editSource, /buildNodePayload\(node\.vps_ip, nodeEditDrafts\[node\.id\], node\.id\)/);
     assert.match(editSource, /method: 'PUT'/);
@@ -208,6 +216,17 @@ test('TUIC uses a stable internal certificate identity while other TLS nodes fol
 test('TUIC bypasses sing-box sniffing while retaining shared DNS handling', () => {
     assert.match(agent, /sniff_inbounds = sorted\([\s\S]*?node\.get\("protocol"\) not in \{"dokodemo-door", "TUIC"\}/);
     assert.match(agent, /build_egress_dns_policy\([\s\S]*?sniff_inbounds=sniff_inbounds/);
+});
+
+test('MTProxy is managed by mtg and excluded from sing-box inbounds', () => {
+    assert.match(agent, /MTG_VERSION = "2\.2\.8"/);
+    assert.match(agent, /def sync_mtproxy_nodes\(/);
+    assert.match(agent, /if proto == "MTProxy":[\s\S]*?continue/);
+    assert.match(agent, /sync_mtproxy_nodes\(nodes\)/);
+    assert.doesNotMatch(agent, /"type": "mtproxy"/);
+    assert.match(agent, /archive checksum mismatch/);
+    assert.match(agent, /ProtectSystem=strict/);
+    assert.match(agent, /f"\/etc\/init\.d\/\{service\}"/);
 });
 
 test('sing-box node traffic and connection tuning are generated safely', () => {

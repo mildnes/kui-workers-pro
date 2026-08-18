@@ -83,6 +83,9 @@ BACKUP_ITEMS=""
 for item in opt/kui etc/sing-box usr/bin/sing-box etc/systemd/system/kui-agent.service etc/systemd/system/sing-box.service etc/init.d/kui-agent etc/init.d/sing-box opt/proxy_lite etc/proxy-lite etc/systemd/system/proxy-lite.service etc/init.d/proxy-lite etc/conf.d/proxy-lite; do
     [ ! -e "/$item" ] || BACKUP_ITEMS="$BACKUP_ITEMS $item"
 done
+for item in /etc/systemd/system/kui-mtproxy-*.service /etc/init.d/kui-mtproxy-*; do
+    [ ! -e "$item" ] || BACKUP_ITEMS="$BACKUP_ITEMS ${item#/}"
+done
 [ -z "$BACKUP_ITEMS" ] || tar -C / -czf "$BACKUP_DIR/system.tgz" $BACKUP_ITEMS
 
 rollback_install() {
@@ -90,10 +93,12 @@ rollback_install() {
     rm -f "$SB_STAGED_PATH"
     if [ "$INSTALL_SUCCESS" -ne 1 ]; then
         echo "❌ 安装未完成，正在恢复上一个可用版本..."
+        for service in /etc/systemd/system/kui-mtproxy-*.service; do [ ! -e "$service" ] || systemctl disable --now "$(basename "$service")" >/dev/null 2>&1 || true; done
+        for service in /etc/init.d/kui-mtproxy-*; do [ ! -e "$service" ] || { rc-service "$(basename "$service")" stop >/dev/null 2>&1 || true; rc-update del "$(basename "$service")" default >/dev/null 2>&1 || true; }; done
         if [ "$INIT_SYS" = "openrc" ]; then rc-service kui-agent stop >/dev/null 2>&1 || true; rc-service sing-box stop >/dev/null 2>&1 || true; rc-service proxy-lite stop >/dev/null 2>&1 || true
         else systemctl stop kui-agent sing-box proxy-lite >/dev/null 2>&1 || true; fi
         rm -rf /opt/kui /etc/sing-box /opt/proxy_lite /etc/proxy-lite
-        rm -f /usr/bin/sing-box /etc/systemd/system/kui-agent.service /etc/systemd/system/sing-box.service /etc/systemd/system/proxy-lite.service /etc/init.d/kui-agent /etc/init.d/sing-box /etc/init.d/proxy-lite /etc/conf.d/proxy-lite
+        rm -f /usr/bin/sing-box /etc/systemd/system/kui-agent.service /etc/systemd/system/sing-box.service /etc/systemd/system/proxy-lite.service /etc/systemd/system/kui-mtproxy-*.service /etc/init.d/kui-agent /etc/init.d/sing-box /etc/init.d/proxy-lite /etc/init.d/kui-mtproxy-* /etc/conf.d/proxy-lite
         [ ! -f "$BACKUP_DIR/system.tgz" ] || tar -C / -xzf "$BACKUP_DIR/system.tgz"
         if [ "$INIT_SYS" = "openrc" ]; then rc-service kui-agent start >/dev/null 2>&1 || true; rc-service sing-box start >/dev/null 2>&1 || true; rc-service proxy-lite start >/dev/null 2>&1 || true
         else systemctl daemon-reload >/dev/null 2>&1 || true; systemctl start kui-agent sing-box proxy-lite >/dev/null 2>&1 || true; fi
@@ -112,15 +117,17 @@ export CURL_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/53
 
 echo "[1/7] 🧹 正在清理历史残留..."
 if [ "$INIT_SYS" = "openrc" ]; then
+    for service in /etc/init.d/kui-mtproxy-*; do [ ! -e "$service" ] || { rc-service "$(basename "$service")" stop >/dev/null 2>&1 || true; rc-update del "$(basename "$service")" default >/dev/null 2>&1 || true; }; done
     rc-service kui-agent stop >/dev/null 2>&1 || true
     rc-service sing-box stop >/dev/null 2>&1 || true
     rc-update del kui-agent default >/dev/null 2>&1 || true
     rc-update del sing-box default >/dev/null 2>&1 || true
-    rm -f /etc/init.d/kui-agent /etc/init.d/sing-box
+    rm -f /etc/init.d/kui-agent /etc/init.d/sing-box /etc/init.d/kui-mtproxy-*
 else
+    for service in /etc/systemd/system/kui-mtproxy-*.service; do [ ! -e "$service" ] || systemctl disable --now "$(basename "$service")" >/dev/null 2>&1 || true; done
     systemctl stop kui-agent >/dev/null 2>&1 || true
     systemctl stop sing-box >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/kui-agent.service
+    rm -f /etc/systemd/system/kui-agent.service /etc/systemd/system/kui-mtproxy-*.service
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 rm -rf /opt/kui /etc/sing-box/config.json
@@ -262,7 +269,7 @@ if [ -f "$BACKUP_DIR/system.tgz" ]; then
     done
 fi
 
-API_URL="$API_URL" VPS_IP="$VPS_IP" TOKEN="$TOKEN" PROXY_API_URL="${PROXY_API_URL:-}" python3 -c 'import json, os; json.dump({"api_url": os.environ["API_URL"] + "/api/config", "report_url": os.environ["API_URL"] + "/api/report", "ip": os.environ["VPS_IP"], "token": os.environ["TOKEN"], "proxy_api": os.environ["PROXY_API_URL"]}, open("/opt/kui/config.json", "w"))'
+API_URL="$API_URL" VPS_IP="$VPS_IP" TOKEN="$TOKEN" PROXY_API_URL="${PROXY_API_URL:-}" GITHUB_PROXY="$GITHUB_PROXY" python3 -c 'import json, os; json.dump({"api_url": os.environ["API_URL"] + "/api/config", "report_url": os.environ["API_URL"] + "/api/report", "ip": os.environ["VPS_IP"], "token": os.environ["TOKEN"], "proxy_api": os.environ["PROXY_API_URL"], "github_proxy": os.environ["GITHUB_PROXY"]}, open("/opt/kui/config.json", "w"))'
 chmod 600 /opt/kui/config.json
 
 verify_agent_manifest() {

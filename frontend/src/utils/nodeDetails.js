@@ -53,6 +53,10 @@ export function buildNodeDetailRows(node = {}) {
     if (node.relay_type === 'internal') add('目标节点 ID', node.target_id);
     else add('转发目标', node.target_ip && node.target_port ? `${node.target_ip}:${node.target_port}` : node.target_ip || node.target_port);
     add('传输网络', node.network || 'tcp');
+  } else if (protocol === 'MTProxy') {
+    add('TLS 伪装域名', node.sni);
+    add('FakeTLS 密钥', node.private_key);
+    add('传输方式', 'TCP + FakeTLS');
   } else {
     add('UUID', node.uuid);
     add('SNI / 域名', node.sni);

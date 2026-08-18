@@ -190,11 +190,12 @@ test('successful command and protocol copies close their floating menus', () => 
     assert.match(topBar, /copySurgeConfig\('', '', \$event\)/);
 });
 
-test('expanded node details expose three node-scoped subscription exports', () => {
+test('expanded node details expose protocol-appropriate node exports', () => {
     const start = serversPage.indexOf('kui-node-export-actions');
     const actions = serversPage.slice(start, serversPage.indexOf('</div>', start));
     assert.ok(start >= 0);
-    assert.equal((actions.match(/<button\b/g) || []).length, 3);
+    assert.equal((actions.match(/<button\b/g) || []).length, 4);
+    assert.match(actions, /generateMtproxyLink\(node\)/);
     assert.match(actions, /generateSubLink\(vps\.ip, '', node\.id\)/);
     assert.match(actions, /generateSubLink\(vps\.ip, 'clash', node\.id\)/);
     assert.match(actions, /copySurgeConfig\(vps\.ip, node\.id\)/);

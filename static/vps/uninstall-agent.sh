@@ -98,6 +98,9 @@ for item in \
     etc/sysctl.d/99-proxy-lite.conf; do
     [ ! -e "/$item" ] || BACKUP_ITEMS="$BACKUP_ITEMS $item"
 done
+for item in /etc/systemd/system/kui-mtproxy-*.service /etc/init.d/kui-mtproxy-*; do
+    [ ! -e "$item" ] || BACKUP_ITEMS="$BACKUP_ITEMS ${item#/}"
+done
 
 if [ -n "$BACKUP_ITEMS" ] && command -v tar >/dev/null 2>&1; then
     umask 077
@@ -112,10 +115,12 @@ fi
 
 echo "[*] 停止并禁用 KUI Agent 与 KUI sing-box..."
 if [ "$INIT_SYS" = "systemd" ]; then
+    for service in /etc/systemd/system/kui-mtproxy-*.service; do [ ! -e "$service" ] || systemctl disable --now "$(basename "$service")" >/dev/null 2>&1 || true; done
     systemctl disable --now kui-agent.service >/dev/null 2>&1 || true
     systemctl disable --now sing-box.service >/dev/null 2>&1 || true
     if [ "$PURGE_ALL" -eq 1 ]; then systemctl disable --now proxy-lite.service >/dev/null 2>&1 || true; fi
 elif [ "$INIT_SYS" = "openrc" ]; then
+    for service in /etc/init.d/kui-mtproxy-*; do [ ! -e "$service" ] || { rc-service "$(basename "$service")" stop >/dev/null 2>&1 || true; rc-update del "$(basename "$service")" default >/dev/null 2>&1 || true; }; done
     rc-service kui-agent stop >/dev/null 2>&1 || true
     rc-service sing-box stop >/dev/null 2>&1 || true
     rc-update del kui-agent default >/dev/null 2>&1 || true
@@ -144,8 +149,10 @@ rm -rf /etc/sing-box
 rm -rf /etc/systemd/system/kui-agent.service.d
 rm -f /usr/bin/sing-box
 rm -f /etc/systemd/system/kui-agent.service
+rm -f /etc/systemd/system/kui-mtproxy-*.service
 [ "$REMOVE_SYSTEMD_SINGBOX_UNIT" -ne 1 ] || rm -f /etc/systemd/system/sing-box.service
 rm -f /etc/init.d/kui-agent
+rm -f /etc/init.d/kui-mtproxy-*
 rm -f /etc/init.d/sing-box
 rm -f /etc/sysctl.d/99-kui-optimize.conf
 rm -f /run/kui-agent.pid /run/sing-box.pid

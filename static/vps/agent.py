@@ -19,6 +19,7 @@ import threading
 import configparser
 import ipaddress
 import random
+import tarfile
 try:
     from realtime_client import RealtimeChannel
 except ImportError:
@@ -97,6 +98,16 @@ CLOUDFLARED_ASSETS = {
     "x86_64": ("amd64", "79a0ade7fc854f62c1aaef48424d9d979e8c2fcd039189d24db82b84cd146be1"),
     "aarch64": ("arm64", "18f2c9bfc7a67a971bd96f1a5a1935def3c1e52aa386626f1566f04e9b5478d6"),
 }
+MTG_VERSION = "2.2.8"
+MTG_ASSETS = {
+    "x86_64": ("amd64", "7ef19d079d85f4e00d4f8334ec1f3f3c8718e3d0ed1f3109ea9a8673138a2102"),
+    "amd64": ("amd64", "7ef19d079d85f4e00d4f8334ec1f3f3c8718e3d0ed1f3109ea9a8673138a2102"),
+    "aarch64": ("arm64", "562a94dd4cafcb8f179b76cfeafb76da12747c8e230bc76235bf8746cc189644"),
+    "arm64": ("arm64", "562a94dd4cafcb8f179b76cfeafb76da12747c8e230bc76235bf8746cc189644"),
+}
+MTPROXY_ROOT = "/opt/kui/mtproxy"
+MTPROXY_BIN = f"{MTPROXY_ROOT}/bin/mtg"
+MTPROXY_NODE_DIR = f"{MTPROXY_ROOT}/nodes"
 
 try:
     with open(CONF_FILE, 'r') as f:
@@ -109,6 +120,7 @@ API_URL = env["api_url"]
 REPORT_URL = env["report_url"]
 VPS_IP = env["ip"]
 TOKEN = env["token"]
+GITHUB_PROXY = str(env.get("github_proxy") or "").rstrip("/")
 
 HEADERS = {'Content-Type': 'application/json', 'Authorization': TOKEN, 'User-Agent': 'KUI-Unified-Agent/2.0'}
 
@@ -1715,6 +1727,255 @@ def build_chain_outbound(target, tag):
         return None
     return tune_outbound(outbound)
 
+def validate_mtproxy_secret(secret, domain):
+    normalized = str(secret or "").strip().lower()
+    domain = str(domain or "").strip().lower()
+    if not domain or not re.fullmatch(r"ee[0-9a-f]{34,}", normalized) or len(normalized) % 2:
+        raise ValueError("invalid MTProxy FakeTLS secret")
+    if normalized[34:] != domain.encode("utf-8").hex():
+        raise ValueError("MTProxy FakeTLS secret does not match domain")
+    return normalized
+
+def build_mtproxy_config(node, listen_address):
+    port = int(node["port"])
+    if not 1 <= port <= 65535:
+        raise ValueError("invalid MTProxy port")
+    secret = validate_mtproxy_secret(node.get("private_key"), node.get("sni"))
+    bind_host = f"[{listen_address}]" if ":" in listen_address and not listen_address.startswith("[") else listen_address
+    return f'secret = "{secret}"\nbind-to = "{bind_host}:{port}"\n'
+
+def mtg_asset(machine=None):
+    asset = MTG_ASSETS.get((machine or platform.machine()).lower())
+    if not asset:
+        raise RuntimeError(f"unsupported mtg architecture: {machine or platform.machine()}")
+    return asset
+
+def _write_text_if_changed(path, content, mode):
+    try:
+        with open(path, "r", encoding="utf-8") as current:
+            if current.read() == content:
+                os.chmod(path, mode)
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    staged = f"{path}.tmp.{os.getpid()}"
+    with open(staged, "w", encoding="utf-8") as output:
+        output.write(content)
+        output.flush()
+        os.fsync(output.fileno())
+    os.chmod(staged, mode)
+    os.replace(staged, path)
+    return True
+
+def ensure_mtg_binary():
+    version_marker = f"{MTPROXY_BIN}.version"
+    try:
+        with open(version_marker, "r", encoding="utf-8") as marker:
+            if marker.read().strip() == MTG_VERSION and os.path.isfile(MTPROXY_BIN) and os.access(MTPROXY_BIN, os.X_OK):
+                return False
+    except OSError:
+        pass
+
+    arch, expected_sha = mtg_asset()
+    os.makedirs(os.path.dirname(MTPROXY_BIN), mode=0o700, exist_ok=True)
+    work_dir = tempfile.mkdtemp(prefix="mtg-install-", dir=MTPROXY_ROOT)
+    archive_path = os.path.join(work_dir, "mtg.tar.gz")
+    staged_binary = os.path.join(work_dir, "mtg")
+    release_url = f"https://github.com/9seconds/mtg/releases/download/v{MTG_VERSION}/mtg-{MTG_VERSION}-linux-{arch}.tar.gz"
+    try:
+        download_urls = [f"{GITHUB_PROXY}/{release_url}", release_url] if GITHUB_PROXY else [release_url]
+        failures = []
+        archive_verified = False
+        for download_url in dict.fromkeys(download_urls):
+            result = subprocess.run([
+                "curl", "-fL", "--retry", "3", "--connect-timeout", "10", "--max-time", "180",
+                "--max-filesize", "30000000", "-o", archive_path, download_url,
+            ], capture_output=True, text=True, timeout=210)
+            if result.returncode != 0:
+                failures.append(result.stderr.strip()[-200:] or f"curl exit {result.returncode}")
+                continue
+            digest = hashlib.sha256()
+            with open(archive_path, "rb") as archive_file:
+                for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if hmac.compare_digest(digest.hexdigest(), expected_sha):
+                archive_verified = True
+                break
+            failures.append("mtg archive checksum mismatch")
+        if not archive_verified:
+            raise RuntimeError(f"mtg download failed: {'; '.join(failures)[-500:]}")
+        with tarfile.open(archive_path, "r:gz") as archive:
+            matches = [member for member in archive.getmembers() if member.isfile() and os.path.basename(member.name) == "mtg"]
+            if len(matches) != 1 or matches[0].size <= 0 or matches[0].size > 100 * 1024 * 1024:
+                raise RuntimeError("mtg archive has an invalid binary member")
+            source = archive.extractfile(matches[0])
+            if source is None:
+                raise RuntimeError("mtg binary could not be extracted")
+            with source, open(staged_binary, "wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+                output.flush()
+                os.fsync(output.fileno())
+        os.chmod(staged_binary, 0o700)
+        checked = subprocess.run([staged_binary, "--version"], capture_output=True, text=True, timeout=15)
+        if checked.returncode != 0 or MTG_VERSION not in (checked.stdout + checked.stderr):
+            raise RuntimeError("mtg binary version check failed")
+        os.replace(staged_binary, MTPROXY_BIN)
+        _write_text_if_changed(version_marker, MTG_VERSION + "\n", 0o600)
+        return True
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+def _mtproxy_service_name(node_id):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(node_id)):
+        raise ValueError("invalid MTProxy node id")
+    return f"kui-mtproxy-{node_id}"
+
+def _mtproxy_systemd_unit(node_id, config_path):
+    return f"""[Unit]
+Description=KUI MTProxy ({node_id})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={MTPROXY_BIN} run {config_path}
+Restart=always
+RestartSec=3
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+def _mtproxy_openrc_service(node_id, config_path):
+    return f'''#!/sbin/openrc-run
+description="KUI MTProxy ({node_id})"
+command="{MTPROXY_BIN}"
+command_args="run {config_path}"
+command_background="yes"
+pidfile="/run/kui-mtproxy-{node_id}.pid"
+output_log="/var/log/kui-mtproxy-{node_id}.log"
+error_log="/var/log/kui-mtproxy-{node_id}.log"
+rc_ulimit="-n 1048576"
+depend() {{ need net; }}
+'''
+
+def _desired_mtproxy_nodes(nodes):
+    desired = []
+    seen_ids = set()
+    seen_ports = set()
+    for node in nodes or []:
+        if node.get("protocol") != "MTProxy":
+            continue
+        node_id = str(node.get("id") or "")
+        _mtproxy_service_name(node_id)
+        port = int(node.get("port"))
+        if not 1 <= port <= 65535 or node_id in seen_ids or port in seen_ports:
+            raise ValueError("invalid or duplicate MTProxy listener")
+        validate_mtproxy_secret(node.get("private_key"), node.get("sni"))
+        seen_ids.add(node_id)
+        seen_ports.add(port)
+        desired.append(node)
+    mtproxy_ports = {int(node["port"]) for node in desired}
+    for node in nodes or []:
+        if node.get("protocol") == "MTProxy":
+            continue
+        try:
+            port = int(node.get("port"))
+            transports = node_transports(node)
+        except (TypeError, ValueError):
+            continue
+        if port in mtproxy_ports and "tcp" in transports:
+            raise ValueError(f"MTProxy TCP port {port} conflicts with another node")
+    return desired
+
+def _installed_mtproxy_ids():
+    ids = set()
+    for directory, prefix, suffix in (
+        (MTPROXY_NODE_DIR, "", ".toml"),
+        ("/etc/systemd/system", "kui-mtproxy-", ".service"),
+        ("/etc/init.d", "kui-mtproxy-", ""),
+    ):
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith(prefix) and name.endswith(suffix):
+                node_id = name[len(prefix):len(name) - len(suffix) if suffix else None]
+                if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", node_id):
+                    ids.add(node_id)
+    return ids
+
+def prepare_mtproxy_nodes(nodes):
+    desired_ids = {str(node["id"]) for node in _desired_mtproxy_nodes(nodes)}
+    stale_ids = sorted(_installed_mtproxy_ids() - desired_ids)
+    if not stale_ids:
+        return
+    openrc = os.path.exists("/etc/alpine-release") or os.path.exists("/sbin/openrc-run")
+    for node_id in stale_ids:
+        service = _mtproxy_service_name(node_id)
+        if openrc:
+            subprocess.run(["rc-service", service, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            subprocess.run(["rc-update", "del", service, "default"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            service_path = f"/etc/init.d/{service}"
+        else:
+            subprocess.run(["systemctl", "disable", "--now", f"{service}.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            service_path = f"/etc/systemd/system/{service}.service"
+        for path in (service_path, f"/etc/systemd/system/{service}.service", f"/etc/init.d/{service}", f"{MTPROXY_NODE_DIR}/{node_id}.toml"):
+            try: os.remove(path)
+            except FileNotFoundError: pass
+    if not openrc:
+        subprocess.run(["systemctl", "daemon-reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+
+def sync_mtproxy_nodes(nodes):
+    desired = _desired_mtproxy_nodes(nodes)
+    if not desired:
+        return
+    binary_changed = ensure_mtg_binary()
+    os.makedirs(MTPROXY_NODE_DIR, mode=0o700, exist_ok=True)
+    openrc = os.path.exists("/etc/alpine-release") or os.path.exists("/sbin/openrc-run")
+    pending = []
+    units_changed = False
+    listen_address = node_listen_address(VPS_IP)
+    for node in desired:
+        node_id = str(node["id"])
+        service = _mtproxy_service_name(node_id)
+        config_path = f"{MTPROXY_NODE_DIR}/{node_id}.toml"
+        config_changed = _write_text_if_changed(config_path, build_mtproxy_config(node, listen_address), 0o600)
+        if openrc:
+            service_path = f"/etc/init.d/{service}"
+            unit_changed = _write_text_if_changed(service_path, _mtproxy_openrc_service(node_id, config_path), 0o700)
+        else:
+            service_path = f"/etc/systemd/system/{service}.service"
+            unit_changed = _write_text_if_changed(service_path, _mtproxy_systemd_unit(node_id, config_path), 0o644)
+        units_changed = units_changed or unit_changed
+        pending.append((node, service, binary_changed or config_changed or unit_changed))
+    if units_changed and not openrc:
+        subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=20)
+    for node, service, changed in pending:
+        if openrc:
+            subprocess.run(["rc-update", "add", service, "default"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            action = "restart" if changed else "start"
+            started = subprocess.run(["rc-service", service, action], capture_output=True, text=True, timeout=30)
+            healthy = started.returncode == 0 and subprocess.run(["rc-service", service, "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode == 0
+        else:
+            subprocess.run(["systemctl", "enable", f"{service}.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            action = "restart" if changed else "start"
+            started = subprocess.run(["systemctl", action, f"{service}.service"], capture_output=True, text=True, timeout=30)
+            healthy = started.returncode == 0 and subprocess.run(["systemctl", "is-active", "--quiet", f"{service}.service"], timeout=15).returncode == 0
+        if not healthy:
+            raise RuntimeError(f"MTProxy service {service} failed: {(started.stderr or started.stdout).strip()[-300:]}")
+        ensure_firewall_open(node["port"], "tcp")
+
 def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_outbound=None, warp_mode="off", egress_check_host="127.0.0.1"):
     global proxy_port_conflict
     node_listen = node_listen_address(VPS_IP)
@@ -1749,14 +2010,14 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             listener_keys_for_node = {(transport, port) for transport in transports}
             conflict = next((transport for transport, key_port in listener_keys_for_node if (transport, key_port) in listener_keys), None)
             if conflict: raise ValueError(f"duplicate {conflict} listener port {port}")
-            supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Shadowsocks2022", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door"}
+            supported = {"VLESS", "XTLS-Reality", "Reality", "Hysteria2", "TUIC", "Shadowsocks2022", "Trojan", "H2-Reality", "gRPC-Reality", "AnyTLS", "Naive", "Socks5", "VLESS-Argo", "dokodemo-door", "MTProxy"}
             if proto not in supported:
                 raise ValueError(f"unsupported protocol {proto}")
             if proto != "dokodemo-door" and not isinstance(node.get("uuid"), str):
                 raise ValueError("uuid is required")
             if proto in {"XTLS-Reality", "Reality", "H2-Reality", "gRPC-Reality"} and (not node.get("private_key") or not node.get("short_id")):
                 raise ValueError("Reality private_key and short_id are required")
-            if proto in {"TUIC", "Shadowsocks2022", "Trojan", "AnyTLS", "Naive", "Socks5"} and not node.get("private_key"):
+            if proto in {"TUIC", "Shadowsocks2022", "Trojan", "AnyTLS", "Naive", "Socks5", "MTProxy"} and not node.get("private_key"):
                 raise ValueError(f"{proto} password is required")
             if proto == "Shadowsocks2022":
                 validate_ss2022_credentials(node.get("uuid", ""), node.get("private_key", ""))
@@ -1765,8 +2026,14 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                     raise ValueError("dokodemo internal target is unavailable")
                 if node.get("relay_type") != "internal" and (not node.get("target_ip") or not node.get("target_port")):
                     raise ValueError("dokodemo target_ip and target_port are required")
+            if proto == "MTProxy":
+                validate_mtproxy_secret(node.get("private_key"), node.get("sni"))
         except (KeyError, TypeError, ValueError) as error:
             print(f"[agent] skipping invalid node {node.get('id', '<unknown>')}: {error}", flush=True)
+            continue
+        if proto == "MTProxy":
+            listener_keys.update(listener_keys_for_node)
+            ensure_firewall_open(port, "tcp")
             continue
         sni = node.get("sni") or "addons.mozilla.org"
         certificate_name = "kui-tuic.local" if proto == "TUIC" else sni
@@ -2346,6 +2613,7 @@ def fetch_and_apply_configs():
                 if runtime_egress == "residential" and not residential.get("available"):
                     reason = residential.get("reason") or "controller did not report a ready residential tunnel"
                     raise RuntimeError(f"residential proxy is unavailable: {reason}")
+                prepare_mtproxy_nodes(nodes)
                 try:
                     verified_egress_ip = build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
                 except RuntimeError as verify_error:
@@ -2353,6 +2621,7 @@ def fetch_and_apply_configs():
                         verified_egress_ip = build_singbox_config(nodes, current_proxy_config, peers, mesh, runtime_socks, runtime_warp, egress_check_host)
                     else:
                         raise
+                sync_mtproxy_nodes(nodes)
                 if runtime_warp != "off":
                     optimizer_health = _load_warp_optimizer_state()
                     if optimizer_health.get("consecutive_failures"):
