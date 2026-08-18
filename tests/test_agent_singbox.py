@@ -8,7 +8,7 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
+FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "node_listen_address", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
@@ -20,6 +20,12 @@ exec(compile(ast.Module(body=SELECTED, type_ignores=[]), str(SOURCE_PATH), "exec
 
 
 class AgentSingBoxTests(unittest.TestCase):
+    def test_node_listener_matches_the_managed_vps_address_family(self):
+        listen_address = NAMESPACE["node_listen_address"]
+        self.assertEqual(listen_address("203.0.113.8"), "0.0.0.0")
+        self.assertEqual(listen_address("2001:db8::8"), "::")
+        self.assertEqual(listen_address("invalid"), "0.0.0.0")
+
     def test_ping_targets_reject_shell_metacharacters(self):
         self.assertEqual(NAMESPACE["normalize_ping_target"]("probe.example.com"), "probe.example.com")
         self.assertEqual(NAMESPACE["normalize_ping_target"]("203.0.113.8"), "203.0.113.8")

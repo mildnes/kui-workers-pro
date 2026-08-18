@@ -15,6 +15,14 @@ exec(compile(ast.Module(body=SELECTED, type_ignores=[]), str(SOURCE_PATH), "exec
 
 
 class AgentEgressTests(unittest.TestCase):
+    def test_new_deployment_identity_is_persisted_immediately(self):
+        deployment_branch = SOURCE[
+            SOURCE.index("if deployment_changed:"):
+            SOURCE.index("elif not deployment_id", SOURCE.index("if deployment_changed:"))
+        ]
+        self.assertIn("_save_egress_state", deployment_branch)
+        self.assertIn("deployment_id=deployment_id", deployment_branch)
+
     def test_dual_stack_verification_reports_the_preferred_ipv4_exit(self):
         select = NAMESPACE["_select_warp_exit_ip"]
         exits = {"ipv4": "104.28.1.1", "ipv6": "2606:4700:100::1"}

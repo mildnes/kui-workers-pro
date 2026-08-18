@@ -1506,6 +1506,13 @@ def node_transports(node):
     return ["udp"] if node.get("protocol") in {"Hysteria2", "TUIC"} else ["tcp"]
 
 
+def node_listen_address(vps_ip):
+    try:
+        return "::" if ipaddress.ip_address(str(vps_ip)).version == 6 else "0.0.0.0"
+    except ValueError:
+        return "0.0.0.0"
+
+
 def tune_inbound(inbound, transports):
     inbound["reuse_addr"] = True
     if "tcp" in transports:
@@ -1707,6 +1714,7 @@ def build_chain_outbound(target, tag):
 
 def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_outbound=None, warp_mode="off", egress_check_host="127.0.0.1"):
     global proxy_port_conflict
+    node_listen = node_listen_address(VPS_IP)
     singbox_config = {
         "log": {"level": "warn"},
         "inbounds": [],
@@ -1783,22 +1791,22 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                 try: os.remove(conf_path)
                 except: pass
         
-        if proto == "VLESS": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}]})
-        elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
-        elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "congestion_control": "bbr", "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
+        if proto == "VLESS": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"]}]})
+        elif proto in ["XTLS-Reality", "Reality"]: singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}], "tls": {"enabled": True, "server_name": sni, "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}})
+        elif proto == "Hysteria2": singbox_config["inbounds"].append({"type": "hysteria2", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"password": node["uuid"]}], "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "TUIC": singbox_config["inbounds"].append({"type": "tuic", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"], "password": node["private_key"]}], "congestion_control": "bbr", "tls": {"enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path}})
         elif proto == "Shadowsocks2022":
             ss_networks = normalize_ss2022_network(node.get("network"))
-            singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": "::", "listen_port": port, "network": ss_networks, "method": node["uuid"], "password": node["private_key"]})
-        elif proto == "Trojan": singbox_config["inbounds"].append({"type": "trojan", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "server_name": sni, "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "H2-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2", "http/1.1"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "http", "host": [sni], "path": "/"}})
-        elif proto == "gRPC-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "grpc", "service_name": "grpc"}})
-        elif proto == "AnyTLS": singbox_config["inbounds"].append({"type": "anytls", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "Naive": singbox_config["inbounds"].append({"type": "naive", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"username": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "certificate_path": cert_path, "key_path": key_path}})
-        elif proto == "Socks5": singbox_config["inbounds"].append({"type": "socks", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"username": node["uuid"], "password": node["private_key"]}]})
-        elif proto == "VLESS-Argo": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": "::", "listen_port": port, "users": [{"uuid": node["uuid"]}], "transport": {"type": "ws", "path": "/"}})
+            singbox_config["inbounds"].append({"type": "shadowsocks", "tag": in_tag, "listen": node_listen, "listen_port": port, "network": ss_networks, "method": node["uuid"], "password": node["private_key"]})
+        elif proto == "Trojan": singbox_config["inbounds"].append({"type": "trojan", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "server_name": sni, "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "H2-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2", "http/1.1"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "http", "host": [sni], "path": "/"}})
+        elif proto == "gRPC-Reality": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"]}], "tls": {"enabled": True, "server_name": sni, "alpn": ["h2"], "reality": {"enabled": True, "handshake": {"server": sni, "server_port": 443}, "private_key": node["private_key"], "short_id": [node["short_id"]]}}, "transport": {"type": "grpc", "service_name": "grpc"}})
+        elif proto == "AnyTLS": singbox_config["inbounds"].append({"type": "anytls", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"password": node["private_key"]}], "tls": {"enabled": True, "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "Naive": singbox_config["inbounds"].append({"type": "naive", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"username": node["uuid"], "password": node["private_key"]}], "tls": {"enabled": True, "certificate_path": cert_path, "key_path": key_path}})
+        elif proto == "Socks5": singbox_config["inbounds"].append({"type": "socks", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"username": node["uuid"], "password": node["private_key"]}]})
+        elif proto == "VLESS-Argo": singbox_config["inbounds"].append({"type": "vless", "tag": in_tag, "listen": node_listen, "listen_port": port, "users": [{"uuid": node["uuid"]}], "transport": {"type": "ws", "path": "/"}})
         elif proto == "dokodemo-door":
-            singbox_config["inbounds"].append({ "type": "direct", "tag": in_tag, "listen": "::", "listen_port": port })
+            singbox_config["inbounds"].append({ "type": "direct", "tag": in_tag, "listen": node_listen, "listen_port": port })
             out_tag = f"out-{node['id']}"
             if node.get("relay_type") == "internal" and node.get("chain_target"):
                 t = node["chain_target"]
@@ -1836,7 +1844,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                     singbox_config["inbounds"].append({
                         "type": "socks",
                         "tag": "residential-socks5",
-                        "listen": "::",
+                        "listen": node_listen,
                         "listen_port": int(proxy_port),
                         "users": [
                             {"username": str(proxy_user), "password": str(proxy_pass)}
@@ -2293,6 +2301,7 @@ def fetch_and_apply_configs():
                 else:
                     print("[agent] binding legacy egress state to current deployment; resetting local revision", flush=True)
                 local_state = {"applied_mode": "native", "applied_revision": 0, "applied_config": {"mode": "native", "proxy_mode": "global", "proxy_categories": ""}, "pending_result": None, "deployment_id": deployment_id}
+                _save_egress_state(local_state["applied_mode"], local_state["applied_revision"], deployment_id=deployment_id, applied_config=local_state["applied_config"])
             elif not deployment_id and local_state["applied_revision"] > revision and local_state["applied_mode"] != desired_egress:
                 print("[agent] remote desired egress conflicts with a newer legacy local revision; trusting remote state", flush=True)
                 local_state = {"applied_mode": "native", "applied_revision": 0, "applied_config": {"mode": "native", "proxy_mode": "global", "proxy_categories": ""}, "pending_result": None, "deployment_id": ""}
