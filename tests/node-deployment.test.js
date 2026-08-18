@@ -205,6 +205,11 @@ test('TUIC uses a stable internal certificate identity while other TLS nodes fol
     assert.doesNotMatch(agent, /proto == "TUIC"[\s\S]{0,300}"server_name"/);
 });
 
+test('TUIC bypasses sing-box sniffing while retaining shared DNS handling', () => {
+    assert.match(agent, /sniff_inbounds = sorted\([\s\S]*?node\.get\("protocol"\) not in \{"dokodemo-door", "TUIC"\}/);
+    assert.match(agent, /build_egress_dns_policy\([\s\S]*?sniff_inbounds=sniff_inbounds/);
+});
+
 test('sing-box node traffic and connection tuning are generated safely', () => {
     assert.doesNotMatch(agent, /http:\/\/127\.0\.0\.1:9090\/stats\/inbound/);
     assert.match(agent, /totals = \[_read_iptables_port_bytes\(port, item\) for item in transports\]/);

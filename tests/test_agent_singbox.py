@@ -162,6 +162,19 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertFalse(any(rule.get("action") == "resolve" for rule in prefix))
         self.assertEqual(fallback, [])
 
+    def test_tuic_can_hijack_dns_without_traffic_sniffing(self):
+        _, prefix, _ = NAMESPACE["build_egress_dns_policy"](
+            ["in-ss", "in-tuic"],
+            "native",
+            sniff_inbounds=["in-ss"],
+        )
+
+        self.assertEqual(prefix[0], {"inbound": ["in-ss"], "action": "sniff", "timeout": "1s"})
+        self.assertEqual(
+            prefix[1],
+            {"inbound": ["in-ss", "in-tuic"], "protocol": "dns", "action": "hijack-dns"},
+        )
+
     def test_global_proxy_preserves_domains_for_remote_socks_resolution(self):
         dns, prefix, fallback = NAMESPACE["build_egress_dns_policy"](
             ["in-node"], "proxy-global", outbound_tag="socks5-outbound"

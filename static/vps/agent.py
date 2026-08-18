@@ -1093,8 +1093,12 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag, custom
     return rule_sets, rules, dns_tags, direct_dns_tags
 
 
-def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, custom_domains=None, strategy="prefer_ipv4", detoured_dns=None):
+def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, custom_domains=None, strategy="prefer_ipv4", detoured_dns=None, sniff_inbounds=None):
     inbounds = sorted(set(proxy_inbounds or []))
+    inbound_set = set(inbounds)
+    sniff_targets = inbounds if sniff_inbounds is None else [
+        inbound for inbound in sorted(set(sniff_inbounds or [])) if inbound in inbound_set
+    ]
     local_dns = {"type": "local", "tag": "local-dns"}
     servers = [local_dns]
     dns_rules = []
@@ -1169,11 +1173,10 @@ def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags
             "strategy": strategy,
         })
 
+    if sniff_targets:
+        prefix_rules.append({"inbound": sniff_targets, "action": "sniff", "timeout": "1s"})
     if inbounds:
-        prefix_rules.extend([
-            {"inbound": inbounds, "action": "sniff", "timeout": "1s"},
-            {"inbound": inbounds, "protocol": "dns", "action": "hijack-dns"},
-        ])
+        prefix_rules.append({"inbound": inbounds, "protocol": "dns", "action": "hijack-dns"})
         # SOCKS5 receives the original domain and resolves it on the landing
         # server. WARP is an IP tunnel, so its destinations are resolved here
         # with DNS traffic forced through the WARP endpoint.
@@ -1982,6 +1985,8 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         singbox_config["route"]["rules"].append(check_rule)
 
     proxy_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") != "dokodemo-door")
+    # Surge cancels TUIC streams when sing-box sniffs them; DNS hijacking remains enabled.
+    sniff_inbounds = sorted(f"in-{node['id']}" for node in valid_nodes if node.get("protocol") not in {"dokodemo-door", "TUIC"})
     dns_config, dns_prefix_rules, dns_fallback_rules = build_egress_dns_policy(
         proxy_inbounds,
         dns_policy_mode,
@@ -1991,6 +1996,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         custom_domains=custom_proxy_domains,
         strategy=dns_strategy,
         detoured_dns=landing_dns_detours,
+        sniff_inbounds=sniff_inbounds,
     )
     singbox_config["dns"] = dns_config
     singbox_config["route"]["default_domain_resolver"] = "local-dns"
