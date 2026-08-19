@@ -88,6 +88,14 @@ class AgentEgressTests(unittest.TestCase):
         runtime_socks, _ = NAMESPACE["_runtime_egress_args"](config, {"addr": "172.17.0.1", "port": 7920}, "172.17.0.1")
         self.assertEqual(json.loads(runtime_socks["domains"]), {"categories": ["youtube", "ai", "custom"], "custom_domains": ["example.com", "xn--fsqu00a.xn--0zwm56d"]})
 
+    def test_residential_application_verifies_the_singbox_data_path(self):
+        build = ast.get_source_segment(
+            SOURCE,
+            next(node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name == "build_singbox_config"),
+        )
+        self.assertNotIn("_verify_residential_exit", build)
+        self.assertIn("_verify_socks5_exit(egress_check_host, require_distinct_exit=True)", build)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,13 +83,15 @@ test('residential apply failures include the controller readiness reason', () =>
     assert.match(agent, /residential\.get\("reason"\)/);
 });
 
-test('residential data-plane verification follows the configured listener with safe fallbacks', () => {
+test('residential data-plane verification follows the sing-box business route', () => {
     assert.match(api, /const residentialAddr = listenHost \|\| '127\.0\.0\.1'/);
     assert.match(api, /addr: residentialAddr[\s\S]{0,120}check_addr: residentialAddr/);
-    assert.match(agent, /proxy\.get\("addr"\), proxy\.get\("check_addr"\), "127\.0\.0\.1"/);
     assert.match(agent, /residential_addr == "127\.0\.0\.1" and egress_check_host != "127\.0\.0\.1"/);
     assert.match(agent, /"addr": residential_addr, "check_addr": egress_check_host/);
-    assert.match(agent, /residential proxy verification failed via/);
+    assert.match(agent, /build_global_proxy_rule\(valid_nodes, s5_tag\)/);
+    assert.match(agent, /_verify_socks5_exit\(egress_check_host, require_distinct_exit=True\)/);
+    assert.match(agent, /not require_distinct_exit or ip != VPS_IP/);
+    assert.doesNotMatch(agent, /def _verify_residential_exit/);
 });
 
 test('residential landing server resolves domains through its active tunnel', () => {

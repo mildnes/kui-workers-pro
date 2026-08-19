@@ -8,7 +8,7 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "node_listen_address", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_egress_dns_policy", "normalize_ping_target"}
+FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "node_listen_address", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_global_proxy_rule", "build_egress_dns_policy", "normalize_ping_target"}
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
@@ -184,6 +184,23 @@ class AgentSingBoxTests(unittest.TestCase):
         self.assertEqual(dns["final"], "proxy-dns")
         self.assertFalse(any(rule.get("action") == "resolve" for rule in prefix))
         self.assertEqual(fallback, [])
+
+    def test_global_proxy_routes_business_and_check_inbounds_together(self):
+        rule = NAMESPACE["build_global_proxy_rule"](
+            [
+                {"id": "node-b", "protocol": "TUIC"},
+                {"id": "relay", "protocol": "dokodemo-door"},
+                {"id": "node-a", "protocol": "Shadowsocks2022"},
+                {"id": "telegram", "protocol": "MTProxy"},
+            ],
+            "socks5-outbound",
+        )
+
+        self.assertEqual(rule, {
+            "inbound": ["egress-check-in", "in-node-a", "in-node-b"],
+            "action": "route",
+            "outbound": "socks5-outbound",
+        })
 
     def test_selective_proxy_dns_reuses_domain_rules_and_keeps_local_fallback(self):
         dns, prefix, fallback = NAMESPACE["build_egress_dns_policy"](

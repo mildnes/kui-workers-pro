@@ -850,8 +850,6 @@ def _verify_warp_exit(mode, check_host="127.0.0.1"):
     if not _warp_exit_ip: raise RuntimeError(f"WARP {mode} verification returned no preferred-family exit IP")
     return _warp_exit_ip
 
-_residential_exit_ip = ""
-
 def _verified_public_ip(value):
     try:
         parsed = ipaddress.ip_address(value.strip())
@@ -859,46 +857,16 @@ def _verified_public_ip(value):
     except ValueError:
         return ""
 
-def _verify_residential_exit(proxy):
-    global _residential_exit_ip
-    _residential_exit_ip = ""
-    try:
-        port = int(proxy.get("port") or PROXY_PORT)
-    except (TypeError, ValueError):
-        port = PROXY_PORT
-    if not 1 <= port <= 65535:
-        raise RuntimeError("invalid residential proxy port")
-    user = str(proxy.get("user") or "")
-    password = str(proxy.get("pass") or "")
-    auth = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@" if user or password else ""
-    hosts = []
-    for candidate in (proxy.get("addr"), proxy.get("check_addr"), "127.0.0.1"):
-        host = normalize_check_host(candidate or "127.0.0.1")
-        if host not in hosts:
-            hosts.append(host)
-    failures = []
-    for host in hosts:
-        proxy_url = f"socks5h://{auth}{host}:{port}"
-        for attempt in range(2):
-            result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "15", "--noproxy", "", "--proxy", proxy_url, "https://api.ipify.org"], capture_output=True, text=True)
-            ip = _verified_public_ip(result.stdout)
-            if result.returncode == 0 and ip and ip != VPS_IP:
-                _residential_exit_ip = ip
-                return ip
-            error = result.stderr.strip()[-200:] or (f"invalid exit IP: {result.stdout.strip()[:64]}" if result.returncode == 0 else f"curl exit {result.returncode}")
-            if attempt == 0:
-                time.sleep(1)
-        failures.append(f"{host}:{port}: {error}")
-    raise RuntimeError(f"residential proxy verification failed via {'; '.join(failures)}")
-
-def _verify_socks5_exit(check_host="127.0.0.1"):
+def _verify_socks5_exit(check_host="127.0.0.1", require_distinct_exit=False):
     check_host = normalize_check_host(check_host)
     for _ in range(4):
         result = subprocess.run(["curl", "-4", "-fsSL", "--connect-timeout", "5", "--max-time", "20", "--noproxy", "", "--proxy", f"socks5h://{check_host}:39482", "https://api.ipify.org"], capture_output=True, text=True)
         ip = _verified_public_ip(result.stdout)
-        if result.returncode == 0 and ip: return ip
+        if result.returncode == 0 and ip and (not require_distinct_exit or ip != VPS_IP):
+            return ip
         time.sleep(2)
-    raise RuntimeError("SOCKS5 data-plane verification failed")
+    reason = " (VPS native IP detected)" if require_distinct_exit and ip == VPS_IP else ""
+    raise RuntimeError(f"SOCKS5 data-plane verification failed{reason}")
 
 def _verify_native_exit():
     try:
@@ -1103,6 +1071,21 @@ def build_selective_proxy_rules(categories, proxy_inbounds, outbound_tag, custom
         })
     rules.append({"inbound": inbounds, "ip_version": 6, "action": "reject"})
     return rule_sets, rules, dns_tags, direct_dns_tags
+
+
+def build_global_proxy_rule(nodes, outbound_tag, check_inbound="egress-check-in"):
+    inbounds = {
+        f"in-{node['id']}"
+        for node in nodes or []
+        if node.get("protocol") not in {"dokodemo-door", "MTProxy"}
+    }
+    if check_inbound:
+        inbounds.add(check_inbound)
+    return {
+        "inbound": sorted(inbounds),
+        "action": "route",
+        "outbound": outbound_tag,
+    }
 
 
 def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, custom_domains=None, strategy="prefer_ipv4", detoured_dns=None, sniff_inbounds=None):
@@ -2179,11 +2162,11 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             s5_outbound["password"] = str(s5_pass)
         singbox_config["outbounds"].append(s5_outbound)
         singbox_config["inbounds"].append({"type": "socks", "tag": "egress-check-in", "listen": egress_check_host, "listen_port": 39482})
-        singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "outbound": s5_tag})
         s5_mode = socks5_outbound.get("mode", "global")
         dns_policy_mode = "proxy-selective" if s5_mode == "selective" else "proxy-global"
         dns_outbound_tag = s5_tag
         if s5_mode == "selective":
+            singbox_config["route"]["rules"].append({"inbound": ["egress-check-in"], "action": "route", "outbound": s5_tag})
             try:
                 selective_config = json.loads(socks5_outbound.get("domains", "{}") or "{}")
                 selected = selective_config.get("categories", [])
@@ -2206,13 +2189,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             }
         else:
             # 全局出站：所有非转发节点流量走 SOCKS5
-            existing_routed = {inbound for rule in singbox_config["route"]["rules"] for inbound in rule.get("inbound", [])}
-            for node in valid_nodes:
-                if node.get("protocol") == "dokodemo-door":
-                    continue
-                in_tag = f"in-{node['id']}"
-                if in_tag not in existing_routed:
-                    singbox_config["route"]["rules"].append({"inbound": [in_tag], "outbound": s5_tag})
+            singbox_config["route"]["rules"].append(build_global_proxy_rule(valid_nodes, s5_tag))
 
     if warp_mode != "off":
         if mesh_enabled:
@@ -2336,7 +2313,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
         subprocess.run(["systemctl", "start", "sing-box"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         if not _singbox_service_healthy(): raise RuntimeError("sing-box is not healthy after start")
     try:
-        if socks5_outbound and socks5_outbound.get("source") == "residential": verified_egress_ip = _verify_residential_exit(socks5_outbound)
+        if socks5_outbound and socks5_outbound.get("source") == "residential": verified_egress_ip = _verify_socks5_exit(egress_check_host, require_distinct_exit=True)
         elif socks5_outbound and socks5_outbound.get("source") == "manual": verified_egress_ip = _verify_socks5_exit(egress_check_host)
         elif warp_mode != "off": verified_egress_ip = _verify_warp_exit(warp_mode, egress_check_host)
         else: verified_egress_ip = _verify_native_exit()
