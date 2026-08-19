@@ -1088,6 +1088,13 @@ def build_global_proxy_rule(nodes, outbound_tag, check_inbound="egress-check-in"
     }
 
 
+def apply_global_proxy_route(route, nodes, outbound_tag, check_inbound="egress-check-in"):
+    route["rules"].append(build_global_proxy_rule(nodes, outbound_tag, check_inbound))
+    # Some multiplexed/UDP flows may not retain their original inbound match.
+    # Global mode must never fall back to the first (direct) outbound.
+    route["final"] = outbound_tag
+
+
 def build_egress_dns_policy(proxy_inbounds, mode, outbound_tag="", dns_rule_tags=None, dns_direct_rule_tags=None, custom_domains=None, strategy="prefer_ipv4", detoured_dns=None, sniff_inbounds=None):
     inbounds = sorted(set(proxy_inbounds or []))
     inbound_set = set(inbounds)
@@ -2070,7 +2077,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
                     continue
             else:
                 singbox_config["outbounds"].append(tune_outbound({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) }))
-            singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
+            singbox_config["route"]["rules"].append({"inbound": [in_tag], "action": "route", "outbound": out_tag})
         listener_keys.update(listener_keys_for_node)
         valid_nodes.append(node)
 
@@ -2189,7 +2196,7 @@ def build_singbox_config(nodes, proxy_cfg=None, peers=None, mesh=None, socks5_ou
             }
         else:
             # 全局出站：所有非转发节点流量走 SOCKS5
-            singbox_config["route"]["rules"].append(build_global_proxy_rule(valid_nodes, s5_tag))
+            apply_global_proxy_route(singbox_config["route"], valid_nodes, s5_tag)
 
     if warp_mode != "off":
         if mesh_enabled:

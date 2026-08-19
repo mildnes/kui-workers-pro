@@ -8,7 +8,7 @@ import unittest
 SOURCE_PATH = pathlib.Path(__file__).parents[1] / "static" / "vps" / "agent.py"
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
-FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "node_listen_address", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_global_proxy_rule", "build_egress_dns_policy", "normalize_ping_target"}
+FUNCTION_NAMES = {"normalize_ss2022_network", "node_transports", "node_listen_address", "tune_inbound", "tune_outbound", "get_port_traffic", "normalize_proxy_custom_domains", "build_selective_proxy_rules", "build_global_proxy_rule", "apply_global_proxy_route", "build_egress_dns_policy", "normalize_ping_target"}
 SELECTED = [
     node for node in TREE.body
     if (isinstance(node, ast.FunctionDef) and node.name in FUNCTION_NAMES)
@@ -201,6 +201,21 @@ class AgentSingBoxTests(unittest.TestCase):
             "action": "route",
             "outbound": "socks5-outbound",
         })
+
+    def test_global_proxy_uses_the_proxy_as_the_unmatched_flow_fallback(self):
+        route = {"rules": []}
+        NAMESPACE["apply_global_proxy_route"](
+            route,
+            [{"id": "tuic-node", "protocol": "TUIC"}],
+            "socks5-outbound",
+        )
+
+        self.assertEqual(route["final"], "socks5-outbound")
+        self.assertEqual(route["rules"], [{
+            "inbound": ["egress-check-in", "in-tuic-node"],
+            "action": "route",
+            "outbound": "socks5-outbound",
+        }])
 
     def test_selective_proxy_dns_reuses_domain_rules_and_keeps_local_fallback(self):
         dns, prefix, fallback = NAMESPACE["build_egress_dns_policy"](

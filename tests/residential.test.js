@@ -88,7 +88,8 @@ test('residential data-plane verification follows the sing-box business route', 
     assert.match(api, /addr: residentialAddr[\s\S]{0,120}check_addr: residentialAddr/);
     assert.match(agent, /residential_addr == "127\.0\.0\.1" and egress_check_host != "127\.0\.0\.1"/);
     assert.match(agent, /"addr": residential_addr, "check_addr": egress_check_host/);
-    assert.match(agent, /build_global_proxy_rule\(valid_nodes, s5_tag\)/);
+    assert.match(agent, /apply_global_proxy_route\(singbox_config\["route"\], valid_nodes, s5_tag\)/);
+    assert.match(agent, /route\["final"\] = outbound_tag/);
     assert.match(agent, /_verify_socks5_exit\(egress_check_host, require_distinct_exit=True\)/);
     assert.match(agent, /not require_distinct_exit or ip != VPS_IP/);
     assert.doesNotMatch(agent, /def _verify_residential_exit/);

@@ -19,6 +19,9 @@ class AgentNodeTests(unittest.TestCase):
     def test_missing_internal_relay_target_is_rejected_during_validation(self):
         self.assertIn('raise ValueError("dokodemo internal target is unavailable")', SOURCE)
 
+    def test_dokodemo_keeps_an_explicit_route_before_global_fallback(self):
+        self.assertIn('{"inbound": [in_tag], "action": "route", "outbound": out_tag}', SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()
