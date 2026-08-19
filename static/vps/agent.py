@@ -1519,7 +1519,9 @@ def node_listen_address(vps_ip):
 
 
 def tune_inbound(inbound, transports):
-    inbound["reuse_addr"] = True
+    # UDP listeners must stay exclusive so a stray process cannot split flows.
+    if "udp" not in transports:
+        inbound["reuse_addr"] = True
     if "tcp" in transports:
         inbound.update({"tcp_fast_open": True, "tcp_keep_alive": "2m", "tcp_keep_alive_interval": "30s"})
     if "udp" in transports:

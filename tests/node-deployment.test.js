@@ -235,7 +235,7 @@ test('sing-box node traffic and connection tuning are generated safely', () => {
     assert.match(agent, /"tcp_fast_open": True/);
     assert.match(agent, /"tcp_keep_alive": "2m"/);
     assert.match(agent, /"tcp_keep_alive_interval": "30s"/);
-    assert.match(agent, /inbound\["reuse_addr"\] = True/);
+    assert.match(agent, /if "udp" not in transports:[\s\S]{0,80}inbound\["reuse_addr"\] = True/);
     assert.match(agent, /"udp_timeout"\] = "5m"/);
     assert.match(agent, /ss_networks = normalize_ss2022_network/);
     assert.match(agent, /"network": ss_networks/);

@@ -47,11 +47,16 @@ class AgentSingBoxTests(unittest.TestCase):
     def test_connection_tuning_is_transport_aware(self):
         tcp = NAMESPACE["tune_inbound"]({}, ["tcp"])
         udp = NAMESPACE["tune_inbound"]({}, ["udp"])
+        dual = NAMESPACE["tune_inbound"]({}, ["tcp", "udp"])
         self.assertTrue(tcp["reuse_addr"])
         self.assertTrue(tcp["tcp_fast_open"])
         self.assertNotIn("udp_timeout", tcp)
+        self.assertNotIn("reuse_addr", udp)
         self.assertEqual(udp["udp_timeout"], "5m")
         self.assertNotIn("tcp_fast_open", udp)
+        self.assertNotIn("reuse_addr", dual)
+        self.assertTrue(dual["tcp_fast_open"])
+        self.assertEqual(dual["udp_timeout"], "5m")
 
     def test_selective_proxy_categories_use_versioned_remote_rule_sets(self):
         rule_sets, rules, dns_tags, direct_dns_tags = NAMESPACE["build_selective_proxy_rules"](
