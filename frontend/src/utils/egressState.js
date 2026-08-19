@@ -30,6 +30,15 @@ export function applyEgressProbeResult(server, result) {
   return true;
 }
 
+export function resolveCurrentServer(servers, server) {
+  if (!server) return server;
+  const key = String(server.ip || '').trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (!key) return server;
+  return (Array.isArray(servers) ? servers : []).find(item => (
+    String(item?.ip || '').trim().replace(/^\[|\]$/g, '').toLowerCase() === key
+  )) || server;
+}
+
 export function shouldSuggestWarpOptimization(result, now = Date.now()) {
   if (result?.component !== 'egress' || result.success !== true) return false;
   if (!String(result.applied_mode || '').startsWith('warp_')) return false;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { __test } from '../functions/api/[[path]].js';
-import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry } from '../frontend/src/utils/egressState.js';
+import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry, resolveCurrentServer } from '../frontend/src/utils/egressState.js';
 
 const api = fs.readFileSync(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 const agent = fs.readFileSync(new URL('../static/vps/agent.py', import.meta.url), 'utf8');
@@ -206,8 +206,17 @@ test('an egress apply result received before the save response still refreshes t
     assert.equal(server.egress_revision, 5);
     assert.equal(server.egress_applied_revision, 5);
     assert.equal(server.egress_ip, '104.28.222.43');
-    assert.match(frontend, /const alreadyApplied = vps\.egress_status === 'applied'/);
-    assert.match(frontend, /if \(!alreadyApplied\) vps\.egress_status/);
+    assert.match(frontend, /const alreadyApplied = activeVps\.egress_status === 'applied'/);
+    assert.match(frontend, /if \(!alreadyApplied\) activeVps\.egress_status/);
+});
+
+test('egress saving state is cleared after a data refresh replaces the server object', () => {
+    const staleServer = { ip: '203.0.113.8', _egress_saving: true };
+    const currentServer = { ip: '203.0.113.8', _egress_saving: true };
+    assert.equal(resolveCurrentServer([currentServer], staleServer), currentServer);
+    assert.equal(resolveCurrentServer([], staleServer), staleServer);
+    assert.match(frontend, /const activeVps = resolveCurrentServer\(servers\.value, vps\)/);
+    assert.match(frontend, /finally \{ vps\._egress_saving = false; resolveCurrentServer\(servers\.value, vps\)\._egress_saving = false; \}/);
 });
 
 test('new D1 egress state is never overwritten by an older realtime server object', () => {

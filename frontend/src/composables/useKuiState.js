@@ -4,7 +4,7 @@ import { createApiClient } from './useApi.js';
 import { generateRealityKeys, generateSs2022Password } from './useAuth.js';
 import { countryCoords, iso2To3 } from './useProbe.js';
 import { nextRealtimeRetryDelay, normalizeRealtimeKey } from './useRealtime.js';
-import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry, shouldSuggestWarpOptimization } from '../utils/egressState.js';
+import { applyEgressProbeResult, applyEgressRealtimeResult, mergeServerRealtimeTelemetry, resolveCurrentServer, shouldSuggestWarpOptimization } from '../utils/egressState.js';
 
 
 export function useKuiState() {
@@ -656,18 +656,19 @@ export function useKuiState() {
                           }
                           const res = await fetchApi('/api/vps', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
                           const saved = await res.json();
+                          const activeVps = resolveCurrentServer(servers.value, vps);
                           const savedRevision = Number(saved.egress_revision || 0);
-                          const alreadyApplied = vps.egress_status === 'applied' && Number(vps.egress_applied_revision || 0) === savedRevision;
-                          vps.egress_mode = saved.egress_mode || mode; vps.egress_revision = savedRevision;
-                          if (!alreadyApplied) vps.egress_status = saved.egress_status || 'pending';
-                          vps.proxy_mode = saved.proxy_mode || (vps.egress_mode === 'residential' || vps.egress_mode === 'socks5' ? 'global' : '');
-                          vps.proxy_categories = saved.proxy_categories || '';
-                          vps.proxy_custom_domains = saved.proxy_custom_domains || [];
-                          vps.socks5_addr = saved.socks5_addr || ''; vps.socks5_port = saved.socks5_port || 0;
-                          vps.socks5_user = saved.socks5_user || ''; vps.socks5_password_set = saved.socks5_password_set === true;
-                          cancelEgressDraft(vps);
-                      } catch (error) { vps.egress_mode = prevMode; vps.proxy_mode = prevProxyMode; vps.proxy_categories = prevCats; vps.proxy_custom_domains = prevCustomDomains; vps.egress_status = prevStatus; }
-                      finally { vps._egress_saving = false; }
+                          const alreadyApplied = activeVps.egress_status === 'applied' && Number(activeVps.egress_applied_revision || 0) === savedRevision;
+                          activeVps.egress_mode = saved.egress_mode || mode; activeVps.egress_revision = savedRevision;
+                          if (!alreadyApplied) activeVps.egress_status = saved.egress_status || 'pending';
+                          activeVps.proxy_mode = saved.proxy_mode || (activeVps.egress_mode === 'residential' || activeVps.egress_mode === 'socks5' ? 'global' : '');
+                          activeVps.proxy_categories = saved.proxy_categories || '';
+                          activeVps.proxy_custom_domains = saved.proxy_custom_domains || [];
+                          activeVps.socks5_addr = saved.socks5_addr || ''; activeVps.socks5_port = saved.socks5_port || 0;
+                          activeVps.socks5_user = saved.socks5_user || ''; activeVps.socks5_password_set = saved.socks5_password_set === true;
+                          cancelEgressDraft(activeVps);
+                      } catch (error) { const activeVps = resolveCurrentServer(servers.value, vps); activeVps.egress_mode = prevMode; activeVps.proxy_mode = prevProxyMode; activeVps.proxy_categories = prevCats; activeVps.proxy_custom_domains = prevCustomDomains; activeVps.egress_status = prevStatus; }
+                      finally { vps._egress_saving = false; resolveCurrentServer(servers.value, vps)._egress_saving = false; }
                   };
                   const forceReapplyEgress = async vps => {
                       await updateVpsEgress(vps, vps.egress_mode || 'native', vps.proxy_mode || 'global', vps.proxy_categories || '');
